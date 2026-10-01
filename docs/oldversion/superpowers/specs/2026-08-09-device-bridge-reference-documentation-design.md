@@ -21,7 +21,6 @@ related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
-  - docs/oldversion/superpowers/specs/2026-08-09-agent-reference-figures-and-navigation-design.md
 supersedes: []
 ---
 
@@ -415,4 +414,4 @@ The implementation is complete when:
 - [Agent API and Connection Matrix](../../../agents/agent_api_connection_matrix.md)
 - [Documentation Standard](../../../standards/documentation_standard.md)
 - [Paper Documentation Standard](../../../standards/paper_documentation_standard.md)
-- [Agent Reference Figures and Navigation Design](2026-08-09-agent-reference-figures-and-navigation-design.md)
+- [Agent Reference Figures and Navigation Design](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/specs/2026-08-09-agent-reference-figures-and-navigation-design.md)

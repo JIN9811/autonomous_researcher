@@ -73,6 +73,7 @@ documents:
   - docs/runtime/three_level_control_model.md
   - docs/knowledge/markdown_memory_operations.ko.md
   - docs/knowledge/manual_rag_knowledge.ko.md
+  - docs/superpowers/specs/2026-10-01-repository-layout-design.md
 legacy_scope:
   status: migration_debt
   note: >-

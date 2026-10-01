@@ -10,7 +10,7 @@ summary: Approved Knowledge-only restructuring from graph projections to ontolog
 last_verified: 2026-09-10
 related_docs:
   - docs/agents/knowledge_agent.md
-  - docs/oldversion/superpowers/plans/2026-09-10-knowledge-markdown-memory.md
+  - docs/knowledge/markdown_memory_operations.ko.md
 supersedes: []
 ---
 

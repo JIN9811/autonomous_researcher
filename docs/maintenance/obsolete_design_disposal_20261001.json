@@ -1,0 +1,1856 @@
+{
+  "schema": "obsolete_design_disposal.v1",
+  "doc_type": "evidence",
+  "date": "2026-10-01",
+  "baseline": "c3c0c6e4ffedb83e62b86503632119635ae53616",
+  "authority": "Owner-requested removal of reviewed superseded design text only; no executable/runtime-input/scientific-evidence deletion.",
+  "method": "Prior full-document review plus current exact-path/basename consumer searches, surviving-reference scan and Git-blob byte equality checks; current guide/config and governing-design dependencies retained.",
+  "deleted_count": 169,
+  "deleted": [
+    {
+      "path": "docs/oldversion/gui/history/live_gui_chat_message_separation_plan.md",
+      "sha256": "3988ad3397b1c2bbbb299173f7d6e192ef862cfa5af6924a88a0e1fae5158179",
+      "bytes": 22825,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/gui/history/live_gui_evolution_plan.md",
+      "sha256": "d23b948487bb2f19e85dd95d739021a929d244be088e6493fa2989e061f6e835",
+      "bytes": 63908,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-22-utm-ros-runtime-bridge.md",
+      "sha256": "35882e292a3aa71c2f810ad569cffaba1ee3c5caf11fbfd88db18eb17d8b90aa",
+      "bytes": 4566,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-23-isaac-mirror-joint-probe.md",
+      "sha256": "275dd8ed943f42e18ba7d4340d759a56bbd63ee91a6b0130c8753ea3136bb9b1",
+      "bytes": 1590,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-24-specimen-pose-tracking-ros.md",
+      "sha256": "ea45cca23794fa2e36b5f9c99292722f13531ca30763ddc5a64b4853084f9e11",
+      "bytes": 65227,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-28-active-robot-cam.md",
+      "sha256": "4936ea50f7df4816827f94e21e1151f8c82a8361ed5e0392573e299305fbe4a9",
+      "bytes": 2857,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-28-isaac-data-augmentation.md",
+      "sha256": "497e3b02a9f6baf4a8c8c87dc9473139108b9cb1074695bd41d972e14fedfe19",
+      "bytes": 3782,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-28-isaac-play-specimen-pose.md",
+      "sha256": "e86c4f8af5bf4c9fdbdc3cf8a0c2d4e413084969b6e2bd9243b914a4bbe404f2",
+      "bytes": 3654,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-28-lerobot-isaac-rgbd-attempts.md",
+      "sha256": "e207f368382739fce3b9e08cdd9d2a30af3a794f9871bb62b730cbb7b133f647",
+      "bytes": 3841,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+      "sha256": "a11e7462ee36a712dce5a543d4dc7b9fa0aa4fa62accada92f48db4208df54b5",
+      "bytes": 167319,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-01-isaac-sim-grasp-latch-action.md",
+      "sha256": "3d78c1f5fcfc908dc5113416d250d776ff31559e7137157c58b9e4eed70c1a18",
+      "bytes": 40657,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-gui-tab.md",
+      "sha256": "8cf7af27fa8dbcdf357223ccfaafe7b782d336244b9b96d40b972d680a37b245",
+      "bytes": 5807,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-live-e2e-runner.md",
+      "sha256": "61f6c80e4bcecf61d7d8894be08361a7b7fcb98460a8afd826e363aacb6b52b5",
+      "bytes": 6670,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+      "sha256": "76a906b9cca2b04471879b698967fda11609360dace11235f172bab3c9c8f76c",
+      "bytes": 60377,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-06-official-isaac-lab-mimic-phase1.md",
+      "sha256": "6baa7eeba43eba4bcb1a65224bcf44020c20b2f36be095a09979ce3fa6cc5766",
+      "bytes": 6137,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-06-official-isaac-lab-mimic-phase2.md",
+      "sha256": "8375ab34aa16fd058fc8c9d86bec9262f779a67f31100466457503fdffcadfa4",
+      "bytes": 47714,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-09-manipulation-bridge-refresh.md",
+      "sha256": "1019346a964f00dcbd49a818be06361624cfb2943eeeabfc637375d6a81bf026",
+      "bytes": 3375,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-13-active-cam-run-artifact-persistence.md",
+      "sha256": "cd13b623eb4c38b4646cc84b08360067f2d565cff6349df299ed108a065faeb9",
+      "bytes": 21032,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-13-manipulation-live-pose-policy-tracking.md",
+      "sha256": "8fa03e98fcc6b37158b92650b32f714ec6bd3b15be32e0cdd6886b7aab68b109",
+      "bytes": 7944,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-14-grasp-outcome-observation.md",
+      "sha256": "4e8c199e69ad3e37c2689bc32b054321a5fbf204f86abd7cb1f413d4cc2a46b9",
+      "bytes": 5004,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-14-native-joint-telemetry-motion-state.md",
+      "sha256": "d05190a64ba40ec8ed42633bfc400a2ab829cef9d560037f5ac35a7a16c844b9",
+      "bytes": 9837,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-14-post-ungrasp-utm-completion-interlock.md",
+      "sha256": "c6ddfd6ea6efd041dab9016051315b94cdeb50dc914922761cd94da11cca8ed7",
+      "bytes": 9269,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-15-lerobot-camera-usb-link-status.md",
+      "sha256": "fe3d9a818cf439817d2b841956f177ce735a84692f815f5a6caa01702fd5659d",
+      "bytes": 8015,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-15-realsense-noninvasive-ownership.md",
+      "sha256": "f28a46d751b1c292d45b37941ccf58e746cad8e1812d38b04bb135e11fb72c1a",
+      "bytes": 2973,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-20-manipulation-grounded-runtime-cards.md",
+      "sha256": "e14161895f715d7dc1436e32e55cdf1b2b156f02678d55f5c535828c18b83651",
+      "bytes": 7989,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-20-vision-specimen-operator-retry.md",
+      "sha256": "b0499f2b3ab91d6af9effd445b5e414dd484de56a9eefbdc5666f6b9d5d1ee2e",
+      "bytes": 17060,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-22-active-cam-grounded-specimen-detection.md",
+      "sha256": "1933ebd0e2d869130933cf25ec203ccdaeaaa8403194d23b14443a159110c145",
+      "bytes": 11217,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-22-guardian-rollout-clamp-removal.md",
+      "sha256": "7ccad0a33f1df570351fee31d1db851b03e7c871007df2625a12eee7e04c19e5",
+      "bytes": 2097,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-07-27-common-equipment-workspace-utm-test-bridge.md",
+      "sha256": "6b08d461fe21cdaa07b47c7b76de7d7c609da914fd1139e5cd92723bb3038817",
+      "bytes": 22119,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-03-lightweight-windows-bridge-console.md",
+      "sha256": "d7aa1ee4842f54082125e6482d4ee5f0bbe170af09bd323fa12156fa4aa980c5",
+      "bytes": 2740,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-04-windows-bridge-advanced-device-style.md",
+      "sha256": "1d16a8410407229df8d976fcd053e1c50116dbd526dd987ac6e7b95a0fc7f002",
+      "bytes": 4334,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-05-local-development-pyautogui-bridge.md",
+      "sha256": "f460d005815fbbaa4d665f31eb7175192a88a6e63a9771600095cc0eb8ceebb4",
+      "bytes": 9366,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-06-recorded-equipment-skill-exception-recovery.md",
+      "sha256": "d95bed079ecea30a6927f541da772298bd63653b000546b352b2e7b4ce8b59d4",
+      "bytes": 10503,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-07-pyautogui-skill-capability-expansion.md",
+      "sha256": "25c0809f2851ec59fb54b52af42c6467387dbd81a8b7ed6599c8dfd8ac1f2529",
+      "bytes": 8148,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-07-recorded-complex-pyautogui-demos.md",
+      "sha256": "7c98771a9fff6b305567a606aab128e87421114f7cbb68d0585affe21be54417",
+      "bytes": 4918,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-advanced-visual-work-queue-skill.md",
+      "sha256": "40012b90834bd76c9e0e7bd2f2d0b8c6b0599ae95d0b8a4223df5a9ec99006e2",
+      "bytes": 25153,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-complex-image-workflow-e2e.md",
+      "sha256": "d8779bef4193b049aa895a98b7f50c2d7ea53e964eec9de1f2f45646fc94f926",
+      "bytes": 2427,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-documentation-governance-and-refresh.md",
+      "sha256": "113171161df8720b626f6eae80e28672c5bf8f41a274d7718964dd79a37046e2",
+      "bytes": 20587,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-knowledge-agent-neo4j-graphify-ontology.md",
+      "sha256": "149db31f4e517a9fbcc0b8688eb8962140492fcddca6de5abaf2116af4e23861",
+      "bytes": 15195,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-knowledge-visualization-workspace.md",
+      "sha256": "7b59e6dbcac5fa6463971d68f9134309b50beeb20545508ab5cb8120bc2eb673",
+      "bytes": 4181,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-lab-equipment-live-gui-operations.md",
+      "sha256": "d56f77f3d4b819721f0dcc9d3b9719caf2c90f2a89f55bd6c72e12c3537eeaff",
+      "bytes": 15335,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-pyautogui-recording-image-locators.md",
+      "sha256": "5a230a5ebbf35c6e02bc22c40be933863ce61e46fadf36dad4a54f45fda9e6e9",
+      "bytes": 3458,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-windows-pyautogui-standalone-deployment.md",
+      "sha256": "04420d6621ac884cb1cc2384495d0c2cbd61cd39f36afa74cd676646c3cfc49a",
+      "bytes": 2453,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-08-windows-recording-topmost-overlay.md",
+      "sha256": "00a9290a5934cbc53b28e13076086be9d6d6fa9437898801aaebd6ad0efe2eb9",
+      "bytes": 6801,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-agent-reference-documentation.md",
+      "sha256": "92570a51c7a700fd75575a1605147906ee472b5b36e56f1928e062baf140392d",
+      "bytes": 22916,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-agent-reference-figures-and-navigation.md",
+      "sha256": "656102e56bca282cb30b8db83bfbbd7cd293aa9d10f6d14e9e23e6803424cf23",
+      "bytes": 35200,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-device-bridge-reference-documentation.md",
+      "sha256": "63ccbddb1d9735a1c7406f7e02228f5212b81e443bf7e74ab79153a4e65000e6",
+      "bytes": 15481,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-document-location-cleanup.md",
+      "sha256": "3f8be810acbc58e2cd95417825633c01e05ec59df5f5ad178f234aea657a4c40",
+      "bytes": 6711,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-knowledge-relation-reconciliation.md",
+      "sha256": "108498770a455c5fa5329fd943a5f5ae03118e6bd21305036094bbab45ab3bcd",
+      "bytes": 19119,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-llm-objective-compiler.md",
+      "sha256": "b1976af18f5ad4161af196dbe7f575d00d7798722935540d56009896433e357e",
+      "bytes": 20098,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-paper-first-github-documentation.md",
+      "sha256": "b9add0d9229ac07bd1aff6ed701bfeed8df608369ad089a136398a3d09fd1f81",
+      "bytes": 24652,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-09-runtime-ide-reference-documentation.md",
+      "sha256": "ec7bd8f775aeb47e6c9773a5566f99e50fb98ff86633af67b902427c07f9c906",
+      "bytes": 13217,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-10-bo-objective-posterior-live-cards.md",
+      "sha256": "0f4227bf3ba34d54b833328756b56ed98eeed8e71b8f7fc50872541480571a88",
+      "bytes": 20201,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-10-botorch-lhs-closed-loop.md",
+      "sha256": "906dd3c96fc6056913c1ba7ddbc9b9f14ede6acf0a4f7165ec3eab9d76a175c9",
+      "bytes": 12386,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-10-manual-objective-builder.md",
+      "sha256": "ff1c5840233a05f4580a8d286a60ae0ebe90d8c489c5eacda1dc2d26af0e45a1",
+      "bytes": 25760,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-11-bo-20-cycle-white-matplotlib.md",
+      "sha256": "a42301d295dcf8cda4cefb69ef61b7022968d36cc0c1e4f190a543e909553f69",
+      "bytes": 5025,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-11-two-variable-gyroid-sea-bo.md",
+      "sha256": "3db1af862046eb1dc2acb3b2f40c2dec5cf111cd9f50ced1b45d081385470b24",
+      "bytes": 7207,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-13-windows-bridge-atr-controller-auto-discovery.md",
+      "sha256": "797cf7e248acefbd35a86a636ae0b6971698876b0ac2d24a45ad51a75b950cfb",
+      "bytes": 16807,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-13-windows-equipment-candidate-selection-feedback.md",
+      "sha256": "68faccc917a759aa763c9f1d4910108418a890c1e1c7115fbeb7460e9eb20a4b",
+      "bytes": 3345,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-14-windows-bridge-delete-proxy.md",
+      "sha256": "2d6760f2d0b8735cb238113755bab65e5202d8ee88ac1797a34713fce3f532e7",
+      "bytes": 12017,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-17-manual-knowledge-semantic-projection.md",
+      "sha256": "4013baf238993d5c1b0a14b15084b40bf07e7f6a056398a9d929db18025d73f5",
+      "bytes": 26132,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-17-manual-rag-knowledge.md",
+      "sha256": "73547770363b1a9944e6f36bb07c953fe151514fb387c3fb2bd5fe313d3d6126",
+      "bytes": 6804,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-25-plc-safety-corrective-cycle.md",
+      "sha256": "39de6a289b21a54745d2ead7ad9b19c0f372167d7443a967693a7731f27bb54c",
+      "bytes": 9466,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-27-lab-equipment-consolidation.md",
+      "sha256": "48f557cfa99ce032a6a75dfd3d836f0993696142297d7f0250ccad65a6f7d43a",
+      "bytes": 8649,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-28-windows-worker-remote-update.md",
+      "sha256": "ad10f017d2081192e3f90d6887171eda285e1ec52009511de00042f4e91e386d",
+      "bytes": 4478,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-30-equipment-agent-manager.md",
+      "sha256": "bf1778e266c5404b6abad85d6eee1ea399f270d9b69e06b29a88e67347a0920f",
+      "bytes": 11540,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-30-equipment-skill-fullscreen-timeline.md",
+      "sha256": "66208dac177bf852a7fd6f94e6bd1cb5279e09541c1e585609109f6cf8f4e310",
+      "bytes": 13126,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-30-equipment-skill-workflow-editor.md",
+      "sha256": "77e6719e67bd3da830352af736b1b9de3a23ea94ada0a3644fa0455cec230139",
+      "bytes": 25219,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-08-31-equipment-vision-task-binding.md",
+      "sha256": "db30fb82ab3609b46550adaba4b005ab623b81a93f60357019a37c54e138dc79",
+      "bytes": 30082,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-01-lab-equipment-agentic-task-overlay.md",
+      "sha256": "b9df7b8fe4564e2d14c9ca14af17d76683acfe220e841dd75f6f0daae6382b1c",
+      "bytes": 24997,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-02-analysis-equipment-csv-to-bo.md",
+      "sha256": "ae87c056c02c0289245933d780cd8ff0c0e88687f4d90f492a6c5e225e8a990d",
+      "bytes": 8013,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-02-analysis-stress-strain-energy.md",
+      "sha256": "7f225080620908362cf930683c8f191e1c29271290ee7250d2722a7fd355c4b8",
+      "bytes": 14459,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-02-calculix-quasistatic-compression.md",
+      "sha256": "ed9437f3a4e5dd2ab25b985b0e0a574d875b8f89797b4c428c438924c6386eee",
+      "bytes": 13874,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-02-trapezium-csv-validation.md",
+      "sha256": "cbd8df5ecd532d8f509e50e7f82ae1ef920366d16f808c070a119fe7ffffbb03",
+      "bytes": 3887,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-02-utm-raw-csv-runtime-export.md",
+      "sha256": "2310b392e5168ea0ae04162890f408fb827fb2ff810b84c50b3aca414de90ce4",
+      "bytes": 26910,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-03-safe-preflight-closed-loop.md",
+      "sha256": "d7fca7f59ee9f3a1ecb178431ed1c5ec49e45c6aeea91f9c3562f2ee2ac21781",
+      "bytes": 11510,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-04-test-mode-execution-profiles.md",
+      "sha256": "252972b49c8952ae9f67b50f851747486de737a0adbffa7fba8b5d2ae105daf9",
+      "bytes": 19967,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-06-utm-clear-verification.md",
+      "sha256": "4ab195e329a7bec42f82ed823c062ef504e08fa4b2dc8100f51ed3ff9df91a32",
+      "bytes": 8335,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-07-agent-owned-campaign-continuous-bo.md",
+      "sha256": "4360ccacb68421e91629154e429c94459b1cc2d2f72fa7f3f7a924b33d3d0f64",
+      "bytes": 44777,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-07-single-compression-experiment-slot.md",
+      "sha256": "393551e27a1e8b76cb805107d1fb8febd163a4687687bedce076deed73c0bb50",
+      "bytes": 33668,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-09-analysis-background-improvement.md",
+      "sha256": "18bc15832b207328e2013ba7e1307f61facd94f0c6dd6c520a8952764c67ee2f",
+      "bytes": 11116,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-09-nonblocking-fem-live-cards.md",
+      "sha256": "08ab59e20aecd59871ff5c0041fe7e7aa4156ec6d8e003c8259d3ebf6b6b20f1",
+      "bytes": 6818,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-09-sparse-native-fem-improvement.md",
+      "sha256": "396e9eb1a6e46ea9ec0944381bc223723938d9eada3b2af392b860c4dc6006b7",
+      "bytes": 7732,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-10-bo-strategy-continuous.md",
+      "sha256": "d0f2525ce39e3fbf6feb1f05249d3257f17677b2b3a0994f56947b5cd8b82c0c",
+      "bytes": 12461,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-10-knowledge-markdown-memory.md",
+      "sha256": "abda6b0ad1a89b8ee36d13116d72aa44bb787d6062b417ce4882ece36911f69c",
+      "bytes": 12846,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-11-research-first-presentation.md",
+      "sha256": "d07126c8d650eedf7fcce24ec7b1997a235c54bf35ee49c05a74237414076b59",
+      "bytes": 3852,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-11-source-curation.md",
+      "sha256": "edbbe109cf1111a1a8b81e08852c345b43122d2f50caf75657b322ccb3de4f0a",
+      "bytes": 16262,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-12-ax4lab-wiki-memory-orchestrator.md",
+      "sha256": "bdef0106f6ae89aecdcb010f7cd1c788f645b211d33cb89bdd4e9e3185e8eea5",
+      "bytes": 12936,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-12-orchestrator-dynamic-experimental-setup.md",
+      "sha256": "723fafd8751f70c1cfadf7f45dc645964f65f6816f9b88a7f41887c0b7adedfe",
+      "bytes": 46986,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-13-analysis-agent-package.md",
+      "sha256": "fde0f79e519be793b1fc741c7de6b38914c7f8a2c9c472700194cf67c98ebe56",
+      "bytes": 10564,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-13-equipment-agent-package.md",
+      "sha256": "1e7d58af4eed3006fb19050278a353fbde7e7ffa588f15674de8457d3ed1dbba",
+      "bytes": 14973,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-13-vision-agent-package.md",
+      "sha256": "70157de01b12fe91a3f63cf775bc2c529120603313c770f12d9f133fcd2b23c7",
+      "bytes": 15078,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-14-agent-import-cleanup.md",
+      "sha256": "ab84f61f4212b870bb9096ecb921e7d9b77f01b843d774a6a6d78852d7804fc8",
+      "bytes": 6125,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-14-core-agent-roots.md",
+      "sha256": "5ea1ff7976b3284f383f3ac419ca30cfe1aeb9d9beacfcbbfe39ba5fa34d7348",
+      "bytes": 9841,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/plans/2026-09-14-knowledge-guardian-core-structure.md",
+      "sha256": "244343c65d613828aab2b40235d3a3efca5f4d33360d045adf09c17c8eb0a4d1",
+      "bytes": 11314,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-06-24-specimen-pose-tracking-ros-design.md",
+      "sha256": "1ed322e6e38ccfa7b65bd2a7dffd7816231b33b4a4f01d92924b751c52e53b73",
+      "bytes": 9649,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-02-isaac-lab-gui-tab-design.md",
+      "sha256": "d4436a2b456ae83d17d3fa10d724266e7c12c46b1f2deb86099a2c491412f407",
+      "bytes": 8538,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-02-isaac-lab-live-e2e-runner-design.md",
+      "sha256": "7642a89b90dc1e441cc24edf1ba295bad10335cfa4f43210cc5e6ef6b3c08964",
+      "bytes": 11785,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-06-official-isaac-lab-mimic-integration-design.md",
+      "sha256": "42dc8a45b66a8ddedc32e36b665f495fa37bd479686ae63cf32a791343a80153",
+      "bytes": 37654,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-09-manipulation-runtime-supervisor-design.md",
+      "sha256": "e947dd9b5ccadcbe3957e0f175d26b587a0c4593b7e0b42a8b68260daf32e154",
+      "bytes": 17257,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-13-active-cam-run-artifact-persistence-design.md",
+      "sha256": "3f532e69dc67f30133ccef1908b1b1d5ba51bfe07df85cefea26d9f6a62f275c",
+      "bytes": 3822,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-13-manipulation-live-pose-policy-tracking-design.md",
+      "sha256": "633f196188f1ecc9ac8cffdc16e4a4454b0d39c3d08ae773f504a53357ec6f6f",
+      "bytes": 5375,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-14-grasp-outcome-observation-design.md",
+      "sha256": "2b3ed67b4fdd85f2bdf9bbefa27280bd2888896d4b2c7152850045c9c26c7d9c",
+      "bytes": 7155,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-14-native-joint-telemetry-motion-state-design.md",
+      "sha256": "c9334e35ed71e666b7fa554d30728a66ab2987a5275e56172a54ffa97d13e79a",
+      "bytes": 7521,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-14-post-ungrasp-utm-completion-interlock-design.md",
+      "sha256": "f4a0d0ee6df03589978c9736e10727cc363a8d948f0e7b3829fef608c0c976c5",
+      "bytes": 6929,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-15-lerobot-camera-usb-link-status-design.md",
+      "sha256": "4139ce17396758dff793c793fe32254558623971d81ef56b3f6aaa1b28e849ea",
+      "bytes": 2189,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-15-realsense-noninvasive-ownership-design.md",
+      "sha256": "a8cc911a84fab4afbfaa665a25da2a22a8d9d81bef99d7ddde3d248a14961663",
+      "bytes": 1693,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-20-manipulation-live-runtime-grounded-cards-design.md",
+      "sha256": "c534eb60835d95ef46d1e0bb878136281f1de4710433a786e178968cd7137731",
+      "bytes": 23660,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-20-vision-specimen-operator-retry-design.md",
+      "sha256": "4cd83c9e037630bdc979858fe56bacf8b22b33dc8ae4713a53d6a1b23792d8a6",
+      "bytes": 9076,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-22-active-cam-grounded-specimen-detection-design.md",
+      "sha256": "d6b74e1fdef12438567f64c55240f48544dbfa4fcc23037e6478c10036109da3",
+      "bytes": 4097,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-07-27-common-equipment-workspace-utm-test-bridge-design.md",
+      "sha256": "4c45107f9bac7fe3f8e7702cc83e85f7e395ca4fb5e4ddfcb2178c189dfe8003",
+      "bytes": 6523,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-03-lightweight-windows-bridge-console-design.md",
+      "sha256": "c4e52690d2029124af5d88d7df64c380523aa8fa23ce56044a0a415340e98914",
+      "bytes": 5590,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-04-windows-bridge-advanced-device-style-design.md",
+      "sha256": "c9a2a356185618092ac8cede72454cabd3dffd0c22dfff83111fcfef7d296692",
+      "bytes": 2141,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-05-local-development-pyautogui-bridge-design.md",
+      "sha256": "e92aa7ee7907f53960f9d02204bafa7e822d1fa6d6bb986299838eb2da52ee28",
+      "bytes": 7343,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-06-recorded-equipment-skill-exception-recovery-design.md",
+      "sha256": "54ea70b9cff5eb7ea0f2c3c281bd2768528f5568d28b48ffe4d5d816d933b84b",
+      "bytes": 39161,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-07-pyautogui-skill-capability-expansion-design.md",
+      "sha256": "1467495be045342a4ae391831e28ec9a0b38702be5d92a34059939c5e79caaba",
+      "bytes": 7359,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-07-recorded-complex-pyautogui-demos-design.md",
+      "sha256": "ac3169afb9c082d0071c01855ad868bebd42714b89cf5acda8d63ac836f6e99c",
+      "bytes": 2323,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-advanced-visual-work-queue-skill-design.md",
+      "sha256": "5e3c7f388ad5337c069c789bf15defadff0323faeddbf97fee62902d87ee7695",
+      "bytes": 6613,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-complex-image-workflow-e2e-design.md",
+      "sha256": "7636f1d9c2abe52a169d3725b561bc3c8aba385171fe6fedea5af19f92fe0cdc",
+      "bytes": 1602,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-knowledge-agent-neo4j-graphify-ontology-design.md",
+      "sha256": "b239b7fdae852e1611b6d819d7f81b10717b75432f8942863a5ce89fa3a86c8c",
+      "bytes": 27602,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-lab-equipment-live-gui-operations-design.md",
+      "sha256": "f65a7e562d700f18f99e587bb980395fc9ce9b10f11b735379fe1d86cb152538",
+      "bytes": 7327,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-pyautogui-recording-image-locators-design.md",
+      "sha256": "7d376a408580290dda9fb2456db2301db5457a4092af8cd5846eac8ae03fb2c8",
+      "bytes": 5209,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-windows-pyautogui-standalone-deployment-design.md",
+      "sha256": "11fe81009dd81521371c903eb06383b27994f52f10c08524ad99fc51ca5a0348",
+      "bytes": 3119,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-08-windows-recording-topmost-overlay-design.md",
+      "sha256": "ea3aa712d20ce4b2150b477246cbc1c4c54e919470a91144bfcf29a3589484f9",
+      "bytes": 3319,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-09-agent-reference-documentation-design.md",
+      "sha256": "a46e23f1cdd241fbaa4f1ef48946b6d538460c65422bf839fb7de7ae6cf299b3",
+      "bytes": 29764,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-09-agent-reference-figures-and-navigation-design.md",
+      "sha256": "1df8a716dd95f444d9b5fe25fa318947e40c43838c9255cfddf3d6808c48fb31",
+      "bytes": 22115,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-09-document-location-cleanup-design.md",
+      "sha256": "147802d8bfe952b9e2c3afc79c5e8e3fd2c0de3ed30b03650a34613f4b965f85",
+      "bytes": 6097,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-09-knowledge-relation-reconciliation-design.md",
+      "sha256": "f6ce9f4367f74b1a43eaa6a2cf13a41b254467fc7d84f23a6c73e2f44d382a70",
+      "bytes": 24009,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-09-llm-objective-compiler-design.md",
+      "sha256": "1afe2d2b3fe953f3e4ff16427089bc99d8ad8ba39ac9b813d2741edf5978b989",
+      "bytes": 18347,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-10-bo-objective-posterior-live-cards-design.md",
+      "sha256": "81821b297888280074c61925a70629724ebd36f57f344273732426cb4c5baf8e",
+      "bytes": 12607,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-10-botorch-lhs-closed-loop-design.md",
+      "sha256": "ee3c41e99d161b7ac93ea69a58155403e79c94ab94cfc115465c2e0480b5c3d3",
+      "bytes": 8152,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-10-manual-objective-builder-design.md",
+      "sha256": "ad997d462def9fb585402686473fa8ba8c3601ed4b989d5fbab0c9591a4ceaa7",
+      "bytes": 14125,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-11-two-variable-gyroid-sea-bo-design.md",
+      "sha256": "dd03f36c92bd0d3f8b1594dcd16b6bf84656950951e98cffc9bcb427ccd04216",
+      "bytes": 6415,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-13-windows-bridge-atr-controller-auto-discovery-design.md",
+      "sha256": "55b58eeea19e323259d8656948747c5948a8fd2d3534d8d702597ffc4e16029e",
+      "bytes": 8273,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-13-windows-equipment-candidate-selection-feedback-design.md",
+      "sha256": "cb82b27a36e7a9dfcc7f3fde2c760b70ed924db0712d2a6fd2aefb366688d648",
+      "bytes": 3321,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-14-windows-bridge-delete-proxy-design.md",
+      "sha256": "a8ba82e1c2d877fa82833db0a86fb14893241a06381b702518a65626db5c31e5",
+      "bytes": 5232,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-17-manual-knowledge-semantic-projection-design.md",
+      "sha256": "e0cea88ec19842b610a51396505236a48a95201d40c68912291033b1f2d1c5c9",
+      "bytes": 7573,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-17-manual-rag-knowledge-design.md",
+      "sha256": "c8e3bf95704346cb976ee3f03bb3632ef9eeb299ff9827a90b61faf1c4915138",
+      "bytes": 5078,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-28-windows-worker-remote-update-design.md",
+      "sha256": "757efb8cd22427a017064ef925f0a68fd52d86d2e28d33f7af6845418d8913f0",
+      "bytes": 2359,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-30-equipment-skill-flow-design.md",
+      "sha256": "bd6654c11cf3524b881da7e6b49c0027b4393f82e51ea4509a88f77102ee2d56",
+      "bytes": 6100,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-30-equipment-skill-fullscreen-timeline-design.md",
+      "sha256": "da9d28e6bd684b60b1cda5eea1c817be9b5f878fc0007390d7999a39b3b37ba7",
+      "bytes": 12761,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-30-equipment-skill-workflow-editor-design.md",
+      "sha256": "1103c6f3721aa36071068e7dd12c3348a781a9a8f26201b03be337fc7b5d26f1",
+      "bytes": 10100,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-08-31-equipment-vision-task-binding-design.md",
+      "sha256": "c681d4cd8a13cbf930a153feb948e34fa55a67e7557fcab0044d093cba44ad5c",
+      "bytes": 11564,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-01-lab-equipment-agentic-task-overlay-design.md",
+      "sha256": "5eec2179ee22ad2f7e722412354a831ce54a4326ad8b32094c8028d9d19ef690",
+      "bytes": 21257,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-02-analysis-equipment-csv-to-bo-design.md",
+      "sha256": "766d3be60636610fd7c748cfdab995e20ce080e7f2476ebc204f9ac2d668a3c0",
+      "bytes": 3508,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-02-analysis-stress-strain-energy-design.md",
+      "sha256": "5d90a520fbaf1b1d82fb79a9258075892c9640129374af631f3f0a07e6813cd4",
+      "bytes": 9545,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-02-calculix-quasistatic-compression-design.md",
+      "sha256": "60434d7e23ab0e1a95ce0b6ff827b98d46b4014a33572c15ea5be6364cd60eb3",
+      "bytes": 7945,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-02-trapezium-csv-validation-design.md",
+      "sha256": "079240eb57a2b8f11ec433f05cd66925dbe3f0f625c4ebc06d0c826ead1bab72",
+      "bytes": 1805,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-02-utm-raw-csv-runtime-export-design.md",
+      "sha256": "05f24fa2304f7c2de6f1d3ba03058e639d1a29c0893d494e7fd5c8263ec86523",
+      "bytes": 8777,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-03-safe-preflight-closed-loop-design.md",
+      "sha256": "40c7c446d97bea9daf9c4f6e3c54c3b9191ee6ba8588b4cb4bed347f1cca6994",
+      "bytes": 15659,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-04-test-mode-execution-profiles-design.md",
+      "sha256": "9dcf17adfcfc718bb5549564347c8b3d920cd198e522d87848f460871cbde7ca",
+      "bytes": 19591,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-06-utm-clear-verification-design.md",
+      "sha256": "b656f180f028ee43c21d0b84e15d44d24fef39a0dfc62367fcb817fd159d87f3",
+      "bytes": 3256,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-07-single-compression-experiment-slot-design.md",
+      "sha256": "5c65e217ddb6a268ced53173ac18dd9f3810ca01f78844d5d170af83a17031d6",
+      "bytes": 35776,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/superpowers/specs/2026-09-12-ax4lab-wiki-memory-orchestrator-design.md",
+      "sha256": "e562a46644419e55058d3ab4a825a6f8572d655c514c7145f96f7e3b496b23a6",
+      "bytes": 46320,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/system/ATR_LangGraph_Runtime_IDE_Codex_Instructions.txt",
+      "sha256": "3a82e8473f5ebd1b38bbfd227d220a175f380df09f7a36d3e3bd0bb2823f7aff",
+      "bytes": 20422,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/system/ATR_Live_GUI_and_LangGraph_Codex_Instructions.txt",
+      "sha256": "e7788146c484c9328c4b80e7fc4f87b39d8581eac9436f0a1c2771480cb596f1",
+      "bytes": 15738,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/system/ATR_Self_Evolution_Codex_Instructions.txt",
+      "sha256": "f554e450dfc949364180049514e9bda329a8c451a884aac8c9054a7df7f6d34d",
+      "bytes": 7444,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+      "sha256": "095f043f9094c9e22f62c1009bc98a6714b995f9abcae91a594ce22e35f3214c",
+      "bytes": 23288,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+      "sha256": "3f38341ffb49fa5a1a271498ef30d4566a36f5dd2b6c3db047d4ff8a40f75a12",
+      "bytes": 26739,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+      "sha256": "724ba9b6a09dc35fb89bbb78ff1d95f7a4a0104cabedaa0930f7db695e906215",
+      "bytes": 32447,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+      "sha256": "41a8a80c07b2e0e6531aa406c742539e9be2d169469054f13a3bc15390ab5117",
+      "bytes": 45192,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+      "sha256": "643378edddf8836aa2b2c0cb0e31a023dfa7486b0b24fa8c7b437c396ac94e23",
+      "bytes": 31396,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+      "sha256": "0713bbf229f16814ade4cbe1220609350323c8372fa4ba60cfc02bceb028c784",
+      "bytes": 43378,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+      "sha256": "c10110ac1d48630d71b851a2829f0fa17f804a85abdd2153b6da14c5355e4cd3",
+      "bytes": 33654,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/11_live_gui_control_surface_upgrade_plan.md",
+      "sha256": "6402a0731d6d9931ad2a0446b5a3d2b5f17317de3eb8a75388f6fd1e63e75c9f",
+      "bytes": 32862,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+      "sha256": "d304abd27ab48a3d708da8523d82285f9ee795afc4520878f7584770e4569db5",
+      "bytes": 40199,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/README_codex_goal_full_upgrade.md",
+      "sha256": "3aa06d1ad9837aff06aac65cb12d7d72773752aeeed55aa9891a13d548acfa95",
+      "bytes": 24552,
+      "replacement_targets": [
+        "docs/agents/README.md",
+        "docs/device_bridges/README.md",
+        "docs/modularity.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+      "sha256": "3fabd609da3b79f62a6458ec394bb86a612efa4753430b15af0cfbc298fad071",
+      "bytes": 17144,
+      "replacement_targets": [
+        "docs/gui/reference/live_gui_reference_alignment.md",
+        "docs/runtime/runtime_ide.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-22-omx-movej-inference-design.md",
+      "sha256": "fb4ab55e1651e9c9b08d79f4bda63c737fd8fddc4a0a19e08ccf0d80708803d1",
+      "bytes": 12110,
+      "replacement_targets": [
+        "libs/joint_linear_interpolation/README.md"
+      ],
+      "reason": "Superseded proposal or implementation plan with no required current consumer; historical content recoverable from baseline Git object."
+    }
+  ],
+  "retained_governing_designs": [
+    "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+    "docs/oldversion/superpowers/specs/2026-09-13-executable-agent-ide-contract-design.md"
+  ],
+  "retained_scope": "Current runtime inputs/configuration references, scientific/verification evidence, RPT worktree designs, remaining provenance dependencies, and independently reviewed asset bundles are not deleted.",
+  "recovery": "Read any deleted file from baseline:path using git show; recover selected paths only. Do not restore the whole worktree over newer work."
+}

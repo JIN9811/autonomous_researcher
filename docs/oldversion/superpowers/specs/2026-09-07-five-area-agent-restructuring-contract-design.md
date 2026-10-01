@@ -508,7 +508,7 @@ IDE outcome 라벨은 짧은 캡슐로 해당 연결선에 붙인다. 겹침 회
 
 이 후속 범위에 한하여 본 공통 계약의 새 설정 연동 제외 항목을 확장한다.
 과거 캠페인·슬롯 설계나 bridge 직접 제어를 재도입하는 승인이 아니다.
-상세안 승인 후 [구현 계획](../plans/2026-09-12-orchestrator-dynamic-experimental-setup.md)을 작성했다.
+상세안 승인 후 [구현 계획](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-12-orchestrator-dynamic-experimental-setup.md)을 작성했다.
 구현·검증 완료 기록은 아니다.
 
 ### Design 추가 인수 기준: 가상 폐루프 · API · Gemma4 31B
@@ -780,7 +780,7 @@ BO 내부 High는 전략과 근거 충분성, 수치 결과의 인계 여부를 
 문서는 Design 형식을 따라 Status at a Glance, 5영역 표, 실제 툴 계약, SVG,
 아티팩트와 수행한 검증을 포함한다. 세부 사항은
 [BO 설계](2026-09-10-bo-strategy-continuous-design.md)와
-[구현 기록](../plans/2026-09-10-bo-strategy-continuous.md)을 따른다.
+[구현 기록](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-10-bo-strategy-continuous.md)을 따른다.
 
 ## Knowledge 적용 계약 — 2026-09-10
 
@@ -798,7 +798,7 @@ Knowledge의 High 판단은 재사용 가능한 근거의 선별·온톨로지 �
 Reference는 Design과 같은 6줄 Status at a Glance, 5영역 책임표, 도구·API 표,
 기존 3개 SVG, 아티팩트·실제 검증 표를 사용한다. 구현 범위와 검증은
 [Knowledge 설계](2026-09-10-knowledge-markdown-memory-design.md),
-[구현 계획](../plans/2026-09-10-knowledge-markdown-memory.md),
+[구현 계획](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-10-knowledge-markdown-memory.md),
 [Knowledge Reference](../../../agents/knowledge_agent.md)에 연결한다.
 
 ## Related Documents

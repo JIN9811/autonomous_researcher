@@ -713,6 +713,10 @@
       "sha256": "fd617a137ea86b733f621a7bad3338e54494871de5e9734fcb3f6ad77ee0d071",
       "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
     },
+    "docs/maintenance/obsolete_design_disposal_20261001.json": {
+      "sha256": "86a1a433ad62b5964fcab197097562f4030c5f317c448cf02002274ffe8f5e2b",
+      "review": "Owner-requested public documentation retirement inventory reviewed 2026-10-01. Contains only already-public document paths, hashes, byte counts, replacement references and baseline Git recovery information; no private runtime evidence, credentials or new physical verification claims."
+    },
     "docs/runtime/evidence/guardian_improvement_09_audit.md": {
       "sha256": "32477d02c5422148a62e11ab9f978771aea327f064604bd0fcdb2d4c1ea4f05f",
       "review": "Existing public Guardian evidence reviewed 2026-10-01 for owner-requested documentation publication. Current-contract annotations preserve historical scientific measurements and test outcomes; no private records, credentials or new physical verification claims."

@@ -14,7 +14,7 @@ related_docs:
   - docs/runtime/runtime_ide.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/standards/documentation_standard.md
-  - docs/oldversion/superpowers/plans/2026-09-12-orchestrator-dynamic-experimental-setup.md
+  - docs/runtime/autonomous_experiment_runtime.md
 supersedes: []
 ---
 
@@ -381,7 +381,7 @@ receipt와 `partial`을 남기고 성공한 적용을 반복하지 않는다. �
 ## Related Evidence and Plan
 
 관련 공통 기준은 [5영역 재구성 계약](2026-09-07-five-area-agent-restructuring-contract-design.md)이다.
-이번 작업은 [구현 계획](../plans/2026-09-12-orchestrator-dynamic-experimental-setup.md)에 따라 수행한다.
+이번 작업은 [구현 계획](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-12-orchestrator-dynamic-experimental-setup.md)에 따라 수행한다.
 첫 write-enabled 범위는 연구 목표와 BO 탐색 범위·획득함수이며 다음 새 run에 적용한다.
 나머지 에이전트 설정은 현재 계약을 조회하는 블록으로 제공하고 미지원 쓰기를 명시한다.
 

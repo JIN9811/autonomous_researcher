@@ -9,7 +9,7 @@ scope: [knowledge, source_ingestion, curation, scoped_rag]
 summary: Folder-driven source ingestion, bounded LLM curation, Markdown organization, and source-backed agent retrieval.
 related_docs:
   - docs/agents/knowledge_agent.md
-  - docs/oldversion/superpowers/plans/2026-09-11-source-curation.md
+  - docs/knowledge/manual_rag_knowledge.ko.md
 supersedes: []
 ---
 

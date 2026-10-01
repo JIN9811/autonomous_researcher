@@ -320,6 +320,18 @@ Private runtime outputs MUST stay in an ignored local archive, never in the
 public documentation archive. Archiving history does not authorize changing
 working runtime, agent or device behavior.
 
+An explicit owner request may retire obsolete design/implementation-plan text
+from the working tree instead of retaining another archived copy. Before doing
+so, review current consumers and surviving provenance dependencies, preserve
+runtime inputs and scientific/verification evidence, repair inbound navigation,
+and record exact deleted paths, hashes, reasons, replacements and a recoverable
+Git revision in a disposal ledger. Required governing-design references and
+self-contained asset bundles MUST NOT be broken by partial deletion. Earlier
+dated audit ledgers remain historical records; do not rewrite their inventories
+to conceal the later removal. The
+[2026-10-01 disposal ledger](../maintenance/obsolete_design_disposal_20261001.json)
+records the first owner-requested text-only retirement under this rule.
+
 An archived tree SHOULD retain its former repository-relative context beneath
 `docs/oldversion/`. Active References and Guides MUST NOT cite archived
 material as current implementation authority. Internal manifests and relative

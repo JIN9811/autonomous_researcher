@@ -414,7 +414,7 @@ README는 전체 폴더를 복사해 호환 CalculiX에서 `ccx -i model`로 실
 
 ## Related Evidence and Plan
 
-상위 계약은 [5영역 설계](2026-09-07-five-area-agent-restructuring-contract-design.md), 현재 구현 설명은 [Analysis Reference](../../../agents/analysis_agent.md), 초기 작업 순서는 [승인 후 구현 계획](../plans/2026-09-09-analysis-background-improvement.md), 후속 실행은 [비차단 FEM/Live 카드 계획](../plans/2026-09-09-nonblocking-fem-live-cards.md)에 둔다. 당시 실행 근거 `docs/paper/evidence/2026-09-09-analysis-improvement-validation.md`는 현재 `oldversion/2026-09-14-retired-computation/docs/paper/evidence/2026-09-09-analysis-improvement-validation.md`에 로컬 보관되며 공개 아카이브에서는 제공하지 않는다. 현재 Reference는 이 과거 증거의 대체물이 아니다.
+상위 계약은 [5영역 설계](2026-09-07-five-area-agent-restructuring-contract-design.md), 현재 구현 설명은 [Analysis Reference](../../../agents/analysis_agent.md), 초기 작업 순서는 [승인 후 구현 계획](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-09-analysis-background-improvement.md), 후속 실행은 [비차단 FEM/Live 카드 계획](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-09-nonblocking-fem-live-cards.md)에 둔다. 당시 실행 근거 `docs/paper/evidence/2026-09-09-analysis-improvement-validation.md`는 현재 `oldversion/2026-09-14-retired-computation/docs/paper/evidence/2026-09-09-analysis-improvement-validation.md`에 로컬 보관되며 공개 아카이브에서는 제공하지 않는다. 현재 Reference는 이 과거 증거의 대체물이 아니다.
 
 ### 구현 범위와 후속 목표
 

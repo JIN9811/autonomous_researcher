@@ -688,7 +688,7 @@ across ten owners through the next Design, in 357.934 seconds, with zero physica
 calls and no denied effects. The separate guarded mode suite passed 44 tests. These
 results establish software integration with virtual equipment, not hardware proof.
 Detailed implementation and remaining integration checks belong to the
-[Vision execution plan](../plans/2026-09-13-vision-agent-package.md).
+[Vision execution plan](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-13-vision-agent-package.md).
 
 ### Equipment Implementation Update — 2026-09-13
 
@@ -719,7 +719,7 @@ zero physical calls and no denied effects (`1 passed` in 470.15 seconds; cycle
 search-identity tool contract and Guardian blocked before BO. This demonstrates
 one successful guarded virtual integration cycle with an observed stochastic
 reliability caveat, not hardware proof or a universal model success rate. See
-the [Equipment implementation plan](../plans/2026-09-13-equipment-agent-package.md).
+the [Equipment implementation plan](https://github.com/JIN9811/autonomous_researcher/blob/c3c0c6e4ffedb83e62b86503632119635ae53616/docs/oldversion/superpowers/plans/2026-09-13-equipment-agent-package.md).
 The 1920×1080 browser check confirmed the generic five-area map, separate Flow,
 package-to-bridge drilldown, original Live cards and Design → Equipment owner
 switching with no console warning/error; physical calls remained zero.
