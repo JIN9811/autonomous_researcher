@@ -1,7 +1,13 @@
 """Migration accounting must describe Git objects, never private working files."""
 import copy
 import hashlib
+import json
+from pathlib import Path
+import shutil
 import subprocess
+import sys
+
+import pytest
 
 
 def git(root, *args):
@@ -85,3 +91,78 @@ def test_checks_reject_unknown_task_without_importing_application():
     with pytest.raises(SystemExit) as rejected:
         main(["check", "not-a-task"])
     assert rejected.value.code != 0
+
+
+def test_document_manifest_moves_to_system_root(tmp_path):
+    from tools.repository_layout.manifest import build_manifest, validate_manifest
+    root = repository(tmp_path)
+    (root / "docs").mkdir()
+    (root / "docs/document_manifest.yaml").write_text("documents: []\n")
+    git(root, "add", "docs/document_manifest.yaml")
+    git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "-qm", "document metadata")
+    manifest = build_manifest(root, "HEAD")
+    entry = manifest["entries"]["docs/document_manifest.yaml"]
+    assert entry["destination"] == "system/document_manifest.yaml"
+    assert entry["disposition"] == "move"
+    assert validate_manifest(manifest) == []
+
+
+@pytest.mark.parametrize(
+    "revision_manifest,checkout_manifest,expected_status",
+    [("valid", "invalid", 0), ("valid", "missing", 0),
+     ("invalid", "valid", 1), ("missing", "valid", 1), ("stale", "valid", 1)],
+)
+def test_check_inventory_is_bound_to_revision_not_checkout(
+    tmp_path, revision_manifest, checkout_manifest, expected_status,
+):
+    from tools.repository_layout import checks
+    from tools.repository_layout.manifest import build_manifest
+    from tools.repository_layout.sandbox import require_boundary
+    require_boundary()
+    root = repository(tmp_path)
+    baseline = git(root, "rev-parse", "HEAD").decode().strip()
+    valid = build_manifest(root, baseline)
+    manifest_path = root / "docs/maintenance/repository_layout_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+
+    def set_manifest(state):
+        if state == "missing":
+            manifest_path.unlink(missing_ok=True)
+        elif state == "invalid":
+            manifest_path.write_text("{ invalid JSON")
+        else:
+            payload = copy.deepcopy(valid)
+            if state == "stale":
+                payload["baseline_commit"] = "0" * 40
+            manifest_path.write_text(json.dumps(payload))
+
+    # Nested probes execute actual containment code, never a mocked success result.
+    tools_root = root / "tools/repository_layout"
+    tools_root.mkdir(parents=True)
+    for name in ("__init__.py", "manifest.py", "sandbox.py", "checks.py"):
+        shutil.copyfile(Path(checks.__file__).parent / name, tools_root / name)
+    set_manifest(revision_manifest)
+    git(root, "add", "tools")
+    if manifest_path.exists():
+        git(root, "add", "docs/maintenance/repository_layout_manifest.json")
+    git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "-qm", "revision under test")
+    revision = git(root, "rev-parse", "HEAD").decode().strip()
+    set_manifest(checkout_manifest)
+    runner = (
+        "import sys; from tools.repository_layout import checks; "
+        "checks.BASELINE=sys.argv[1]; "
+        "checks.CHECKS={'1': [['python', '-c', \"print('revision-check-passed')\"]]}; "
+        "raise SystemExit(checks.main(sys.argv[2:]))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", runner, baseline, "check", "1", "--revision", revision,
+         "--dependencies", "/deps", "--timeout", "30"],
+        cwd=root, capture_output=True, text=True, timeout=90,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == expected_status, output
+    if expected_status:
+        assert "manifest_errors" in output, output
+        assert "revision-check-passed" not in output, output
+    else:
+        assert "revision-check-passed" in output, output

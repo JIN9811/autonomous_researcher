@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from .manifest import build_manifest, validate_manifest
+from .manifest import build_manifest, validate_manifest, git_entries, _git
 from .sandbox import export_tracked, run_bounded, sandbox_command
 
 CHECKS: dict[str, list[list[str]]] = {
@@ -252,9 +252,25 @@ def main(argv: list[str] | None = None) -> int:
     private = root / ".superpowers/sdd/2026-10-01-repository-layout-migration"
     dependencies = args.dependencies or private / "deps"
     original = build_manifest(root, BASELINE)
-    manifest_path = root / "docs/maintenance/repository_layout_manifest.json"
-    relocated_manifest = root / "system/maintenance/repository_layout_manifest.json"
-    manifest = json.loads((manifest_path if manifest_path.is_file() else relocated_manifest).read_text())
+    revision = _git(root, "rev-parse", "--verify", f"{args.revision}^{{tree}}").decode().strip()
+    records = {path: (mode, kind, blob) for path, mode, kind, blob in git_entries(root, revision)}
+    candidates = [path for path in ("docs/maintenance/repository_layout_manifest.json",
+                                   "system/maintenance/repository_layout_manifest.json") if path in records]
+    if len(candidates) != 1:
+        print(json.dumps({"manifest_errors": ["Requested revision must contain exactly one public inventory"]}))
+        return 1
+    mode, kind, blob = records[candidates[0]]
+    if kind != "blob" or mode not in {"100644", "100755"}:
+        print(json.dumps({"manifest_errors": ["Revision inventory must be a regular Git blob"]}))
+        return 1
+    try:
+        manifest = json.loads(_git(root, "cat-file", "blob", blob))
+    except (ValueError, UnicodeDecodeError) as exc:
+        print(json.dumps({"manifest_errors": [f"Invalid revision inventory JSON: {exc}"]}))
+        return 1
+    if not isinstance(manifest, dict):
+        print(json.dumps({"manifest_errors": ["Revision inventory must be an object"]}))
+        return 1
     errors = validate_manifest(manifest)
     if manifest.get("baseline_commit") != BASELINE or set(manifest.get("entries", {})) != set(original["entries"]):
         errors.append("Public inventory no longer accounts for the frozen baseline")
@@ -269,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     results = []
     with tempfile.TemporaryDirectory(prefix="check-", dir=private) as temporary:
         snapshot = Path(temporary) / "snapshot"
-        export_tracked(root, snapshot, revision=args.revision)
+        export_tracked(root, snapshot, revision=revision)
         cwd = "/snapshot/runtime" if (snapshot / "runtime/pyproject.toml").is_file() else "/snapshot"
         probe = ["python", "-c", "import json; from tools.repository_layout.sandbox import boundary_probe; b=boundary_probe(); print(json.dumps(b)); assert not b['host_paths_visible'] and not b['device_nodes'] and not b['host_pid_visible'] and not b['non_loopback_connected']"]
         commands = [["python", "-m", "pytest", "-p", "pytest_asyncio.plugin"]] if args.baseline_suite else CHECKS[args.task]
@@ -279,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
             results.append({"command": command, "returncode": completed.returncode, "output": completed.stdout})
             if command is probe and completed.returncode:
                 break
-    report = {"task": args.task, "baseline": BASELINE, "revision": args.revision, "checks": results,
+    report = {"task": args.task, "baseline": BASELINE, "revision": revision,
+              "requested_revision": args.revision, "checks": results,
               "software_only": True, "complete": len(results) == len(commands) + 1}
     label = "baseline-suite" if args.baseline_suite else f"check-{args.task}"
     (private / f"{label}-results.json").write_text(json.dumps(report, indent=2))

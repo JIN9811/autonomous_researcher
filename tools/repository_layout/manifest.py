@@ -50,6 +50,7 @@ def disposition(path: str) -> tuple[str, str, str]:
     special = {"README.ko.md": "docs/README.ko.md", "SECURITY.md": ".github/SECURITY.md",
                "LICENSE": "runtime/LICENSE", "CITATION.cff": "docs/paper/CITATION.cff",
                "docs/modularity.md": "system/modularity.md",
+               "docs/document_manifest.yaml": "system/document_manifest.yaml",
                "docs/project/Project_guide.txt": "system/project/Project_guide.txt"}
     if path in special:
         return special[path], "move", "Explicit approved placement; preserve effective content"

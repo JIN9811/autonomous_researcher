@@ -6901,9 +6901,9 @@
       "approved_content_changes": []
     },
     "docs/document_manifest.yaml": {
-      "destination": "docs/document_manifest.yaml",
-      "disposition": "keep",
-      "reason": "Human-facing navigation/procedures or self-contained human asset bundle",
+      "destination": "system/document_manifest.yaml",
+      "disposition": "move",
+      "reason": "Explicit approved placement; preserve effective content",
       "mode": "100644",
       "git_blob": "975c1f1f7b66dfb09a660a6eff5bd2a30799bb49",
       "sha256": "ea0471b8badc8316fc97dfbb121e052616bb65e6f5caf928c90e52f6690cadda",
