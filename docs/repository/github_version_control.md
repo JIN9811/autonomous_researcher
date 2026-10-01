@@ -31,8 +31,10 @@ Primary tracked directories:
 
 ## Local User and Runtime Files
 
-Do not commit private or generated runtime data. These folders are intentionally
-ignored except for their README files:
+Do not commit private or generated runtime data. Generated contents of these
+folders are ignored; their README files and explicitly tracked source modules
+are retained. In particular, `memory/` also contains versioned Python
+compatibility modules, not only private state:
 
 - `memory/`
 - `runs/`
@@ -53,10 +55,12 @@ Examples of ignored files:
 
 Before pushing to GitHub:
 
-1. Run `git status --ignored`.
+1. Run `git status --short` and inspect `git diff --cached`.
 2. Confirm secrets are not staged.
 3. Confirm large generated artifacts are not staged.
-4. Commit only source, docs, reusable config, templates, and lightweight assets.
+4. Commit only source, docs, reusable config, templates, and reviewed lightweight assets.
+5. Follow the [publication checks](../knowledge/publication.md) for evidence,
+   Wiki material and screenshots. Ignored local data is not a public artifact link.
 
 ## Branch Use Policy
 
@@ -88,12 +92,13 @@ Branch workflow:
    ```
 
 3. Make changes on that branch.
-4. Run the relevant tests or live checks.
+4. Run the relevant non-hardware tests. Live equipment checks require separate
+   operator authorization and must not be started merely to prepare a commit.
 5. Commit the branch work:
 
    ```bash
    git status
-   git add .
+   git add <reviewed-paths>
    git commit -m "<clear change summary>"
    ```
 
@@ -105,12 +110,10 @@ Branch workflow:
    git push
    ```
 
-7. If the branch fails or becomes messy, discard it instead of damaging `main`:
-
-   ```bash
-   git checkout main
-   git branch -D <work-branch-name>
-   ```
+7. If verification fails, preserve the branch and diagnose it. Do not force-delete
+   unmerged work or overwrite a dirty worktree. After integration, an explicitly
+   requested cleanup can use `git branch -d <work-branch-name>`; Git then refuses
+   to delete an unmerged branch.
 
 Recommended branch names:
 

@@ -24,7 +24,7 @@ on subsequent refreshes.
 Knowledge cards retain activity, memory and retrieval evidence. The
 [Wiki and Memory](../../knowledge/wiki_memory.md) integration adds the shared
 Wiki, scoped private-memory actions and delivery receipts; its browser rendering
-is not yet verified. The existing Knowledge Workspace keeps Source Library,
+has a limited read-only Wiki screenshot in the [2026-09-29 GUI collection](../visual_structure.md). That capture does not verify authenticated private-memory, delivery, or write flows. The existing Knowledge Workspace keeps Source Library,
 execution Markdown and ontology alongside the new views. Knowledge-bound Chat
 HTML is excluded from persistent browser snapshots, while the server transcript
 and existing three-expanded-message interaction remain intact. Retired graph

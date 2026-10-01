@@ -3,6 +3,8 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # 16. UTM ROS Vision Runtime Bridge + Live GUI Card Upgrade Plan
 
+> Review note (2026-09-29): For the implemented sensor/UI boundary, use [UTM ROS bridge](../../hardware/utm_ros_vision_runtime_bridge.md) and [Equipment agent](../../agents/equipment_agent.md). Proposed fallback and validation steps below describe the original plan; they are not current live-device permissions or new validation evidence.
+
 작성일: 2026-06-22
 대상 코드: `device_bridges/`, `mcp_tools/camera_tools.py`, `app/bootstrap.py`, `app/main.py`, `configs/devices.yaml`, `web/templates/*`, `web/static/*`, `agents/equipment_agent.py`, `agents/vision_agent.py`, `docs/hardware/*`, `REQUIREMENTS.md`
 외부 기준 repo: `<home>/external_repos/UTM` (`https://github.com/hylee12345/UTM`)

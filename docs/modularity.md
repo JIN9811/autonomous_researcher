@@ -26,8 +26,8 @@ source_of_truth:
   - orchestrator/langgraph_runtime.py
   - web/static/runtime_ide.js
   - web/static/experimental_packages.js
-last_verified: 2026-09-14
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772472d5d44bfef690e6258fc62270192b96
 related_docs:
   - packages/README.md
   - docs/agents/README.md
@@ -66,8 +66,9 @@ can cross its declared provider or equipment effect boundary.
 
 ## Scope and Source of Truth
 
-This Reference describes the working-tree implementation verified on
-2026-09-14. Executable code, checked-in graph/module configuration, registered
+This Reference was rechecked against the committed implementation on
+2026-09-29 by static source inspection. The dated controlled-runtime tests below
+are separate evidence, not newly repeated hardware checks. Executable code, checked-in graph/module configuration, registered
 handlers and tools, and persisted run evidence remain authoritative. The
 [archived architecture Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
 records the preceding development decisions; it does not override the current

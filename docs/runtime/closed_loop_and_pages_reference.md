@@ -19,8 +19,8 @@ source_of_truth:
   - app/main.py
   - web/templates/planning.html
   - web/static/planning.js
-last_verified: 2026-08-08
-verified_against: 09bbe32
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/langgraph_runtime.md
@@ -41,9 +41,11 @@ supersedes: []
 
 ## Scope
 
-이 문서는 커밋 `09bbe32`에서 실행되는 기본 closed loop, operator page,
+이 문서는 기본 closed loop, operator page,
 agent/module, runtime event와 artifact 연결을 설명합니다. 장비별 상세 조작
 절차와 향후 설계 제안은 각각 active Guide와 Design/Evidence 문서의 범위입니다.
+2026-09-29 `dd0d772` 소스 대조는 Vision 재진입 경로, Knowledge 화면과
+테스트 권한 경계를 갱신했습니다. 아래 2026-08-08 검증 기록은 재실행하지 않았습니다.
 
 ## Source of Truth
 
@@ -63,7 +65,7 @@ agent/module, runtime event와 artifact 연결을 설명합니다. 장비별 상
 2. **첫 단계 이동**
    - `idle -> design` (실행 순서의 시작)
 3. **기본 사이클**
-   - `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`
+   - `design -> specimen -> vision -> manipulation -> vision -> equipment -> analysis -> knowledge -> bo -> guardian` (대표 흐름; 이송/관측/UTM 정리는 조건부 경로)
 4. **반복/종료**
    - `guardian` 판단값이
      - `continue`면 다시 `design`로 회귀
@@ -80,7 +82,7 @@ agent/module, runtime event와 artifact 연결을 설명합니다. 장비별 상
 - [ ] 서버 실행됨(`atr up`)
 - [ ] `/live` 접속
 - [ ] 테스트면 `mode=test`, 실기라면 `mode=live` 선택
-- [ ] 장비 상태가 필요하면 Main GUI의 `Device Workspaces`에서 `/printer`, `/equipment/windows`, `/lerobot`, `/bo`, `/cae` 전용 GUI를 먼저 열어 bridge 상태를 확인
+- [ ] 장비 상태가 필요하면 Main GUI의 `Device Workspaces`에서 `/printer`, `/equipment/windows`, `/lerobot` 전용 GUI를 열어 bridge 상태를 확인. `/bo`는 최적화 작업 화면이며, 퇴역한 `/cae` 페이지는 현재 운영 경로가 아님.
 - [ ] Run 시작 버튼 → run_id 발급
 - [ ] 이벤트 스트림에 다음이 순차로 뜨는지 확인
   - `run.started`
@@ -184,11 +186,17 @@ Management는 주요 descriptor 필드를 typed form으로 편집할 수 있습�
 
 ## 3) 기본 닫힌루프(기본 모드) 단계별 상세
 
-아래는 `atr_closed_loop.yaml`의 현재 순서입니다.
+아래는 대표 실험 흐름입니다. 실제 기본/조건부 경로는
+[`atr_closed_loop.yaml`](../../graphs/configs/atr_closed_loop.yaml)이 결정합니다.
 
 ```text
-dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian -> (continue: design | stop: complete | error: error)
+dispatch -> idle -> design -> specimen -> vision -> manipulation -> vision -> equipment -> analysis -> knowledge -> bo -> guardian -> (continue: design | stop: complete | error: error)
 ```
+
+기본 `manipulation -> vision`은 조작 후 검증 단계로 재진입합니다.
+Vision은 이송이 필요하면 조건부로 Manipulation을 선택하고, 실행 중 관측은
+Vision에 머물며, 배치가 검증되면 Equipment로 이동합니다. UTM 정리도 별도의
+scope-bound 조건부 경로로 확인한 후 Analysis로 인계합니다.
 
 ### 핵심 노드 동작 (실행/디버깅 포인트)
 
@@ -210,7 +218,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 | BO Workspace | `/bo` | `bo.html` | BO/MBO/LLM preference 전략 설정, reasoning audit, candidate ranking, next-design handoff | `/api/bo/config`, `/api/bo/benchmark`, `/api/bo/run` |
 | Runtime IDE | `/ide` | `runtime_ide.html` | 그래프/에지/모듈 편집, module attach deep-link, validate/dry-run/실행, 버전관리 | `/api/graphs*`, `/api/modules*`, `/api/handlers` |
 | Module Management | `/module-management` | `module_management.html` | 모듈 로드·언로드·검증·버전 저장, draft module 생성, `ui.yaml` descriptor 관리, handler/LLM/tool/prompt/safety/step typed edit, raw JSON edit | `/api/modules*`, `/api/modules/templates/*`, `/api/modules/{id}/ui`, `/api/runtime/agent-manifests`, `/api/bridges`, `/api/handlers` |
-| Knowledge Workspace | `/knowledge` | `knowledge.html` | Graph Explorer, Memory, Ontology, Sync, Project Graph와 기록된 활동 집계 확인 | `/api/knowledge/ontology`, `/api/knowledge/ontology/validate`, `/api/knowledge/graph/stats`, `/api/knowledge/activity`, `/api/knowledge/graph/sync`, `/api/knowledge/graph/query` |
+| Knowledge Workspace | `/knowledge` | `knowledge.html` | AX4LAB Wiki, scoped Memory, Source Library, Agent Delivery, Ontology 확인; 관계 편집 화면은 폐기됨 | 현재 route/저장 경계는 [Wiki and Memory](../knowledge/wiki_memory.md), [Knowledge owner](../agents/knowledge_agent.md) 참조 |
 | PyAutoGUI 장비 브릿지 | `/equipment/windows` | `windows_equipment.html` | Windows 후보 검색/선택과 Ubuntu localhost 개발 브릿지 시작/선택/프로그램 실행 | `/api/equipment/windows/config`, `/api/equipment/windows/local-bridge/*`, `/api/equipment/windows/discover`, `/api/equipment/windows/connect`, `/api/equipment/windows/select`, `/api/equipment/windows/delete`, `/api/equipment/windows/test`, `/api/equipment/windows/run-program` |
 | LeRobot GUI | `/lerobot` | `lerobot.html` | ROBOTIS teleop/record/train/rollout, 포트/카메라 구성, 조작 agent bridge, manipulation 연동, Isaac Sim follower-state probe/receiver process/receiver-health/receiver-verify 및 mirror loop | `/api/lerobot/config`, `/api/lerobot/ports*`, `/api/lerobot/camera/test`, `/api/lerobot/mirror/*`, `/api/lerobot/teleoperate/*`, `/api/lerobot/record/*`, `/api/lerobot/train/*`, `/api/lerobot/rollout/*`, `/api/lerobot/manipulation-agent/*` |
 
@@ -265,13 +273,13 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **핵심 툴**: `equipment.pyautogui.health`, `equipment.pyautogui.list_programs`, `equipment.pyautogui.run`, `utm.run_protocol`
 - **필수 결과 키**: `equipment_result`, `protocol_note`
 - **UTM ROS evidence provider**: `device_bridges/utm_runtime_bridge.py`는 `<home>/external_repos/UTM`의 `start_utm_vision_stack.sh`, `camera_rect.launch.py`, `green_dot_monitor.launch.py`, `yolo.sh` 흐름을 기준으로 `usb_cam -> rectify_node -> green_dot_monitor -> yolov8` RQT-like graph를 만든다. 실제 graph는 ROS2 node/topic introspection으로 읽고, image evidence는 `/api/equipment/utm-runtime/frame`이 `/image_utm`, `/yolo/dbg_image`, `/compression_tester/debug_image`, `/camera/image_rect`, `/camera/image_raw` 순서로 1프레임을 캡처한다.
-- **UTM test/live policy**: test mode에서 ROS topic/frame evidence가 없으면 `vision.equipment_cross_check`가 `virtual_utm_bridge`로 진행하되 fallback trace를 남긴다. live mode에서는 virtual evidence로 physical UTM 완료를 선언하지 않고 operator attention/recovery action으로 남긴다.
+- **UTM test/live policy**: `test`라는 이름만으로 virtual fallback을 보장하지 않는다. 각 owner가 선택한 시나리오·effective mode·`allow_virtual_bridge_in_test` 및 clear-verification 조건에 따라 virtual evidence 사용 여부가 정해진다. 실제 장비 경로에서 누락된 ROS/frame evidence를 가상 성공으로 대체하지 않는다. 세부 계약은 [Vision](../agents/vision_agent.md)과 [UTM ROS bridge](../hardware/utm_ros_vision_runtime_bridge.md)를 따른다.
 
 ### Analysis Agent (`modules/analysis`, `agent.analysis_agent`)
 - **목적**: Lab Equipment raw UTM artifact를 표준 분석 기록과 BO-ready handoff로 변환
-- **핵심 툴**: `cae.run_static_analysis`, `cae.health`, `cae.run_static_analysis`
+- **핵심 처리**: Analysis owner의 측정 파일 파싱, canonical curve 생성, 품질·SEA 계산 및 BO handoff. 퇴역한 CAE/FEM 도구는 현재 Analysis 실행 경로가 아니다.
 - **주요 결과**: `analysis`, `bo_observation`, `bo_handoff`, `experiment_evaluation`, `knowledge_payload`
-- **주요 아티팩트**: `canonical_curve.csv`, `quality_report.json`, `metrics.json`, `fem_result.json`, `fem_agentic_loop.json`, `fem_utm_comparison.json`, `experiment_evaluation.json`, `bo_handoff.json`
+- **주요 아티팩트**: `raw_input_sidecar.json`, `parse_report.json`, `preprocessing_report.json`, `quality_report.json`, `metrics.json`, `analysis_report.json`, `analysis_trace.jsonl`. 유효 곡선이 있으면 `canonical_curve.csv`, 해당 handoff가 있으면 `experiment_evaluation.json`·`bo_handoff.json`을 보존한다. 과거 FEM 파일은 현재 생성 보장이 아니다.
 
 ### Knowledge Agent (`modules/knowledge`, `agent.knowledge_agent`)
 - **목적**: 실패/성능 이력 요약 후 다음 후보/지침 반영
@@ -297,7 +305,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - 루프가 안도는 것처럼 보일 때 우선 아래를 확인
   1. `POST /api/run/start` 응답에 `run_id`가 있는지
   2. `GET /api/runs/{run_id}`에서 `active=True`/`is_running=True`
-  3. `/api/runs/{run_id}/events` 또는 SSE 스트림에서 `node.started`/`edge.traversed`/`run.complete`가 연속으로 나오는지
+  3. `/api/runs/{run_id}/events` 또는 SSE 스트림에서 `node.started`/`edge.traversed`/`run.completed`가 연속으로 나오는지
 - 루프 진입 직후 `idle`에서 멈춰 있으면 `guardian/디펄트 런치`가 아니라 대부분 **실행 단계가 완료되지 못한 precondition 문제**(설비 게이트/검증 실패)입니다.
 - `live`에서 바로 종료되면 대부분 `safe_stop_requested` 또는 `stop_requested`가 true 상태로 설정됐는지 확인하세요.
 
@@ -306,6 +314,10 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 ## 7) 운영 권장 워크플로우(초간단)
 
 ### 테스트 모드
+
+`test`만으로 비작동을 보장하지 않습니다. 장비 I/O가 모두 virtual인 프로필을
+명시적으로 확인하십시오. installed-printer/physical-print 선택은 별도의 장비
+권한과 안전 게이트를 유지합니다. 모델 판단 실패는 가상 성공이 아닙니다.
 1. Live GUI에서 목표 입력 또는 테스트 모드 명령
 2. `POST /api/run/start`(mode=test)
 3. `run` 이벤트 확인 후 단계별 메시지/아티팩트 확인
@@ -314,7 +326,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 ### 실모드
 1. 장비/브릿지 게이트와 모델/연결 상태 점검
 2. Live 대화에서 실험 명령(예: `실험 수행`)
-3. `specimen` 이후 장비 단계 전이에서 `prusa/robot/wrapper` gate 상태 확인
+3. `specimen` 이후 장비 단계 전이에서 선택된 printer provider/robot/wrapper gate 상태 확인
 4. `guardian` 결정 및 다음 루프로 재진입 여부 확인
 
 ---
@@ -377,7 +389,7 @@ Runtime representation:
 
 - `graphs/modules/vision/module.yaml` declares `lerobot.active_robot_cam.capture` and emits the active-camera confirmation contract.
 - `graphs/modules/manipulation/module.yaml` consumes `transfer_readiness.camera_returned_to_vla`; it does not request a separate RGB-D pose snapshot before rollout.
-- `graphs/configs/atr_closed_loop.yaml` keeps the executable stage transition `manipulation -> equipment` unchanged because the current compiler requires one executable node per stage. Post-place Vision verification is represented as a non-executable `vision_verify` sidecar/contract node and as a ManipulationAgent handoff gate.
+- `graphs/configs/atr_closed_loop.yaml` defaults to executable `manipulation -> vision -> equipment`, with conditional transfer, monitoring and UTM-clearance routes. `vision_verify` remains a non-executable sidecar describing the evidence contract; it does not replace the executable Vision verification stage.
 - Live GUI Vision cards show Active Cam confirmation and VLA camera-return state from `active_cam_ejection_check` and `transfer_readiness`.
 
 ## Active Cam 실행 산출물 수명주기

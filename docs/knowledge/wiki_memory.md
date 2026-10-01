@@ -16,13 +16,17 @@ source_of_truth:
   - web/static/knowledge_workspace.js
   - web/static/knowledge_live.js
   - web/static/planning.js
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-core-agent-roots
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/publication.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source inspection at `dd0d772`.
+Historical provider/test results retain their original scope; this review did not
+invoke models, mutate Knowledge stores or operate devices.
 
 # AX4LAB Wiki and Memory
 
@@ -68,6 +72,13 @@ separate. The context facade still sends bounded excerpts (up to 2,000 character
 per Wiki search item); expanding the corpus does not enlarge model budgets or
 prove that a model read or used every section. Retrieval, full scoped reads and
 validated citation evidence remain distinct.
+
+Operational decisions use a narrower adapter: only the exact owner's reviewed
+`Runtime decision reference` section is projected, at most 1,200 characters.
+General articles, examples and private memory are not implicitly attached to
+those decisions. Missing, stale or oversized summaries produce no reference,
+not an extra experimental gate. Full explanatory browsing retains its separate
+contract. See the [runtime reference safety audit](runtime_reference_safety.md).
 
 The Wiki pane renders a small Markdown subset: headings, paragraphs, lists,
 tables, emphasis, code and reviewed document figures. Raw HTML stays literal.
@@ -195,8 +206,8 @@ existing LLM curation workflow and its execution handoffs.
 ## Verification Boundaries
 
 The opt-in [provider probe](../../scripts/verify_knowledge_workspace.py) uses
-the registered backends and public Wiki plus synthetic fixtures. The latest
-check exercised ten agent decision entrypoints with matching and nonmatching
+the registered backends and public Wiki plus synthetic fixtures. The recorded
+implementation check exercised ten agent decision entrypoints with matching and nonmatching
 references: 20 API (`gpt-5.5`) and 20 local vLLM (`gemma4:31b`) cases returned
 responses with consistent outgoing reference-pack accounting. API use outcomes
 were all Unknown; local Analysis demonstrated one validated explanatory citation,
@@ -222,5 +233,7 @@ Python aggregate passed 162 tests. The original loop and Setup-admission suites
 passed 71 tests with the original handoff budget and execution gates. These are
 non-actuating tests, not a physical run. Live/Workspace DOM-boundary tests passed
 38 cases, including reverse-order navigation and same-revision tab resync.
-Browser rendering and physical equipment
-operation have not been verified in this change.
+That implementation check did not verify browser rendering or physical equipment
+operation. The later 2026-09-29 screenshots above document bounded visual
+inspection with Wiki-only access; they do not expand private-access, model-use
+or physical-validation claims.

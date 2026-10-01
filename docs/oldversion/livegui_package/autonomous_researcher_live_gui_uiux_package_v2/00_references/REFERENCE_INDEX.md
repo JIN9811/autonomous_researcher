@@ -1,5 +1,7 @@
 # Reference Image Index
 
+> Archived development material (archive context clarified 2026-09-29). The original instructions, example values and visual targets below are historical, not current runtime requirements or measured evidence. See the [archive index](../../../README.md) for maintained replacements.
+
 - `00_references/user_supplied/00_current_live_gui_original.png`
 - `00_references/user_supplied/01_dashboard_style_reference_hiring_overview.png`
 - `00_references/user_supplied/02_live_gui_upgrade_plan.md`

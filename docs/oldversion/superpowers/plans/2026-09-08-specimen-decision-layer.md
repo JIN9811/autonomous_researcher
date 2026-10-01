@@ -9,6 +9,9 @@ audience: [developer, maintainer]
 scope: [agents, specimen, decision_tools]
 summary: Bounded fabrication suitability decisions and tool dispatch on the existing printer route.
 source_of_truth:
+  - agents/specimen/agent.py
+  - agents/specimen/decision.py
+historical_source_paths:
   - agents/specimen_agent.py
   - agents/specimen_decision.py
 last_verified: 2026-09-08

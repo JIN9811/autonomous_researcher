@@ -55,10 +55,12 @@ supersedes: []
 
 ATR separates control, agent work, physical integration, evidence, and
 operator interaction into explicit layers. At code baseline `5542ef2`, the
-checked-in graph contains 19 nodes, 74 declared edges, and 12 stage-dispatch
-entries. The reader-facing runtime map displays 50 connections after internal
+checked-in graph contained 19 nodes, 74 declared edges, and 12 stage-dispatch
+entries. That reader-facing runtime map displayed 50 connections after internal
 dispatch/step-return edges are filtered. These are architecture observations, not stability or
-performance guarantees.
+performance guarantees. A YAML-only check on 2026-09-29 at `dd0d772` counts
+19 nodes, 73 declared edges and 12 dispatch entries; it does not rerun the
+historical architecture evidence or measure a browser rendering.
 
 ## Scope
 
@@ -123,8 +125,9 @@ Dispatch maps the current stage to one of 12 entries: `idle`, `design`,
 `bo`, `guardian`, `complete`, and `error`.
 
 Declared edges include logical transitions, supervisor overlays, evidence
-flows, and runtime-sidecar relations. Counting all 74 edges therefore describes
-the configuration surface; it does not imply 74 sequential physical actions.
+flows, and runtime-sidecar relations. The dated 74-edge count above describes
+that configuration surface, not sequential physical actions. Current inventories
+are maintained in the [code snapshot](../runtime/current_code_snapshot.md).
 
 ## Stage Contracts
 

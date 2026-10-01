@@ -50,7 +50,7 @@ supersedes: []
 | At a glance | Details |
 |---|---|
 | Topic | Orchestration handoffs, verification and feedback |
-| Evidence boundary | [Retained one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with its mixed-mode limits |
+| Evidence boundary | [Fifteen-observation archive audit](evidence/2026-09-28-campaign-archive-audit.md), plus [earlier one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md) with distinct mixed-mode limits |
 | Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
 
 ## Summary
@@ -115,7 +115,8 @@ stage/control progression; green arrows represent durable artifact and
 evidence flow. The dashed equipment-to-analysis edge applies only without a
 required clearance contract. The feedback edge carries accepted knowledge and candidate
 context into the next design stage. The paths are code-backed; continuity
-through a complete physical campaign remains `not_evaluated`.
+through the retained campaign is [partially supported by archive inspection](evidence/2026-09-28-campaign-archive-audit.md);
+independent physical certification remains `not_evaluated`.
 
 Each stage may produce three distinct outputs:
 

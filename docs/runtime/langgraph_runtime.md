@@ -362,6 +362,12 @@ are preserved.
 
 ## Module Runtime Application
 
+Current installed owners use `module.execution_graph` and their registered operation
+catalogs. For migrated modules the runtime skips legacy `internal_graph` execution;
+the checkpoint/explicit-handler rules below apply only to unmigrated modules.
+See [the editable module contract](runtime_ide.md#five-area-editable-module-canvas)
+and [`_module_internal_steps`](../../orchestrator/langgraph_runtime.py).
+
 `LangGraphRunLoop` loads `graphs/modules/*/module.yaml` for every stage referenced by the active graph. The module file is not only a UI document: the runtime wraps `AgentContext` with a stage-scoped `ModuleRuntimeContext` before calling `BaseAgent.run(state, ctx)`.
 
 Applied at execution time:
@@ -398,7 +404,7 @@ Still delegated to existing safety layers:
 
 ## Execution Order
 
-Default closed-loop order:
+Nominal experiment flow (conditional routing is not a fixed linear list):
 
 ```text
 idle
@@ -406,6 +412,7 @@ idle
   -> specimen
   -> vision
   -> manipulation
+  -> vision (placement verification / active-rollout monitoring)
   -> equipment
   -> analysis
   -> knowledge
@@ -416,9 +423,17 @@ idle
 
 `bo` is now a mandatory configured graph stage between `knowledge` and `guardian`, not a hidden sidecar.
 
+The saved graph defaults are `specimen -> vision`, `manipulation -> vision`, and
+`vision -> equipment`. A scoped `next_stage:manipulation` selects transfer after
+Active Cam approval; `next_stage:vision` retains rollout monitoring. Equipment
+and Vision also expose identity-scoped UTM-clearance routes before Analysis.
+`vision_verify` is a non-executable evidence overlay, not a replacement for the
+executable Vision stage. Inspect [the active YAML](../../graphs/configs/atr_closed_loop.yaml)
+for defaults and conditional candidates; diagram arrows do not authorize work.
+
 ## Live GUI Planning Handoff
 
-The Live GUI planning handoff also uses the configured LangGraph runtime for stage execution. Design and Specimen stages are executed with `RunLoop.step()` in a planning single-step mode, and the post-specimen tail is derived from the active `graphs/configs/*.yaml` transition table instead of a hard-coded stage list. In the default graph this tail is `vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`. This preserves the chat-specific planning messages while ensuring module handler selection, LLM/prompt overrides, tool allowlists, retry policy, human approval gates, module `pre_execution`, and standard runtime events are applied consistently. Planning may pass `run_orchestrator_before_design=False` only when the chat handoff has already obtained an orchestrator-approved plan, preventing duplicate Design pre-stage calls while keeping the default runtime config-owned.
+The Live GUI planning handoff also uses the configured LangGraph runtime for stage execution. Design and Specimen stages are executed with `RunLoop.step()` in a planning single-step mode, and the post-specimen tail is derived from the active `graphs/configs/*.yaml` transition table instead of a hard-coded stage list. In the current graph this is a conditional tail: Vision can select transfer, Manipulation returns to Vision verification, and verified equipment/clearance evidence leads to Analysis, Knowledge, BO and Guardian. This preserves the chat-specific planning messages while ensuring module handler selection, LLM/prompt overrides, tool allowlists, retry policy, human approval gates, module `pre_execution`, and standard runtime events are applied consistently. Planning may pass `run_orchestrator_before_design=False` only when the chat handoff has already obtained an orchestrator-approved plan, preventing duplicate Design pre-stage calls while keeping the default runtime config-owned.
 
 Live GUI planning messages preserve agent-owned evidence. Analysis supplies measured curves, metrics, quality and the configured objective; BO supplies its posterior, acquisition and next-candidate evidence. Historical files remain accessible through the scoped artifact explorer.
 
@@ -445,7 +460,7 @@ A graph must validate and dry-run before live execution. The runtime API enforce
 
 Current implementation preserves existing live/test safety gates inside agents and device bridges:
 
-- printer live gates remain in Prusa bridge/tool code
+- printer live gates remain in the selected Printer Fleet provider (Bambu or Prusa) and its tool code
 - LeRobot live gates remain in LeRobot bridge/tool code
 - Windows equipment live gates remain in PyAutoGUI bridge/tool code
 - Guardian remains the graph-level safety review node
@@ -517,7 +532,7 @@ Refactor execution wiring through graph config and registry first; agent behavio
 - Route: `/ide`
 - Static frontend: `web/templates/runtime_ide.html` + `web/static/runtime_ide.js`
 - Main GUI entry: LangGraph Runtime Map -> Open Runtime IDE
-- Current GUI supports multi-graph selection from every `graphs/configs/*.yaml`, Runtime Top Bar status, Graph Explorer search/list, categorized Module Library drag/drop, SVG node icons from the Runtime IDE asset set, practical Node Inspector cards, selected-node auto-repair when switching graph/module tabs, port-based transition editing, condition-scoped multi-edge candidates, nearest-port auto routing after node movement, graph-first startup with heavy Activation/Run Launcher controls folded into compact operator drawers, automatic initial graph fit, canvas viewport coverage feedback with a `Fit Graph` overview control, accessible graph tabs with visible `ACTIVE`/`DRAFT` badges, current canvas context labels, DOM dataset state, `window.atrRuntimeIdeState` debug snapshots for GUI/CUI verification, active-baseline route diff cards for draft edge edits, trash-zone node removal, validate draft, compile with executable graph summary, dry-run, graph YAML export/import, graph save, graph version history draft loading, handler listing, and a hidden compatibility module-config host used only to keep legacy JS/API bindings stable. Module lifecycle/config editing is intentionally owned by the Module Management Tool.
+- The API supports every `graphs/configs/*.yaml`; the current GUI normally presents the fixed Main System tab with its graph selector hidden (see the Runtime IDE Reference), Runtime Top Bar status, Graph Explorer search/list, categorized Module Library drag/drop, SVG node icons from the Runtime IDE asset set, practical Node Inspector cards, selected-node auto-repair when switching graph/module tabs, port-based transition editing, condition-scoped multi-edge candidates, nearest-port auto routing after node movement, graph-first startup with heavy Activation/Run Launcher controls folded into compact operator drawers, automatic initial graph fit, canvas viewport coverage feedback with a `Fit Graph` overview control, accessible graph tabs with visible `ACTIVE`/`DRAFT` badges, current canvas context labels, DOM dataset state, `window.atrRuntimeIdeState` debug snapshots for GUI/CUI verification, active-baseline route diff cards for draft edge edits, trash-zone node removal, validate draft, compile with executable graph summary, dry-run, graph YAML export/import, graph save, graph version history draft loading, handler listing, and a hidden compatibility module-config host used only to keep legacy JS/API bindings stable. Module lifecycle/config editing is intentionally owned by the Module Management Tool.
 - The Runtime IDE visual layer is tuned against `atr_runtime_ide_concept_reference.png` as a dark, high-density workbench. At 1920x1080 the graph canvas must start near the first-screen top, exceed 1200 px width, expose the minimap before the fold, and avoid horizontal overflow. Larger displays expand the center graph canvas rather than leaving fixed-width margins; the layout audit now verifies this at 1920x1080 and 2560x1440.
 - Graph Version History uses `/api/graphs/{graph_id}/versions` and `/api/graphs/{graph_id}/versions/{version_id}`. Loading a version puts that saved graph into the editor draft only; operators must validate, dry-run, and save before it becomes active.
 - Runtime Readiness sits at the top of the Bottom Dock and summarizes whole-graph execution readiness: node/edge/route counts, handler allowlist coverage, module linkage and pending-registration state, validation/compile/dry-run evidence, live-gate status, and device/backend warnings. Its issue rows select the affected graph node when possible, and its action buttons call the same guarded Runtime API paths as the toolbar (`Validate`, `Dry Run`, and `Run Launcher`). When an internal module graph tab is active, Runtime Readiness switches to module-draft semantics: evidence is read from the selected module draft preflight record, live gate is shown as `n/a` / `module draft only`, graph Run Launcher is hidden, and the action row exposes `Validate Module`, `Dry Run Module`, and `Save Module`. Handler/module catalog coverage is not marked as registered until `/api/handlers` and `/api/modules` have loaded; while those catalogs are pending the panel shows explicit loading warnings and refreshes graph badges after catalog load. The same readiness evidence is projected onto graph nodes as `readiness-ok`, `readiness-warn`, or `readiness-error` with compact node badges, so missing handlers/modules/routes and pending generated-module registration are visible directly on the canvas. Route coverage follows graph semantics: entry nodes do not require incoming logical routes, and finish/terminal nodes do not require outgoing logical routes; module internal graph tabs derive those entry/finish markers from the first and last configured module steps. Clicking a readiness issue focuses the appropriate repair surface: handler/runtime issues focus Node Inspector and Runtime Recovery, route coverage issues focus the Transition Editor and preselect the current/baseline default target when available, and module/registration issues focus the module tools entry point. This gives operators a single operational preflight view before they inspect individual nodes. The always-visible Draft safety gate above the canvas is kept as a compressed status-chip strip so validation/dry-run/save/live-gate evidence remains visible without pushing the graph canvas below the first viewport.
@@ -583,7 +598,7 @@ The active closed-loop graph declares these runtime planes:
 
 ### Verified Runtime IDE Evidence
 
-The current 2026-05-26 smoke set against `http://127.0.0.1:7860` passed the following checks:
+The historical 2026-05-26 smoke set against `http://127.0.0.1:7860` passed the following checks:
 
 - Runtime IDE full browser audit: `.venv/bin/python tests/ui/runtime_ide_browser_audit.py --base-url http://127.0.0.1:7860 --webdriver-url http://127.0.0.1:4448 --scenario all --out-dir /tmp/atr_runtime_audit_all_v89`
 - Runtime IDE reference-fit audit at the operator target resolution: `.venv/bin/python tests/ui/runtime_ide_browser_audit.py --base-url http://127.0.0.1:7862 --webdriver-url http://127.0.0.1:4448 --scenario layout --width 1920 --height 1080 --out-dir artifacts/ui/runtime_ide_audit_1920x1080_latest`. Evidence: `artifacts/ui/runtime_ide_audit_1920x1080_latest/runtime_ide_browser_audit_layout.png`. The audited canvas started at `x=259.4`, `y=340.6`, width `1312.4`, height `516.9`; the minimap remained in the first viewport at `y=897.5`; horizontal body overflow remained bounded (`scrollW=1911`, `clientW=1908`).
@@ -594,7 +609,7 @@ The current 2026-05-26 smoke set against `http://127.0.0.1:7860` passed the foll
 - CUI graph smoke: `atr graph validate atr_closed_loop`, `atr graph compile atr_closed_loop`, `atr graph dry-run atr_closed_loop`, and `atr graph gate atr_closed_loop`
 - CUI module smoke: `atr module validate design`, `atr module dry-run design`, `atr module load design`, and `atr module unload design`
 
-The current 2026-06-17 12번 개선안 audit set against the local test server
+The historical 2026-06-17 12번 개선안 audit set against the local test server
 `http://127.0.0.1:7862` passed these checks:
 
 - Live GUI runtime audit:
@@ -694,10 +709,10 @@ and downstream agents see the same state after page refresh or new GUI window.
 
 ## Verification
 
-The runtime contract was compared on 2026-08-08 with commit `09bbe32`, including
+Historical verification: the runtime contract was compared on 2026-08-08 with commit `09bbe32`, including
 `graphs/configs/atr_closed_loop.yaml`, `graphs/compiler.py`,
 `orchestrator/langgraph_runtime.py`, the graph/module APIs in `app/main.py`, and
-the Runtime IDE frontend. The primary graph contains 19 nodes, 68 edges, and 12
+the Runtime IDE frontend. That revision's primary graph contained 19 nodes, 68 edges, and 12
 stage-dispatch mappings; reproduction commands are maintained in
 `current_code_snapshot.md`.
 

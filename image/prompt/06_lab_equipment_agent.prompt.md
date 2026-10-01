@@ -1,5 +1,8 @@
 # Lab Equipment Agent 이미지 생성 프롬프트
 
+> Historical generation prompt, not current runtime guidance. See the
+> [presentation-set scope](../README.md) and [current agent references](../../docs/agents/README.md).
+
 목표: PPT에 바로 넣을 수 있는 16:9 벡터 기반 시스템 다이어그램을 생성한다.
 권장 캔버스: 1920x1080px SVG, 16:9.
 글자 크기: 내부 텍스트 최소 14pt 이상. 이 프로젝트 SVG 생성기는 최소 24px로 생성한다.

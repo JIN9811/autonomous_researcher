@@ -3,6 +3,12 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # 15. UTM·CalculiX·PINN 멀티피델리티 자가개선 루프 개선안 - ATR 코드 중심 수립 계획
 
+2026-09-29 완독 감사: 아래는 2026-06-18 연구·구현 제안으로, 현재 기능
+목록이나 설치 지침이 아니다. FEM/CAE 및 Self-Evolution 실행 서비스는
+2026-09-14에 [retirement archive](../../../oldversion/2026-09-14-retired-computation/README.md)로
+이동했다. 현재 [Analysis Agent](../../agents/analysis_agent.md)는 측정 데이터
+후처리를 담당하며, 이 계획의 trust-score/PINN 목표를 구현 완료로 보지 않는다.
+
 작성일: 2026-06-18
 대상 보고서: `<home>/다운로드/UTM·CalculiX·PINN 멀티피델리티 자가개선 루프 연구 보고서.pdf`
 대상 코드: `agents/analysis_agent.py`, `device_bridges/cae_bridge.py`, `device_bridges/utm_macro_bridge.py`, `experiments/api.py`, `experiments/schemas.py`, `experiments/job_queue.py`, `agents/bo_agent.py`, `agents/guardian_agent.py`, `graphs/configs/atr_closed_loop.yaml`, `web/static/planning.js`, `web/templates/planning.html`

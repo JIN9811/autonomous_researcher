@@ -1,6 +1,8 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
+
+> Archive reading note (2026-09-29): This is the 2026-09-07 proposed campaign/settings program, not a completed implementation or current execution authority. Its method-setting/readback and arbitrary target-strain interfaces remain proposals unless separately implemented and verified. Current owner boundaries are in the [Orchestrator reference](../../../agents/orchestrator_agent.md), [Analysis reference](../../../agents/analysis_agent.md), and [BO reference](../../../agents/bo_agent.md). Existing Setup support does not establish completion of this broader campaign plan.
 # Agent-Owned Campaign Settings and Continuous BO Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or, when delegation is authorized, superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -13,7 +15,7 @@
 
 **Spec:** [실험 슬롯·연구 캠페인·BO 연속값 통합 설계안](../specs/2026-09-07-single-compression-experiment-slot-design.md).
 
-**Status:** review / authority: execution / execution_status: planned. 작성일 2026-09-07. 아래 코드는 구현 예정 인터페이스·테스트 예시이며 아직 구현되지 않았다.
+**Historical status (2026-09-07):** review / authority: execution / execution_status: planned. 아래 코드는 당시 구현 예정 인터페이스·테스트 예시이며 작성 시점의 미구현 상태를 기록한다. 현행 코드의 전 범위 완료 여부를 이 계획으로 판단하지 않는다.
 
 ## Global Constraints
 

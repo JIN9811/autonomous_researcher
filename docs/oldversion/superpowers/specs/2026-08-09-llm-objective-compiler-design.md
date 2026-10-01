@@ -20,7 +20,7 @@ related_docs:
   - docs/agents/bo_agent.md
   - docs/agents/bo_agent_runtime_guideline.txt
   - docs/agents/analysis_utm_runtime_guideline.txt
-  - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
+  - docs/agents/knowledge_agent.md
   - docs/runtime/autonomous_experiment_runtime.md
   - docs/oldversion/superpowers/specs/2026-08-09-knowledge-relation-reconciliation-design.md
 supersedes: []
@@ -30,6 +30,8 @@ supersedes: []
 
 
 # LLM Objective Compiler Design
+
+> Archive navigation note (2026-09-29): the former `docs/agents/knowledge_agent_self_evolution_runtime_guideline.md` is retired. Its preserved copy is local-only at `oldversion/2026-09-14-retired-computation/docs/agents/knowledge_agent_self_evolution_runtime_guideline.md`, outside this public archive. The [maintained Knowledge reference](../../../agents/knowledge_agent.md) is current navigation, not a replacement for that historical source.
 
 ## 1. Purpose
 

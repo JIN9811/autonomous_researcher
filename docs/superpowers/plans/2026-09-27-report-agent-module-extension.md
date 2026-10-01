@@ -1,5 +1,11 @@
 # Report Agent and Existing Module Lifecycle Implementation Plan
 
+Status (source audit 2026-09-29): separate `feature/report-agent` worktree work,
+not merged into the reviewed main baseline `dd0d772`. RPT is not an installed
+main agent or an active production graph stage. The plan below remains the
+branch's implementation specification, not current operating documentation or
+authorization to attach the module, restart production, or operate equipment.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a paper-style RPT specialist on the existing module blueprint and complete the extension-to-package contract path without modifying the experimental loop.

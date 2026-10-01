@@ -1,5 +1,15 @@
 Printer Agentic Workflow + PrusaBridge Integration Guideline for Existing Runtime (Phase 1)
 
+HISTORICAL PHASE-1 DESIGN AND MAY-2026 EVIDENCE — NOT A CURRENT RUNBOOK.
+Static audit: dd0d772, 2026-09-29. For current operation use
+docs/device_bridges/printer_fleet_bridge.md and docs/device_bridges/prusa_mk4s_bridge.md.
+Bambu X2D is the checked-in default; Prusa is an explicitly selected provider,
+not an automatic fallback. Canonical provider code is under
+device_bridges/printer_fleet/providers/. Gate/default and UI statements below
+describe their dated implementation epochs, not today's local configuration.
+Test can select effective-live physical execution; verify per-device mode and
+physical intent instead of treating the word Test as an absence-of-effects gate.
+
 Project:
 - Autonomous Researcher Framework for Low-Cost Self-Driving Lab on DGX Spark
 

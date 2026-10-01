@@ -24,8 +24,8 @@ source_of_truth:
   - app/main.py
   - objectives/authoring.py
   - objectives/service.py
-last_verified: 2026-09-14
-verified_against: working-tree BO owner package
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -36,6 +36,10 @@ related_docs:
   - docs/oldversion/superpowers/specs/2026-09-10-bo-strategy-continuous-design.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Bayesian Optimization Agent Reference
 
@@ -91,7 +95,7 @@ receipt for either entrypoint.
 | Package | `packages/agents/bo/package.yaml`; no Device Bridge dependencies |
 | Live report | `/api/agents/bo/report` projected by `agents/bo/presentation.py` |
 | Frontend | `/module-assets/bo/live_report.js`, composed through the common Live module host |
-| Settings | Existing `/api/bo/settings` and `memory/bo_workspace_settings.json`; no second store |
+| Settings | Existing `/api/bo/config` and `memory/bo_workspace_settings.json`; no second store |
 | Numerics | Existing `learning/` and `experiments/` services; no optimizer bridge |
 
 ![BO source-backed control areas](assets/figures/bo_control_areas.svg)
@@ -237,7 +241,9 @@ accepted and does not dispatch another optimization within that decision.
 | Archived discrete visualization | Preserve original discrete semantics | Old artifacts are not rewritten |
 
 The default active domains are `cell_size_mm: [5.0, 10.0]` and
-`relative_density: [0.20, 0.48]`. These are configuration defaults, not an
+`wall_thickness_mm: [0.6, 1.2]` under `wall_cell_v1`. Relative density and
+porosity are derived geometry outputs; historical density-controlled records
+retain their original parameterization. These are configuration defaults, not an
 integer-cell-count equation. Existing manufacturing bounds and fixed geometry/
 process settings remain enforced. The generic `BOParameterSpace` still supports
 mixed/discrete problems.
@@ -414,11 +420,12 @@ LHS and acquisition remain separate read-only projections:
 the declared continuous domain and actual measured/next/planned coordinates.
 Archived discrete payloads keep discrete labels.
 
-The posterior card uses the backend-provided normalized search path, score,
-uncertainty bands and actual acquisition. It does not refit the GP in the
-browser, invent measurements or expose a one-dimensional parameter slice as
-the multidimensional search. Signed UCB values are preserved; EI-specific
-threshold annotations are shown only for EI.
+The current posterior card uses the backend-provided two-dimensional GP surface
+over cell size and wall thickness, with the stored 2D/3D views when available.
+Legacy normalized-search-path payloads remain historical projections, not the
+current physical-coordinate surface. The browser does not refit the GP or invent
+measurements. Signed UCB values are preserved; EI-specific threshold annotations
+are shown only for EI.
 
 Workspace, Live GUI and saved Matplotlib artifacts use the same projection.
 Completed-step events replace existing figures; step selection is inspection,

@@ -98,7 +98,7 @@ Regenerate the scene only through Isaac Sim Python because system Python does
 not provide `pxr`:
 
 ```bash
-/home/jin/IsaacSim/python.sh sim/robotis_omx/tools/build_table_layout_scene.py
+$HOME/IsaacSim/python.sh sim/robotis_omx/tools/build_table_layout_scene.py
 ```
 
 ## Mirror Joint Contract
@@ -199,7 +199,7 @@ The bridge passes the same calibration file into live teleoperation/recording
 with:
 
 ```text
-ATR_ISAAC_MIRROR_CALIBRATION_PATH=/home/jin/autonomous_researcher/memory/isaac_omx_mirror_calibration.json
+ATR_ISAAC_MIRROR_CALIBRATION_PATH=$HOME/autonomous_researcher/memory/isaac_omx_mirror_calibration.json
 ```
 
 Use this file only for measured real-to-sim alignment corrections. Do not use it
@@ -252,7 +252,7 @@ POST /api/lerobot/mirror/loop/stop
 - It converts the configured joint endpoint, for example `http://127.0.0.1:8766/joints`, to the same server's `/health` endpoint.
 - It returns the receiver `apply_mode`, `sample_count`, and health URL.
 - `teleoperate.start` and `record.start` run this check automatically when `mode=live` and `isaac_mirror_enabled=true`.
-- If the receiver is unavailable, the bridge returns `LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE` before starting the real LeRobot subprocess. This prevents a physical teleop/record session from running while the requested Isaac mirror evidence stream is absent.
+- If the receiver is unavailable, live teleop/record preflight returns an `ok=true`, `status=warning` result with `LEROBOT_ISAAC_MIRROR_RECEIVER_UNAVAILABLE`; the real subprocess may still start and its publisher can attach later. Missing mirror evidence is not a physical-motion interlock.
 - If the receiver is reachable but reports a mode other than `deferred_update_tick`, the session is allowed but the trace records that live Isaac GUI update-tick mode was not reported.
 
 `receiver_verify` is a stronger end-to-end check:
@@ -270,7 +270,7 @@ Use `receiver_verify` before relying on mirror evidence for a live teleop/record
 GUI:
 
 - The production default launch mode is `isaac_extension`: it starts
-  `/home/jin/IsaacSim/isaac-sim.sh` with `sim/robotis_omx/extensions` and the
+  `$HOME/IsaacSim/isaac-sim.sh` with `sim/robotis_omx/extensions` and the
   `atr.omx.mirror` extension enabled.
 - `receiver_process_start` waits for `/health` and returns the PID, endpoint,
   command preview, log path, and health payload.
@@ -278,13 +278,15 @@ GUI:
   still running and re-checks `/health` when it is.
 - `receiver_process_stop` terminates only the managed receiver process for the
   configured host/port. It does not stop teleoperation, recording, rollout, or
-  Isaac Sim itself.
+  independently launched Isaac instances. In the default `isaac_extension` mode,
+  the managed process is the Isaac launcher, so stopping it can close that
+  managed Isaac instance; this is not merely an HTTP-listener stop.
 
 The direct script launch remains available when
 `isaac_mirror_receiver_launch_mode=python_script` or
 `isaac_mirror_receiver_python` is explicitly supplied. In that path the default
 receiver Python is `ATR_ISAAC_MIRROR_RECEIVER_PYTHON`, then
-`/home/jin/IsaacSim/python.sh`, otherwise the current Python interpreter. The
+`$HOME/IsaacSim/python.sh`, otherwise the current Python interpreter. The
 direct path is for smoke tests and offline USD target authoring; live physical
 teleop/record should use the extension path so `/health.apply_mode` reports
 `deferred_update_tick`.
@@ -346,7 +348,7 @@ ATR_ISAAC_MIRROR_TIMEOUT_S=0.5
 ATR_ISAAC_MIRROR_SESSION_ID=<lerobot_session_id>
 ATR_ISAAC_MIRROR_ATTACHED_TO_SESSION_ID=<lerobot_session_id>
 ATR_ISAAC_MIRROR_PROFILE_ID=robotis_omx_ai
-ATR_ISAAC_MIRROR_CALIBRATION_PATH=/home/jin/autonomous_researcher/memory/isaac_omx_mirror_calibration.json
+ATR_ISAAC_MIRROR_CALIBRATION_PATH=$HOME/autonomous_researcher/memory/isaac_omx_mirror_calibration.json
 ATR_ISAAC_MIRROR_RECORD_PATH=<jsonl_sidecar_path>
 ```
 
@@ -457,7 +459,7 @@ Timeline handling:
 Run it inside Isaac Sim Python while the OMX scene is open:
 
 ```bash
-/home/jin/IsaacSim/python.sh sim/robotis_omx/tools/isaac_omx_mirror_server.py \
+$HOME/IsaacSim/python.sh sim/robotis_omx/tools/isaac_omx_mirror_server.py \
   --host 127.0.0.1 \
   --port 8766
 ```
@@ -488,13 +490,13 @@ If the script is run outside an Isaac/pxr-capable environment, it can still expo
 Managed GUI launch uses the extension by default:
 
 ```bash
-/home/jin/IsaacSim/isaac-sim.sh \
-  --ext-folder /home/jin/autonomous_researcher/sim/robotis_omx/extensions \
+$HOME/IsaacSim/isaac-sim.sh \
+  --ext-folder $HOME/autonomous_researcher/sim/robotis_omx/extensions \
   --enable atr.omx.mirror \
   --/exts/atr.omx.mirror/enabled=true \
   --/exts/atr.omx.mirror/host=127.0.0.1 \
   --/exts/atr.omx.mirror/port=8766 \
-  --/exts/atr.omx.mirror/scene=/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda \
+  --/exts/atr.omx.mirror/scene=$HOME/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda \
   --/exts/atr.omx.mirror/useCurrentStage=true \
   --/exts/atr.omx.mirror/openSceneOnStartup=true \
   --/exts/atr.omx.mirror/playTimelineOnStartup=false \
@@ -502,9 +504,10 @@ Managed GUI launch uses the extension by default:
 ```
 
 Direct `python.sh sim/robotis_omx/tools/isaac_omx_mirror_server.py` remains
-available for HTTP smoke tests, but live teleop/record preflight blocks a
-receiver that reports `apply_mode=direct_http_thread`. For live physical
-mirroring, `/health` must report `apply_mode=deferred_update_tick`.
+available for HTTP smoke tests. Live teleop/record preflight warns, but does not
+block, a receiver that reports `apply_mode=direct_http_thread`. For reliable
+live Isaac GUI mirroring, use `apply_mode=deferred_update_tick`; this operational
+requirement is not enforced as a physical-motion gate by the current preflight.
 
 Receiver health:
 
@@ -643,7 +646,7 @@ uv run pytest -q tests/unit/test_lerobot_bridge.py
 Regenerate the Isaac scene:
 
 ```bash
-/home/jin/IsaacSim/python.sh sim/robotis_omx/tools/build_table_layout_scene.py
+$HOME/IsaacSim/python.sh sim/robotis_omx/tools/build_table_layout_scene.py
 ```
 
 Check the receiver script syntax:

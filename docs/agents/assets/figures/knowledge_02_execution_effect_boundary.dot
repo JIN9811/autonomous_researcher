@@ -11,7 +11,7 @@ digraph knowledge_execution_effect_boundary {
   gate [label="Code-owned checks\nscope + sources + ontology + lifecycle", fillcolor="#FFF1D6", color="#916100"];
   store [label="Append-only MD revisions\nstable identity / hash / locks", fillcolor="#E9F7EF", color="#2E7D59"];
   publish [label="publish_context\nsource IDs or explicit evidence gap"];
-  handoff [label="Existing typed memory + BO/Evolution handoff"];
+  handoff [label="Existing typed memory + BO context handoff"];
   source [label="Separate source curation\npage files → page-level LLM reading\nbounded consolidation → publication"];
   source_store [label="Complete source MD + one curated MD\ncontent hash / page / block citations", fillcolor="#E9F7EF", color="#2E7D59"];
   snapshot -> inspect -> llm;
@@ -21,6 +21,7 @@ digraph knowledge_execution_effect_boundary {
   llm -> write [label="useful new knowledge"];
   write -> gate -> store;
   store -> llm [label="receipt"];
+  store -> read [style=dashed, label="same-decision write ID; scoped read"];
   llm -> publish [label="enough evidence / abstain"];
   publish -> gate [style=dashed, label="validate references"];
   publish -> handoff [label="accepted"];

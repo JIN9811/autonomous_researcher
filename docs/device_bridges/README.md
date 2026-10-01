@@ -15,8 +15,8 @@ scope:
   - runtime_sidecars
   - api_connections
 summary: How AX4LAB connects existing laboratory capabilities through device-specific execution interfaces, with bridge references and integration contracts.
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/agents/agent_api_connection_matrix.md
@@ -26,6 +26,10 @@ related_docs:
   - docs/modularity.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Device Bridges
 
@@ -38,8 +42,9 @@ and return status, observations, and artifacts.
 
 The integration layer lets the framework reuse existing capabilities without
 embedding a particular printer protocol, robot process, or desktop workflow
-inside the research plan. Computation adapters and virtual devices use related
-integration boundaries, but are distinguished from physical equipment below.
+inside the research plan. Virtual devices use related integration boundaries,
+but are distinguished from physical equipment below. Analysis consumes measured
+data and has no active computation-device bridge.
 
 ## Integration Architecture
 
@@ -87,8 +92,8 @@ responses. A successful API response alone does not establish task completion.
 
 ## Bridge Catalog
 
-The eight core references describe operational capabilities, not eight Python
-classes or eight identical entries in `/api/bridges`.
+The seven core references describe operational capabilities, not seven Python
+classes or seven identical entries in `/api/bridges`.
 
 | Reference | Capability | Owning consumer | Connection / execution |
 |---|---|---|---|
@@ -137,10 +142,11 @@ Current paths worth distinguishing:
 The current modularized fabrication slice declares a
 [Specimen Agent Package](../../packages/agents/specimen/package.yaml) referencing
 one [Printer Fleet module](../../device_bridges/printer_fleet/README.md).
-Its [Bambu](../../device_bridges/bambu/README.md) and
-[Prusa](../../device_bridges/prusa/README.md) provider folders each include Python
-requirements and external-tool notes. Bridge source stays under `device_bridges/`,
-not inside the agent package; flat imports remain compatibility adapters.
+Its canonical Bambu and Prusa providers and separate requirements live under
+`device_bridges/printer_fleet/providers/`. The [Bambu](../../device_bridges/bambu/README.md)
+and [Prusa](../../device_bridges/prusa/README.md) directories document compatibility
+aliases, not separate installed bridge packages. Bridge source stays under
+`device_bridges/`, not inside the agent package; flat imports remain adapters.
 
 `GET /api/packages` describes installed ownership without hardware probes.
 [Experimental Packages](../../packages/README.md) combine exact installed package
@@ -171,7 +177,7 @@ Extend the narrowest existing boundary that fits the new capability.
 | Another desktop-operated instrument | Equipment worker and Flow/Skill lifecycle | Exact programs, locators, runtime context and exported-data checks |
 | Another supported robot or policy | LeRobot profile and session APIs | Hardware support, calibration, camera mapping and policy/task validation |
 | Another observation source | Existing capture and evidence handoff | Capture adapter, calibration, timestamp and observation semantics |
-| Another computation backend | Analysis request and artifact/job boundaries | Preparation/solve adapter, result parser and numerical verification |
+| Another measurement format | Analysis measurement-intake boundary | Explicit parser, units, specimen identity and objective-admission validation; no solver/device execution |
 
 `BaseBridge.execute(command, payload)` is available for adapters that use that
 base contract; it is not the universal interface of every service in this catalog.

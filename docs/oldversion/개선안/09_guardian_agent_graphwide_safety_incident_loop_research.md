@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. 종단 게이트만 존재한다는 진단과 전 action-chunk shield·risk threshold·자동 retreat/approval 정책은 작성 당시 진단 또는 제안이다. 현재 deterministic gate와 advisory 판단, owner별 실행 책임은 [Guardian Agent](../../agents/guardian_agent.md) 및 [three-level control model](../../runtime/three_level_control_model.md)을 따른다. 외부 안전 자료는 설계 배경이며 이 저장소의 인증·준수·물리 E-stop 대체를 입증하지 않는다.
+
 # 09. Guardian Agent 고도화안 - 전역 안전 그래프, 런타임 실드, 사고기록 루프
 
 작성일: 2026-05-28
@@ -132,6 +135,8 @@ NASA의 runtime verification 연구는 autonomous space system에서 sensors, so
 - Control Barrier Functions via Reduced-Order Models: https://www.sciencedirect.com/science/article/pii/S1367578824000166
 
 ### 3.6 Data integrity / provenance: BO와 Knowledge는 증거가 없으면 업데이트하면 안 됨
+
+인용 접근성 메모 (2026-09-29): 아래 FDA URL은 자동 확인 요청을 abuse-detection 안내 페이지로 보냈다. 이는 접근 제한으로 기록하며 원문이 삭제되었다고 판단하지 않는다. 역사적 배경 인용이지 이 실험실에 대한 규제 적용·준수 판정은 아니다.
 
 FDA computerized system guidance는 전자 데이터가 attributable, original, accurate, contemporaneous, legible해야 한다고 설명하고, audit trail을 전자 기록의 생성/수정/삭제 과정을 재구성할 수 있는 time-stamped record로 정의한다. W3C PROV는 provenance를 표현하기 위한 표준 문서군과 conceptual model을 제공한다.
 

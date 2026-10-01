@@ -48,8 +48,8 @@ source_of_truth:
   - graphs/configs/atr_closed_loop.yaml
   - graphs/modules
   - orchestrator/langgraph_runtime.py
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-bo-owner
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/architecture.md
@@ -122,7 +122,7 @@ remain initially collapsed and can still be reopened manually. Chat-panel pinnin
 is independent of message expansion.
 
 Artifacts uses a compact folder tree and one-line file list, scoped by default to
-the selected agent and current loop. Darker folder navigation, lighter file rows
+the selected agent across all indexed loops. A loop filter narrows the view explicitly. Darker folder navigation, lighter file rows
 and a restrained cyan selection distinguish the regions without large artifact
 cards. Selecting a file reveals its preview and original/download actions;
 conversation-only results join the same explorer without a separate preview section. See
@@ -399,9 +399,9 @@ every submitted payload; client state is never the execution authority.
 All ten agents use the existing graph canvas with responsibility
 areas: **High**, **Middle**, **Low**, **Guardian / Safety**, and **Knowledge / Evidence**.
 There is no separate architecture-view switch. Design, Specimen, Vision, Manipulation,
-Equipment, Analysis and Orchestrator use `module.execution_graph` as the executable source for backend
-and canvas; the remaining modules retain
-their existing checkpoint representation. The owner catalog also supplies
+Equipment, Analysis, BO, Orchestrator, Knowledge and Guardian use `module.execution_graph` as the executable source for backend
+and canvas; legacy unmigrated definitions retain their checkpoint representation.
+The owner catalog also supplies
 `implementation_structure`: source-bound function, tool, check and evidence
 relationships around those operations. **High** means bounded LLM decisions;
 **Middle** means software processing, APIs and tool dispatch; **Low** means device
@@ -907,6 +907,11 @@ an active run or by bypassing the validator. Do not repair an unknown physical
 effect by assuming a missing event means “nothing happened.”
 
 ## Verification
+
+Documentation-only source inspection on 2026-09-29 at `dd0d772` reconciled the
+installed-owner list and Live artifact history scope. No browser, model, device,
+or historical test run was repeated by this review; the results below retain
+their original dates and scope.
 
 The executable Design/Orchestrator addition uses
 `tests/unit/test_agent_execution_graph.py` and

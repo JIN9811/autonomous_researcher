@@ -17,7 +17,7 @@ decision_status: approved
 related_docs:
   - docs/oldversion/superpowers/specs/2026-08-08-knowledge-agent-neo4j-graphify-ontology-design.md
   - docs/oldversion/knowledge/knowledge_graph_operations.ko.md
-  - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
+  - docs/agents/knowledge_agent.md
 supersedes: []
 ---
 
@@ -25,6 +25,8 @@ supersedes: []
 
 
 # Knowledge Relation Reconciliation Design
+
+> Archive navigation note (2026-09-29): the former `docs/agents/knowledge_agent_self_evolution_runtime_guideline.md` is retired. Its preserved copy is local-only at `oldversion/2026-09-14-retired-computation/docs/agents/knowledge_agent_self_evolution_runtime_guideline.md`, outside this public archive. The [maintained Knowledge reference](../../../agents/knowledge_agent.md) is current navigation, not a replacement for that historical source.
 
 ## 1. Purpose
 

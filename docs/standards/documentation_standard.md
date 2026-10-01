@@ -414,7 +414,7 @@ embedding, missing caption, or stale rendering is a documentation defect.
 
 ## Device Bridge Reference Figures
 
-The eight canonical capability-oriented References under
+The seven canonical capability-oriented References under
 `docs/device_bridges/` MUST follow one common content and figure contract. The
 canonical set is:
 
@@ -425,6 +425,9 @@ canonical set is:
 - `windows_pyautogui_bridge.md`;
 - `utm_vision_bridge.md`;
 - `base_simulator_bridges.md`.
+
+The supplementary `plc_safety_bridge.md` describes the PLC safety integration;
+it is not an eighth member of this seven-reference figure contract.
 
 The boundary is operator-visible capability rather than one Python class. The
 index MUST distinguish `graph_projected`, `tool_registered`, `api_exposed`,
@@ -466,8 +469,8 @@ Every bridge Reference MUST contain three figures:
 
 The stable figure stems are defined and enforced by
 `scripts/validate_documentation.py` and documented in the current Bridge
-References. This produces exactly 24
-`.dot` sources and 24 same-stem `.svg` renderings under
+References. This produces exactly 21
+`.dot` sources and 21 same-stem `.svg` renderings under
 `docs/device_bridges/assets/figures/`; undeclared figure assets are defects.
 
 All bridge figures MUST:
@@ -489,11 +492,11 @@ All bridge figures MUST:
 - avoid implying that a UI, model, graph descriptor, or bridge registry entry
   grants authority outside registered runtime and policy gates.
 
-`docs/device_bridges/README.md` MUST link all eight References and all 24
-renderings. The root `README.md` MUST contain exactly eight canonical rows and
+`docs/device_bridges/README.md` MUST link all seven References and all 21
+renderings. The root `README.md` MUST contain exactly seven canonical rows and
 direct links to each Reference whenever all References are governed. The bridge
 index is the canonical home for direct figure navigation; the root landing page
-need not repeat all 24 figure links. `bridge_api_connection_matrix.md` owns cross-boundary comparison;
+need not repeat all 21 figure links. `bridge_api_connection_matrix.md` owns cross-boundary comparison;
 individual References own lifecycle and recovery detail.
 
 Executable code, checked-in configuration, Tool Registry wiring, imported API
@@ -512,7 +515,7 @@ find docs/device_bridges/assets/figures -name '*.dot' -print0 \
     done
 ```
 
-Before completion, render all 24 sources into a temporary directory and compare
+Before completion, render all 21 sources into a temporary directory and compare
 them byte-for-byte with the checked-in SVGs. Changes to a bridge contract MUST
 update its Reference and figures, the matrix when a shared boundary changes,
 root/index navigation when inventory changes, and validator/tests when the

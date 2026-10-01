@@ -4,24 +4,24 @@ Scope: LeRobot recording outputs and Isaac Sim / Isaac Lab sidecars used by the 
 
 This document describes the artifact layout only. Counts, latest run status, and QA results belong in each run's `summary.json`, `manifest.jsonl`, or `meta/atr_pipeline.json`.
 
-## Current Reference Roots
+## Historical Reference Roots (July 2026)
 
-Latest active robot cam recording:
+Recorded robot-cam example from 2026-07-02 (not the latest/current session):
 
 ```text
-/home/jin/autonomous_researcher/artifacts/raw_depth_adapter_live_activecam_recheck_20260702T131526/dataset/local/raw-depth-adapter-live-activecam-recheck-20260702t131526
+$HOME/autonomous_researcher/artifacts/raw_depth_adapter_live_activecam_recheck_20260702T131526/dataset/local/raw-depth-adapter-live-activecam-recheck-20260702t131526
 ```
 
-Previous 5 x 10 s recording with Isaac Lab / Mimic sidecars:
+Earlier 5 x 10 s recording with Isaac Lab / Mimic sidecars:
 
 ```text
-/home/jin/autonomous_researcher/artifacts/raw_depth_adapter_live_5x10s/dataset
+$HOME/autonomous_researcher/artifacts/raw_depth_adapter_live_5x10s/dataset
 ```
 
-Short async augmentation smoke:
+Historical short async augmentation smoke:
 
 ```text
-/home/jin/autonomous_researcher/artifacts/async_aug_status_smoke
+$HOME/autonomous_researcher/artifacts/async_aug_status_smoke
 ```
 
 ## Dataset Root

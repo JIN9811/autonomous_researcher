@@ -1,5 +1,7 @@
 # Codex Coding Instructions — ATR LangGraph Runtime IDE
 
+> Archived development material (archive context clarified 2026-09-29). The original instructions, example values and visual targets below are historical, not current runtime requirements or measured evidence. See the [archive index](../README.md) for maintained replacements.
+
 목표: 현재 임시 LangGraph Runtime Map을 실제 실행 가능한 Graph Editor + Runtime Compiler + Live Dashboard로 고도화한다. 사용자는 화면에서 노드 순서, 엣지, 모듈 내부 graph, Python handler, prompt, tool, LLM backend를 수정할 수 있어야 하며, 수정된 그래프는 실제 LangGraph 실행 순서를 바꿔야 한다.
 
 본 지침의 기준 UI는 `atr_runtime_ide_concept_reference.png`이다. 생성된 아이콘은 `icons/`와 `icons_png/`를 사용한다.

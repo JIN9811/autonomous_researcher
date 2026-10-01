@@ -53,12 +53,13 @@ silently rewrite ATR to use `/dev/video*` fallback for D405.
 ## Optional SmolVLA Extra
 
 SmolVLA support does not require a repository patch, but the external LeRobot
-checkout must be installed with its `smolvla` extra in the `lerobot` conda
-environment:
+checkout must be installed with its `smolvla` extra in the environment actually
+selected by `smolvla_conda_env_name`. The current ATR configuration selects
+`lerobot-pi05-torch211` with the `~/lerobot_pi05` checkout:
 
 ```bash
-cd ~/lerobot
-conda run --no-capture-output -n lerobot python -m pip install -e ".[smolvla]"
-conda run --no-capture-output -n lerobot hf download lerobot/smolvla_base --max-workers 1
-conda run --no-capture-output -n lerobot hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
+cd ~/lerobot_pi05
+conda run --no-capture-output -n lerobot-pi05-torch211 python -m pip install -e ".[smolvla]"
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download lerobot/smolvla_base --max-workers 1
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
 ```

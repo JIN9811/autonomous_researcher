@@ -14,8 +14,8 @@ scope:
   - runtime_contracts
   - api_connections
 summary: Canonical entry point for ATR agent roles, contracts, APIs, connections, evidence, and safety boundaries.
-last_verified: 2026-09-14
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/paper/02_system_architecture.md
@@ -26,6 +26,10 @@ related_docs:
   - docs/modularity.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Agent Reference Index
 
@@ -307,14 +311,15 @@ agent contract:
 |---|---|---|
 | `analysis_utm_runtime_guideline.txt` | [Analysis](analysis_agent.md) | UTM analysis detail |
 | `bo_agent_runtime_guideline.txt` | [BO](bo_agent.md) | BO algorithm/runtime detail |
-| `manipulation_pi05_transfer_runtime_guideline.txt` | [Manipulation](manipulation_agent.md) | Pi0.5 transfer detail |
+| `manipulation_pi05_transfer_runtime_guideline.txt` | [Manipulation](manipulation_agent.md) | Historical July transfer snapshot; not current clearance procedure |
 | `specimen_design_existing_runtime_guideline.txt` | [Design](design_agent.md), [Specimen](specimen_agent.md) | Runtime-consumed legacy prompt input, not a reader-facing current contract; retained in place to avoid changing execution |
-| `vision_pickup_observation_runtime_guideline.txt` | [Vision](vision_agent.md) | Pickup observation detail |
+| `vision_pickup_observation_runtime_guideline.txt` | [Vision](vision_agent.md) | Historical pickup-only design; not current tool/effect authority |
 
 ## Verification Method
 
 - Agent and step inventory: `graphs/modules/*/module.yaml`
-- Executable classes: `agents/*_agent.py`
+- Executable classes: specialist `agents/<owner>/agent.py` and core
+  `agents/core/<owner>/agent.py`; retired flat agent wrappers are not current sources
 - Graph position and transitions: `graphs/configs/atr_closed_loop.yaml`
 - API paths and methods: route declarations and registration/retirement hooks
   in `app/main.py`, Analysis route modules, and Knowledge API installers;

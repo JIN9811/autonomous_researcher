@@ -1,6 +1,8 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
+
+> Archive reading note (2026-09-29): This is a chronological July 6–8 design/debug record. Earlier phase blockers, provisional passthrough rules and reset arguments were revised by later entries; they are not interchangeable current recipes. In the present wrapper, `_annotation_command` passes the recorded reset xyz/yaw and `--auto`, as does the generation path for its reset. The July 7 “Do not use” annotation-reset passage below is superseded by the July 8 findings. See [current data/output structure](../../../runtime/lerobot_isaac_data_outputs_structure.md). Historical one-demo successes and private `latest` paths are not a fresh all-episode acceptance.
 # Official Isaac Lab Mimic Integration Design
 
 ## Goal

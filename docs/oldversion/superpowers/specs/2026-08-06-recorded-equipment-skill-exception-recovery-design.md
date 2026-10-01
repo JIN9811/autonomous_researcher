@@ -1,6 +1,8 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
+
+> Archive reading note (2026-09-29): This August 6 proposal is not the current owner-decision contract. Its “exception-only LLM” rule concerns deterministic segment replay; current Equipment also makes bounded selection and terminal/recovery review decisions. The broad recovery vocabulary below is not a current allowlist or permission to retry physical effects. Follow the [Equipment reference](../../../agents/equipment_agent.md) and [Windows bridge guideline](../../../hardware/windows_pyautogui_equipment_agent_guideline.md); stage sequencing is defined by the current graph, not the abbreviated historical route.
 # Recorded Equipment Skill And Exception Recovery Design
 
 ## Status

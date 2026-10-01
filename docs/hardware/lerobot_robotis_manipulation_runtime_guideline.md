@@ -1,8 +1,15 @@
 # LeRobot / ROBOTIS Manipulation Runtime Guideline
 
-Status: implementation guideline for Autonomous Researcher
+Status: historical implementation guideline for Autonomous Researcher
 Last reviewed: 2026-06-17
 Scope: ROBOTIS OMX-AI + Hugging Face LeRobot integration for GUI, MCP tools, Manipulation Agent, test mode, live mode, replay, and fault injection.
+
+Current-contract notice (static audit at `dd0d772`, 2026-09-29): the proposed
+implementation and dated updates below are not a current commissioning claim.
+Use the [LeRobot Reference](../device_bridges/lerobot_bridge.md) and
+[Manipulation Reference](../agents/manipulation_agent.md) for installed package
+ownership, effective device modes, replay/clearance and current telemetry UI.
+In particular, an effective-live profile can move hardware in a Test run.
 
 ## 1. Purpose
 

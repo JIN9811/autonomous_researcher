@@ -20,8 +20,8 @@ source_of_truth:
   - policies/guardian_gate.py
   - app/controller.py
   - app/main.py
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-core-agent-roots
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -31,6 +31,10 @@ related_docs:
   - docs/modularity.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Guardian Agent Reference
 

@@ -14,14 +14,18 @@ source_of_truth:
   - device_bridges/windows_pyautogui/module.py
   - device_bridges/windows_pyautogui/README.md
   - packages/agents/equipment/package.yaml
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/equipment_agent.md
   - docs/hardware/windows_pyautogui_bridge_windows_setup.md
   - Pyautogui_server_for_window/README.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Windows PyAutoGUI Bridge Reference
 

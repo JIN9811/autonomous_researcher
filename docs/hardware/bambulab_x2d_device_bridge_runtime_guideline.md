@@ -2,7 +2,15 @@
 
 작성 기준: 2026-06-16
 대상: `3D Printer Bridge`, `PrinterDeviceBridgeManager`, `SpecimenMakingAgent`, `BambuLab` active printer provider
-문서 성격: 운영자/협업자용 시스템 설명 문서. 구현 지시 원본은 `docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md`를 따른다.
+문서 성격: 2026-06-16 구현 및 검증 시점의 역사적 설명. 보관된 개선안은 현재 운영 권위가 아니다.
+
+> 2026-09-29 정적 감사(`dd0d772`): 현재 운영은 [Bambu X2D Reference](../device_bridges/bambu_x2d_bridge.md),
+> [Printer Fleet](../device_bridges/printer_fleet_bridge.md), [pre-eject cleanup](../device_bridges/x2d_pre_eject_cleanup.md)을 따른다.
+> 아래의 "현재", GUI 버튼, preset 미주입 및 installed-printer 절차는 6월 시점의 기록이다.
+> 현재 slicer는 resolved preset을 사용하고 XYZ speed scale을 적용한다. `installed_printer`는
+> 일반 출력이 아닌 ejection-only 변환 경로이며, standalone live ejection GUI controls는 제거됐다.
+> 정상 print cycle의 배출은 현재 AMS unload/노즐 냉각/bed-cooldown 계약을 따른다.
+> 이 역사적 절차를 그대로 실행하거나 현재 무인운전 검증으로 해석하지 않는다.
 
 ---
 
@@ -439,7 +447,7 @@ Completion audit은 `published=true` 또는 MQTT publish ack만으로 완료를 
 - Bambu Lab printer network ports: https://wiki.bambulab.com/en/general/printer-network-ports
 - Bambu Lab third-party integration / Developer Mode: https://wiki.bambulab.com/en/software/third-party-integration
 - OpenBambuAPI MQTT notes: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
-- BambuBoard LAN liveview / RTSPS setup notes: https://github.com/t0nyz0/BambuBoard/blob/main/VIDEO_STREAMING_SETUP.md
+- BambuBoard LAN liveview / RTSPS setup notes (2026-09-29 링크 감사: main 경로 삭제, 보존된 commit 기준): https://github.com/t0nyz0/BambuBoard/blob/0784168fc451d7206300bb1a1cf3cbef21dfae2d/VIDEO_STREAMING_SETUP.md
 - ha-bambulab upload/start discussion: https://github.com/greghesp/ha-bambulab/discussions/307
 - OrcaSlicer auto-ejection proposal: https://github.com/OrcaSlicer/OrcaSlicer/discussions/7693
 - Looprint multi-loop G-code/3MF builder: https://github.com/NickiAndersen/looprint

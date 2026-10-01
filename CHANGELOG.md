@@ -30,7 +30,9 @@ changes. Detailed implementation history remains in Git.
 
 ### Added
 
-- Latest one-cycle integration demonstration (`E-LIVE-LOOP-002`) for
+- [Retained 15-observation campaign audit](docs/paper/evidence/2026-09-28-campaign-archive-audit.md), distinguishing accepted measurements from failed attempts, recoveries, and unsupported claims of unattended operation.
+- Screenshot-based GUI reference and bilingual tutorials for the existing application, with capture conditions and publication manifests.
+- Earlier one-cycle integration demonstration (`E-LIVE-LOOP-002`) for
   `run-20260907T043145Z-f6152b`: measured compression CSV, placement/clearance
   verification, Analysis-to-BO feedback, and next-design entry. Includes a
   public artifact hash index, explicit mixed-mode limitations, and synchronized
@@ -56,9 +58,9 @@ changes. Detailed implementation history remains in Git.
   connections, safety gates, evidence, recovery, and operator surfaces.
 - Cross-agent API and connection matrix for responsibility, contract, service,
   external-effect, safety, and recovery comparisons.
-- Twenty-six agent architecture figures with editable Graphviz sources and
+- Twenty-nine agent architecture figures with editable Graphviz sources and
   checked-in SVG renderings: closed-loop and execution/effect views for all ten
-  agents plus connection views for six bridge- or persistence-heavy agents.
+  agents plus nine connection views (including the supplementary BO view).
 - Root README and agent-index navigation tables linking every canonical agent
   Reference and figure directly.
 - Automated documentation checks for required agent figure sources,
@@ -79,9 +81,11 @@ changes. Detailed implementation history remains in Git.
   in the paper package.
 - Focused documentation tests support only the documentation contracts they
   execute.
-- End-to-end scientific performance, comparative results, generalized safety
-  effectiveness, and supervised live-hardware campaigns remain
-  `not_evaluated`.
+- Supervised hardware operation and retained multi-cycle measurement artifacts
+  have dated evidence; see the campaign audit above. Controlled comparative
+  scientific benefit, generalized safety effectiveness and reliability across
+  independent campaigns remain unevaluated. Historical test results are not
+  evidence that every current deployment is ready for hardware operation.
 
 ## Release History
 

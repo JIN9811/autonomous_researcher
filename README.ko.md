@@ -76,7 +76,7 @@ supersedes: []
 | **[Device Bridges](docs/device_bridges/README.md)** | 로봇, 실험 장비, 해석 도구의 연동 규약. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | 실행 계획 편집, 실행 제어, 런 상태 확인. |
 | **[결과와 근거](docs/paper/06_evaluation_and_results.md)** | 실증 결과와 이를 뒷받침하는 아티팩트. |
-| **[설치와 운영](README.md)** | 설치, 설정, 운영 절차. |
+| **[설치와 운영](install/README.md)** | 설치, 설정, 운영 절차. |
 | **[전체 문서](docs/README.md)** | 상세 문서, 가이드, 문서 작성 규칙. |
 
 </div>
@@ -213,7 +213,7 @@ BO 입력·다음 추천 기록을 대조했습니다. 산출물 해시와 SEA �
 | Vision | 관측을 수행하고 시각적 근거를 검토 | [Vision](docs/agents/vision_agent.md) |
 | Manipulation | 로봇 스킬을 선택하고 이송 완료를 검토 | [Manipulation](docs/agents/manipulation_agent.md) |
 | Lab Equipment | 저장된 워크플로우를 실행하고 데이터 획득 결과를 검토 | [Lab Equipment](docs/agents/equipment_agent.md) |
-| Analysis | 측정 데이터를 처리하고 해석 모델을 고도화 | [Analysis](docs/agents/analysis_agent.md) |
+| Analysis | 측정 데이터를 파싱하고 물성·SEA 및 BO에 전달할 근거를 산출 | [Analysis](docs/agents/analysis_agent.md) |
 | Knowledge | Markdown 지식을 정리하고 범위에 맞는 맥락을 검색 | [Knowledge](docs/agents/knowledge_agent.md) |
 | Bayesian Optimization | 최적화 전략을 선택하고 수치 도구의 제안을 검토 | [BO](docs/agents/bo_agent.md) |
 | Guardian | 실행 근거를 검토하고 계속 진행할지 판단하는 데 의견을 제공 | [Guardian](docs/agents/guardian_agent.md) |
@@ -249,7 +249,7 @@ Runtime IDE와 Replay를 설명한
 | 독자 | 시작할 문서 |
 |---|---|
 | 연구자·리뷰어 | [문제 정의와 기여](docs/paper/01_problem_and_contributions.md) → [결과](docs/paper/06_evaluation_and_results.md) |
-| 운영자 | [설치와 운영](README.md) → [Device Bridges](docs/device_bridges/README.md) |
+| 운영자 | [설치](install/README.md) → [첫 실행 튜토리얼](docs/tutorials/first_autonomous_run.ko.md) → [Device Bridges](docs/device_bridges/README.md) |
 | 개발자 | [런타임 상세 문서](docs/runtime/current_code_snapshot.md) → [에이전트 API](docs/agents/agent_api_connection_matrix.md) |
 | 기여자 | [기여 가이드](CONTRIBUTING.md) → [문서 작성 규칙](docs/standards/documentation_standard.md) |
 

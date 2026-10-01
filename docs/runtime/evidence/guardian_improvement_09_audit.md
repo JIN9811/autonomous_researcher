@@ -1,6 +1,13 @@
 # Guardian Improvement 09 Implementation Audit
 
 Date: 2026-05-31
+
+This is a historical audit of that date, not a current regression report. Its
+20-cycle fixture, legacy owner paths and Self-Evolution API checks are preserved
+as recorded evidence; the Self-Evolution service was subsequently retired.
+Use [Guardian Graph-wide Safety](../guardian_graphwide_safety.md) and
+[Test Mode](../test_mode.md) for current contracts. No tests or hardware actions
+were rerun by the documentation-only 2026-09-29 review.
 Scope: `docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md`
 
 This audit records the current implementation evidence for the graph-wide Guardian safety, runtime shield, and incident loop upgrade. It is intentionally requirement-based so future work can verify whether a change preserves the intended safety architecture.

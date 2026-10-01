@@ -10,7 +10,7 @@ execution_status: in_progress
 governing_design: docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
 related_docs:
   - docs/agents/analysis_agent.md
-  - docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md
+  - docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
 supersedes: []
 ---
 
@@ -18,6 +18,8 @@ supersedes: []
 
 
 # Feature-informed FEM calibration implementation plan
+
+> Archive provenance (2026-09-29): the former evidence reference `docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md` is now local-only at `oldversion/2026-09-14-retired-computation/docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md`. It is not distributed in this public archive. The original study status and numerical claims below are preserved, not revalidated by this documentation review.
 
 > **For agentic workers:** Use test-driven implementation and scoped review. This tightly coupled numerical workflow is executed inline in the existing user workspace.
 

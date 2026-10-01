@@ -47,8 +47,9 @@ supersedes: []
 
 ## Summary
 
-ATR can place the primary application, models, graph storage, remote GUI
-workers, and laboratory devices on different hosts. A supported interface is
+ATR can coordinate the primary application with remote model services, GUI
+workers and laboratory devices. Active Knowledge/source stores remain on the
+primary host; an active graph database is not required. A supported interface is
 not the same as a validated deployment; each result must name the topology it
 actually used.
 
@@ -136,9 +137,12 @@ tests, failure injection, and security review.
 
 ## Limitations and Known Gaps
 
-The initial paper package has no canonical container image, infrastructure-as-
-code deployment, compatibility certification, physical equipment bill of
-materials, or paper-scoped live topology record.
+The repository has deployment manifests, including the managed
+[vLLM deployment](../../deploy/nemoclaw-vllm.yaml), but not a paper-certified
+portable deployment for every supported topology. The bounded September 7 live
+records identify their mixed-mode scope; they do not supply a complete physical
+equipment bill of materials, cross-topology compatibility certification, or
+independently reproducible public raw dataset.
 
 ## Verification
 

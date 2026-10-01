@@ -3,6 +3,14 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
 # LeRobot Augmentation and Visualization Improvement Plan
 
+Audit note (2026-09-29, static review of `dd0d772`): this is a historical
+implementation/design record with multiple evolving schema and work-package
+drafts. Checked boxes and the dated 2026-06/07 smoke results do not certify all
+later acceptance gates or a fresh simulator/physical run. Current operator
+boundaries are in the [LeRobot bridge reference](../../../device_bridges/lerobot_bridge.md)
+and [Isaac mirror guide](../../../hardware/isaac_sim_robotis_omx_mirror_mode.md).
+Original instructions below are retained context, not authorization to run them.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Improve the LeRobot + Isaac Sim post-recording pipeline so augmentation quality, synthetic RGB-D coverage, raw depth health, and training readiness can be verified before training, then migrate high-volume synthetic data generation into an Isaac Lab synthetic intelligence branch.
@@ -4055,9 +4063,10 @@ This order is intentional: first make bad observation data visible and rejectabl
 - Isaac Sim Digital Twin live camera streaming over RTSP: https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/rtsp_camera_streaming.html
 - Isaac Sim Digital Twin mapping: https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/ext_isaacsim_asset_generator_occupancy_map.html
 - Isaac Sim Digital Twin troubleshooting: https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/troubleshooting.html
-- Isaac Sim Replicator overview: https://docs.isaacsim.omniverse.nvidia.com/5.0.0/replicator_tutorials/index.html
+- Isaac Sim Replicator overview (historical 5.0.0 URL; HTTP 404 in the 2026-09-29 link audit): https://docs.isaacsim.omniverse.nvidia.com/5.0.0/replicator_tutorials/index.html
 - Isaac Sim scene-based SDG and randomization: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/replicator_tutorials/tutorial_replicator_scene_based_sdg.html
-- Isaac Sim data augmentation for RGB/depth annotators and writers: https://docs.isaacsim.omniverse.nvidia.com/4.2.0/replicator_tutorials/tutorial_replicator_augmentation.html
+- Isaac Sim data augmentation for RGB/depth annotators and writers (historical 4.2.0 URL; HTTP 404 in the 2026-09-29 link audit): https://docs.isaacsim.omniverse.nvidia.com/4.2.0/replicator_tutorials/tutorial_replicator_augmentation.html
+- Current Replicator navigation, not a replacement for those version-specific sources: https://docs.isaacsim.omniverse.nvidia.com/latest/replicator_tutorials/index.html
 - Isaac Sim teleoperation SDG: https://docs.isaacsim.omniverse.nvidia.com/latest/synthetic_data_generation/tutorial_replicator_teleop_sdg.html
 - Isaac Sim camera and depth sensors: https://docs.isaacsim.omniverse.nvidia.com/5.1.0/assets/usd_assets_camera_depth_sensors.html
 - Isaac Sim structured light cameras: https://docs.isaacsim.omniverse.nvidia.com/latest/sensors/isaacsim_sensors_camera_structured_light.html

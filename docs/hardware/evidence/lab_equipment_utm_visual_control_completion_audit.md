@@ -4,6 +4,13 @@ Date: 2026-05-30
 Source requirement: `docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md`
 Status: implementation and simulator/browser evidence strengthened; physical live UTM run evidence is still required before calling the goal fully complete.
 
+Historical scope: the status and "current" statements below describe the
+2026-05-30 audit only. They are not a claim that the project still has no
+physical evidence. Later [supervised-cycle evidence](../../paper/evidence/2026-09-07-supervised-closed-loop.md)
+and the [Equipment Reference](../../agents/equipment_agent.md) retain their own
+bounded verification scope. Commands, source paths and missing-proof findings
+below are preserved as provenance, not a current operator runbook.
+
 ## Completion Rule
 
 Improvement 05 defines Lab Equipment success as all of the following, not macro success alone:

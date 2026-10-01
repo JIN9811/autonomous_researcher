@@ -23,8 +23,8 @@ source_of_truth:
   - graphs/modules
   - mcp_tools/tool_registry.py
   - device_bridges
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13-control-area-correction
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - README.md
   - docs/agents/README.md
@@ -134,7 +134,7 @@ tool or external service is used.
 | Middle-Level Control | How is the accepted task processed and dispatched? | Existing runtime/controller, agent functions, ToolRegistry, software services | internal procedure, APIs, numerical work, deterministic validation, result and handoff | bypass graph routing, claim unobserved effects or bypass bridge interlocks |
 | Low-Level Control | How does the selected device execute and report an action? | Device bridge and driver | protocol command, port/device state, hard interlocks, telemetry, effect evidence | choose the research objective, silently change the active agent or convert unknown effects into success |
 | Guardian safety plane | May work continue safely and with sufficient evidence? | Guardian agent, policy gates, approval service, bridge hard interlocks | allow/block/review/stop decisions and incidents | replace hardware interlocks or execute normal device work directly |
-| Knowledge/evidence plane | What proves what was requested, executed, observed, and accepted? | event log, artifacts, typed reports, Knowledge service, ledger/outbox/graph receipts | provenance, immutable records, context for later cycles | rewrite prior evidence or treat a proposal as an executed result |
+| Knowledge/evidence plane | What proves what was requested, executed, observed, and accepted? | event log, artifacts, typed reports, Wiki/scoped memory and Knowledge delivery receipts; graph projection evidence where applicable | provenance, immutable records, context for later cycles | rewrite prior evidence or treat a proposal as an executed result |
 
 ## State and Failure Propagation
 
@@ -202,7 +202,7 @@ future typed contract needs to expose the level explicitly.
 - `orchestrator/langgraph_runtime.py`
 - `app/controller.py`
 - `orchestrator/state.py`
-- `agents/*_agent.py`
+- `agents/<owner>/` and `agents/core/<owner>/` (canonical owners; flat files may be compatibility aliases)
 - `graphs/modules/*/module.yaml`
 - `mcp_tools/tool_registry.py`
 - `device_bridges/*`

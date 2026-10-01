@@ -7,7 +7,7 @@
 
 This plan adapts the newly added draft package:
 
-- `docs/ATR_Live_GUI_Graph_Package/`
+- Original `docs/ATR_Live_GUI_Graph_Package/`, now preserved in the [archived Live GUI package](../../ATR_Live_GUI_Graph_Package/docs/PACKAGING_README.md).
 - `docs/oldversion/system/ATR_Live_GUI_and_LangGraph_Codex_Instructions.txt`
 
 The package is directionally aligned with ATR, but it describes a partially different API surface. The current repository already has:

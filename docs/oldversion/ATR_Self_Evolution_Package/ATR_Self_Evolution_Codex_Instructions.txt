@@ -1,5 +1,7 @@
 # ATR Self-Evolution Engine — Codex Implementation Instructions
 
+> Archived development material (archive context clarified 2026-09-29). The original instructions, example values and visual targets below are historical, not current runtime requirements or measured evidence. See the [archive index](../README.md) for maintained replacements.
+
 ## 0. Goal
 Implement an ATR-native self-evolution layer inspired by NousResearch/hermes-agent-self-evolution, but adapted to this repository's Autonomous Researcher / ATR runtime.
 

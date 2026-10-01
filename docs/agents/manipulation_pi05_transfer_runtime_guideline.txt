@@ -1,8 +1,15 @@
 # Manipulation Pi0.5 Runtime Guideline
 
-Status: implemented runtime guideline
+Status: historical runtime snapshot, superseded for current operation
 Last reviewed: 2026-07-14
 Scope: Manipulation Agent supervision for bounded LeRobot/Pi0.5 skills between 3DP, UTM, and disposal stages.
+
+Current-contract notice (static audit at dd0d772, 2026-09-29): use
+docs/agents/manipulation_agent.md and docs/device_bridges/lerobot_bridge.md.
+The current post-test route is managed UTM-clear replay, fresh Vision clearance,
+then Analysis; home restoration alone is not clearance or a Knowledge handoff.
+The dated implementation narrative below is retained as history, not a live
+procedure or proof of commissioning. Test can use effective-live device profiles.
 
 ## 1. Role Boundary
 

@@ -1,5 +1,10 @@
 # 사전 조사 요약: ROBOTIS OMX-AI + Hugging Face LeRobot + Autonomous Researcher GUI
 
+이 문서는 도입 전 조사 기록이며 아래의 "현재"는 조사 당시 기준이다.
+현재 설치된 package/API 및 동작 권한은 [LeRobot Reference](../../device_bridges/lerobot_bridge.md),
+agent handoff와 post-test clearance는 [Manipulation Reference](../../agents/manipulation_agent.md)를 따른다.
+외부 프로젝트의 기능 설명은 ATR에서 모든 기능이 검증됐다는 증거가 아니다.
+
 ## 1. 현재 프로젝트 기준선
 
 현재 제공된 프로젝트 문서 기준으로 런타임은 `FastAPI Controller -> LangGraphRunLoop -> Stage Agent -> MCP Tool -> State Update -> Event Stream -> Web GUI` 구조를 유지해야 한다. 단계 순서는 active `graphs/configs/*.yaml` 전이에 의해 결정되며, 기본 closed-loop는 `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`이다. 기본 guardian=continue는 다시 design으로, stop/error는 complete/error로 라우팅된다.

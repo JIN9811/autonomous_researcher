@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-27 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. Design의 proxy/LLM note 중심 진단과 Sobol/DOE 제안은 작성 당시 내용이다. 현재 bounded 후보 검토와 수치 제약의 소유권은 [Design Agent](../../agents/design_agent.md), 실행 단계는 [LangGraph runtime](../../runtime/langgraph_runtime.md)을 따른다. 아래 예시 점수·가설·단계별 계획은 현행 실행 또는 성능 검증 결과가 아니다.
+
 # Design Agent Agentic Loop 조사 노트
 
 조사 일자: 2026-05-27

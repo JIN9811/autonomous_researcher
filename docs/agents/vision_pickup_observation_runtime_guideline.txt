@@ -1,8 +1,15 @@
 # Vision Pickup Observation Runtime Guideline
 
-Status: implementation guideline
+Status: historical implementation guideline, superseded for current operation
 Last reviewed: 2026-05-24
 Scope: Vision Agent observation contract between Specimen Making and Manipulation.
+
+Current-contract notice (static audit at dd0d772, 2026-09-29): use
+docs/agents/vision_agent.md. The current graph also includes BO and post-test
+clearance verification. Vision can request bounded ActiveCam motion/return and
+rollout stop through the shared LeRobot bridge; observation-only wording below
+does not apply to those tools. Test does not universally mean no physical effect.
+The following early pickup-only design remains historical background.
 
 ## 1. Purpose
 

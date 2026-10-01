@@ -3,6 +3,12 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # 13. Bambu Lab X2D 전환용 SPC Agent-Device Bridge 개선안
 
+2026-09-29 완독 감사: `not_configured`, provider-handoff-only, FTPS 차단 등의
+아래 상태는 2026-06-14 전환 과정의 기록이며 현재 장비 상태를 재검증한 값이
+아니다. 이후 native G-code autoejection과 provider 경계는
+[현재 Bambu bridge reference](../../device_bridges/bambu_x2d_bridge.md)를
+따른다. 과거 physical/read-only/API evidence의 범위는 확장하지 않았다.
+
 작성일: 2026-06-14
 대상: `SpecimenMakingAgent`, `printer.prepare`, 3DP Device Workspace, Live GUI SPC report
 범위: Bambu Lab X2D 전환 설계, 구현 반영 상태, live 검증 기록.

@@ -1,5 +1,7 @@
 # Codex Instructions: ATR Live GUI + Agentic Binder + LangGraph Runtime Integration
 
+> Archived development prompt (archive context clarified 2026-09-29). Instructions, APIs, visual targets and example values below are historical, not current requirements or evidence. Do not execute this preserved prompt as an active task. See the [archive index](../README.md) and [system prompt index](README.md).
+
 Project goal
 Implement a production-grade ATR Runtime IDE for an Autonomous Researcher / Self-Driving Lab system. The interface must combine:
 1. A compact Agentic Binder on the left.

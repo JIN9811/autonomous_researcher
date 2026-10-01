@@ -107,7 +107,7 @@ ATR이 배포한 프로그램은 읽기 전용 캐시이며 Windows에서 직접
 - 디스크 경고 임계값에서는 녹화를 유지하며 상태를 표시하고, 임계 임계값이나 쓰기 실패에서는 이미 기록한 증거를 보존한 불완전 패키지로 안전 종료합니다.
 - 오버레이 Stop과 Console의 Checkpoint, Preview, Export, Delete를 지원합니다. Preview는 저장된 프레임을 페이지 단위로 이전/다음 확인하며 Windows 절대경로를 브라우저에 노출하지 않습니다.
 
-Windows는 녹화 원본만 만듭니다. Linux ATR은 16개 프레임을 4x4 시간 스토리보드로 구성하고, 선택된 multimodal 모델로 모든 청크를 순서대로 분석한 뒤 전체 흐름을 합성합니다. LLM 어노테이션, Skill 컴파일·검증·버전·배포는 Linux ATR이 수행하며 정상 Skill 실행에는 LLM을 다시 호출하지 않습니다.
+Windows는 녹화 원본만 만듭니다. Linux ATR은 16개 프레임을 4x4 시간 스토리보드로 구성하고, 선택된 multimodal 모델로 모든 청크를 순서대로 분석한 뒤 전체 흐름을 합성합니다. LLM 어노테이션, Skill 컴파일·검증·버전·배포는 Linux ATR이 수행하며 컴파일된 Skill의 개별 재생 동작에는 LLM을 다시 호출하지 않습니다. 다만 Linux의 정상 Equipment Flow에는 실행 전 선택과 terminal evidence review를 위한 LLM 판단이 포함될 수 있으므로 전체 실험 경로가 LLM-free라는 의미는 아닙니다.
 
 ### Latest Local Result
 

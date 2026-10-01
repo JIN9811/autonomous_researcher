@@ -38,9 +38,9 @@ Concrete abnormality found during the same window:
 - systemd repeatedly failed the unit with `status=203/EXEC` and restarted it
   every few seconds; restart counter reached approximately `49k` before the
   crash window.
-- ATR does not require this broken systemd unit for LeRobot training. Stop and
-  disable the service before long training unless deliberately testing local
-  Ollama systemd serving.
+- This was a fault in the recorded service configuration, not evidence that every
+  current Ollama installation is broken. LeRobot training does not itself require
+  that unit; a shared inference deployment may still have other consumers.
 
 ## Pre-Training Checklist
 
@@ -54,7 +54,8 @@ df -h / /home/jin
 nvidia-smi
 ```
 
-If `ollama.service` is in a restart loop, stop it:
+Only if current inspection confirms the same restart loop, and the operator has
+authorized interrupting that service and its consumers, the historical recovery was:
 
 ```bash
 sudo systemctl stop ollama.service || true

@@ -23,8 +23,8 @@ source_of_truth:
   - utils/utm_clear_cycle.py
   - utils/utm_specimen_presence.py
   - device_bridges/camera_vision/tools.py
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -34,6 +34,10 @@ related_docs:
   - docs/agents/vision_pickup_observation_runtime_guideline.txt
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Vision Agent Reference
 

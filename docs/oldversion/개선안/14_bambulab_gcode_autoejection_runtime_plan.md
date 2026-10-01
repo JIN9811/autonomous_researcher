@@ -3,6 +3,11 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # BambuLab G-code Autoejection Runtime Plan
 
+2026-09-29 완독 감사: 아래 구현 계획과 2026-06-16 standalone 장비 검증은
+역사적 기록이다. 현재 cooling/ejection/bed-clear 계약은
+[Bambu bridge reference](../../device_bridges/bambu_x2d_bridge.md)를 따른다.
+이 문서의 감사는 새 physical test 또는 unattended-operation 승인이 아니다.
+
 작성 기준: 2026-06-14
 보강 기준: 2026-06-16, Reddit/GitHub/YouTube/Community 사례 조사 반영
 대상: `SpecimenMakingAgent`, `printer.prepare`, 3DP Device Workspace, Bambu device bridge
@@ -206,7 +211,7 @@ Reddit, GitHub, YouTube, Bambu community, 3DQue, Factorian Designs, Looprint를 
 - Bambu third-party integration: https://wiki.bambulab.com/en/software/third-party-integration
 - OpenBambuAPI MQTT notes: https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md
 - OpenBambuAPI AMS mapping issue: https://github.com/Doridian/OpenBambuAPI/issues/10
-- darkorb FTP and print script: https://github.com/darkorb/bambu-ftp-and-print
+- darkorb FTP and print script (historical source; 2026-09-29 link audit returned HTTP 404, no verified replacement): https://github.com/darkorb/bambu-ftp-and-print
 - Bambu MQTT proxy: https://github.com/disconn3ct/bambu-proxy
 - X2D MQTT report issue: https://github.com/DrozmotiX/ioBroker.bambulab/issues/258
 - ha-bambulab upload/start discussion: https://github.com/greghesp/ha-bambulab/discussions/307
@@ -901,7 +906,7 @@ Bambu/BambuStudio/통신:
 - Bambuddy slow MQTT ack issue: https://github.com/maziggy/bambuddy/issues/1150
 - Bambuddy server-side slicing sidecar: https://wiki.bambuddy.cool/features/slicer-api/
 - Bambu third-party integration / Developer Mode: https://wiki.bambulab.com/en/software/third-party-integration
-- BambuBoard LAN liveview / RTSPS setup notes: https://github.com/t0nyz0/BambuBoard/blob/main/VIDEO_STREAMING_SETUP.md
+- BambuBoard LAN liveview / RTSPS setup notes (2026-09-29: removed from main; retained historical commit): https://github.com/t0nyz0/BambuBoard/blob/0784168fc451d7206300bb1a1cf3cbef21dfae2d/VIDEO_STREAMING_SETUP.md
 
 Autoejection / loop 사례:
 

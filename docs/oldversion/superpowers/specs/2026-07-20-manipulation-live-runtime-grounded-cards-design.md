@@ -1,6 +1,8 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
+
+> Archive reading note (2026-09-29): This July 20 UI/data-contract design preserves its proposed tests and thresholds as history; listed browser/replay acceptance criteria are not newly executed evidence. Current behavior is described by [Manipulation Agent](../../../agents/manipulation_agent.md) and [robot runtime guideline](../../../hardware/lerobot_robotis_manipulation_runtime_guideline.md), backed by `utils/manipulation_runtime_view.py`. Motion-cycle/grasp rates must not be equated with verified specimen placement or rollout handoff.
 # Manipulation Live Runtime Grounded Cards Design
 
 ## 1. 목적

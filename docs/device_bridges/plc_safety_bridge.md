@@ -21,14 +21,18 @@ source_of_truth:
   - app/main.py
   - web/templates/plc.html
   - web/static/plc.js
-last_verified: 2026-09-15
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/oldversion/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
   - docs/oldversion/superpowers/plans/2026-08-24-plc-safety-bridge.md
   - docs/device_bridges/README.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # PLC Safety Bridge Operator Guide
 
@@ -63,7 +67,8 @@ Experiment-start intent is checked against the PLC service latch before entering
 the setup/start dialogue; ordinary system questions remain available. The final
 handoff retains its existing PLC check. Error-run checkpoint restoration and
 Resume also check the PLC service and never clear its latch. Fast stop requests
-both LeRobot replay and rollout stop paths before cancelling runtime tasks.
+LeRobot replay stop, schedules runtime-task cancellation, then requests rollout
+stop; it reports both stop results and does not prove either physical stop.
 These are software-tested boundaries, not a claim of physical safety validation.
 
 ## Register Contract And Ownership

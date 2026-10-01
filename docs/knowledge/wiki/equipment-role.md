@@ -1,5 +1,5 @@
 ---
-{"topic_id":"equipment-role","owner":"equipment_agent","source_refs":["docs/agents/equipment_agent.md"],"source_revision":{"docs/agents/equipment_agent.md":"833fc4d6c8181a3dc719f33b1c7d948c3f424798c4425f0fb36cd683e3852531"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: equipment-role","status":"reviewed"}
+{"topic_id":"equipment-role","owner":"equipment_agent","source_refs":["docs/agents/equipment_agent.md"],"source_revision":{"docs/agents/equipment_agent.md":"44e2fa04db045e5b54a7580fca7674f3862409eb5103fc4d281bcd95975511ca"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: equipment-role","status":"reviewed"}
 ---
 
 # Lab Equipment Agent — Testing and Measurement Handoff

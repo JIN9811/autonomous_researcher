@@ -26,8 +26,8 @@ source_of_truth:
   - configs/devices.yaml
   - configs/lerobot.yaml
   - graphs/configs/atr_closed_loop.yaml
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -35,11 +35,15 @@ related_docs:
 supersedes: []
 -->
 
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
+
 # Device Bridge API and Connection Matrix
 
 ## Summary
 
-This Reference compares AX4LAB's eight core device-integration capabilities,
+This Reference compares AX4LAB's seven core device-integration capabilities,
 with the Controller-owned PLC service listed separately. It groups routes by
 function rather than replacing `/openapi.json`; individual references own
 payload and lifecycle detail with their own verification dates.
@@ -47,7 +51,7 @@ payload and lifecycle detail with their own verification dates.
 ## Scope
 
 The matrix covers manager/provider routing, registered tools, runtime
-sidecars, external computation, and deterministic substitutes at baseline
+sidecars and deterministic substitutes at baseline
 `cf8cb9f` (2026-09-11). `physical_possible` means an allowed path can reach motion; it
 does not say that the checked-in default performs that motion.
 

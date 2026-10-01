@@ -19,8 +19,8 @@ source_of_truth:
   - packages/agents/manipulation/package.yaml
   - app/main.py
   - utils/utm_clear_cycle.py
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -30,6 +30,10 @@ related_docs:
   - docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Manipulation Agent Reference
 
@@ -337,7 +341,7 @@ removal, relax PLC/stop controls, or replace fresh Vision and task-result review
 record is missing. `utm_clear_execution` carries the child lifecycle;
 `initial_manipulation_execution` preserves the earlier transfer evidence.
 The scoped `utm_verifications` map keeps two independent records and images
-in the existing loop archive. See [Vision](vision_agent.md#post-test-compressed-specimen-verification)
+in the existing loop archive. See [Vision](vision_agent.md#post-test-clearance-baseline)
 and the [managed replay API](../device_bridges/lerobot_bridge.md#managed-utm-clear-replay).
 
 ![Manipulation internal execution and effect boundary](assets/figures/manipulation_02_execution_effect_boundary.svg)
@@ -480,7 +484,9 @@ server and reload the page when no device operation is running.
 
 ## Modes and Fallbacks
 
-Test uses fake/virtual policy paths and cannot establish motion. Offline event replay uses
+An explicitly virtual Test profile uses fake/virtual policy paths and cannot
+establish physical motion. Test profiles with effective live robot execution
+retain physical capability and the same live preflight gates. Offline event replay uses
 recorded events; managed robot replay is physical when its effective runtime mode is Live.
 Isaac is simulation/mirror evidence. Browser invokes APIs but
 does not change evidence class. Live requires a visible robot/camera profile,

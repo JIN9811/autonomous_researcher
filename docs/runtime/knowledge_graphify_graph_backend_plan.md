@@ -1,5 +1,12 @@
 # Knowledge Graphify Graph Backend Upgrade Plan
 
+> Historical design and implementation notes, not the current operating contract.
+> The JSON fallback, graph-relation review UI and service proposals below retain
+> their original scope. Current source-backed behavior is documented in
+> [Wiki and Memory](../knowledge/wiki_memory.md) and
+> [Markdown Memory Operations](../knowledge/markdown_memory_operations.ko.md).
+> Do not run historical activation/migration commands as routine setup.
+
 > **2026-09-14 status:** The Self-Evolution service, task-prefill path, API, and
 > workspace discussed below are retired. Evolution-named Knowledge schemas and
 > records remain as read-only improvement evidence and historical attribution;

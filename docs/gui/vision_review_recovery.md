@@ -23,7 +23,9 @@ the compatible Resume dispatcher. It does not actuate devices.
 
 The existing Resume control then checks the PLC interlock and starts the shared
 tail at Vision with a fresh capture. It does not upload, print or eject again,
-and does not treat the archived picture as current evidence. This bounded retry
-returns at the current cycle boundary without launching the next fabrication.
+and does not treat the archived picture as current evidence. On successful
+recovery, the existing configured cycle series continues; this image-review
+retry does not impose a new one-cycle cap. Explicit printer-wait or Equipment
+restart checkpoints have their own separate recovery limits.
 An unresolved owner failure is reported as `needs_attention`, not successful
 cycle completion. Original failed attempts remain in the runtime archive.

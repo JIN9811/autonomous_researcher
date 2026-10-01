@@ -1,5 +1,12 @@
 # Test Scenario Chat Parity Implementation Plan
 
+Status (source audit 2026-09-29, `dd0d772`): retained implementation and follow-up
+record. `app/test_scenario.py` and the controller admission integration are in
+main. Dated test/restart notes below apply to that work only; this audit did not
+rerun a scenario or restart the server. The original execution instructions do
+not authorize a new run. Current operating policy is in
+[test mode](../../runtime/test_mode.md).
+
 > **For agentic workers:** Use superpowers:executing-plans to implement task-by-task in the existing checkout, as requested by the operator.
 
 **Goal:** Automate test scenario input through the ordinary planning chat while preserving the orchestration graph and mode-specific device policies.

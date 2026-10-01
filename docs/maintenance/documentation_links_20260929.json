@@ -1,0 +1,5175 @@
+{
+  "schema": "documentation_link_audit.v1",
+  "date": "2026-09-29",
+  "method": "Read-only relative path, Markdown heading/HTML id, provenance metadata and external GET checks; no local/private services requested.",
+  "local": {
+    "references": 2237,
+    "failures": []
+  },
+  "external": {
+    "unique_public_urls": 318,
+    "dispositions": {
+      "reachable": 296,
+      "access_restricted": 11,
+      "historical_unavailable_annotated": 4,
+      "network_unresolved": 5,
+      "rate_limited": 2
+    },
+    "skipped_local_examples": 27,
+    "skipped_revision_placeholders": 1
+  },
+  "limitations": [
+    "Reachability does not validate all cited claims or external fragment anchors.",
+    "PDF URL-object scans returned no URL entries; Software Manual emitted a Poppler optional-content warning. Text scan found www.qmesys.com in Indicator Manual and its HTTPS destination returned 200. Image-only text is not exhaustively audited.",
+    "HTTP restrictions/network failures are not proof a source is deleted."
+  ],
+  "urls": [
+    {
+      "url": "https://www.qmesys.com",
+      "status": 200,
+      "final_url": "https://www.qmesys.com",
+      "classification": "reachable",
+      "references": [{"path":"docs/knowledge/manuals/sources/Indicator Manual.pdf","location":"Text-layer footer and manufacturer contact; printed as www.qmesys.com"}]
+    },
+    {
+      "url": "https://3dfarmers.kit.com/farmloop",
+      "status": 200,
+      "final_url": "https://3dfarmers.kit.com/farmloop",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 923
+        }
+      ]
+    },
+    {
+      "url": "https://about.fb.com/news/2024/07/our-new-ai-model-can-segment-video/",
+      "status": 200,
+      "final_url": "https://about.fb.com/news/2024/07/our-new-ai-model-can-segment-video/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 71
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 493
+        }
+      ]
+    },
+    {
+      "url": "https://ai.meta.com/research/dinov3/",
+      "status": 200,
+      "final_url": "https://ai.meta.com/research/dinov3/",
+      "content_type": "text/html; charset=\"utf-8\"",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 42
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 488
+        }
+      ]
+    },
+    {
+      "url": "https://ai.meta.com/research/publications/dinov3/",
+      "status": 200,
+      "final_url": "https://ai.meta.com/research/publications/dinov3/",
+      "content_type": "text/html; charset=\"utf-8\"",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 43
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 489
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omx/dataset_preparation_recording_omx.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omx/dataset_preparation_recording_omx.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md",
+          "line": 1063
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 582
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omx/hardware_omx.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omx/hardware_omx.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md",
+          "line": 1061
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 579
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omx/introduction_omx.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omx/introduction_omx.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 578
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omx/model_inference_omx.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omx/model_inference_omx.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 583
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omx/setup_guide_physical_ai_tools.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omx/setup_guide_physical_ai_tools.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 581
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omx/software_omx.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omx/software_omx.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md",
+          "line": 1062
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 580
+        }
+      ]
+    },
+    {
+      "url": "https://ai.robotis.com/omy/robotis_lab_omy.html",
+      "status": 200,
+      "final_url": "https://ai.robotis.com/omy/robotis_lab_omy.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "url": "https://airc.nist.gov/airmf-resources/airmf/5-sec-core/",
+      "status": 200,
+      "final_url": "https://airc.nist.gov/airmf-resources/airmf/5-sec-core/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 71
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 696
+        }
+      ]
+    },
+    {
+      "url": "https://ansyshelp.ansys.com/public/Views/Secured/corp/v252/en/wb_sim/ds_Unaveraged_Results.html",
+      "status": 200,
+      "final_url": "https://ansyshelp.ansys.com/public/Views/Secured/corp/v252/en/wb_sim/ds_Unaveraged_Results.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 335
+        }
+      ]
+    },
+    {
+      "url": "https://arrow.apache.org/docs/python/csv.html",
+      "status": 200,
+      "final_url": "https://arrow.apache.org/docs/python/csv.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 199
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1302
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/1806.10761",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/1806.10761",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 273
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2005.09303",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2005.09303",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 211
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 886
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2101.11196",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2101.11196",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 134
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 705
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2204.01691",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2204.01691",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 64
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 746
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2210.03629",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2210.03629",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 199
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 646
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2303.11366",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2303.11366",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 173
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1309
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 213
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 647
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2304.03442",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2304.03442",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 205
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1312
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2305.16291",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2305.16291",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 188
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1310
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2305.18323",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2305.18323",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 226
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 648
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2307.15818",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2307.15818",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 97
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 495
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 62
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 745
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2310.08560",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2310.08560",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 204
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1311
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2312.04511",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2312.04511",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 227
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 649
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2312.04528",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2312.04528",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 161
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 897
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2402.03921",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2402.03921",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 147
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 896
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2406.09246",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2406.09246",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 63
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 743
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2406.13163",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2406.13163",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 151
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 375
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2408.00714",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2408.00714",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 70
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 492
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2408.14307",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2408.14307",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 107
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 389
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2504.13865",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2504.13865",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 212
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 887
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2504.16054",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2504.16054",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 82
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 738
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2602.15061",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2602.15061",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 101
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 700
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2603.28959",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2603.28959",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 203
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 900
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2605.17976",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2605.17976",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 187
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 898
+        }
+      ]
+    },
+    {
+      "url": "https://arxiv.org/abs/2605.22054",
+      "status": 200,
+      "final_url": "https://arxiv.org/abs/2605.22054",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 188
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 899
+        }
+      ]
+    },
+    {
+      "url": "https://autogenhub.github.io/autogen/docs/autogen-studio/usage/",
+      "status": 200,
+      "final_url": "https://autogenhub.github.io/autogen/docs/autogen-studio/usage/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 780
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 939
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 258
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 756
+        }
+      ]
+    },
+    {
+      "url": "https://ax.dev/",
+      "status": 200,
+      "final_url": "https://ax.dev/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 238
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 904
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 937
+        }
+      ]
+    },
+    {
+      "url": "https://bambulab.com/en-us/x2d",
+      "status": 200,
+      "final_url": "https://bambulab.com/en-us/x2d",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1162
+        }
+      ]
+    },
+    {
+      "url": "https://bambulab.com/en-us/x2d/specs",
+      "status": 200,
+      "final_url": "https://bambulab.com/en-us/x2d/specs",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1163
+        }
+      ]
+    },
+    {
+      "url": "https://blog.bambulab.com/bambu-lab-introduces-local-fleet-control-with-bambu-farm-manager/",
+      "status": 200,
+      "final_url": "https://blog.bambulab.com/bambu-lab-introduces-local-fleet-control-with-bambu-farm-manager/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1172
+        }
+      ]
+    },
+    {
+      "url": "https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/",
+      "status": 200,
+      "final_url": "https://blog.bambulab.com/firmware-update-introducing-new-authorization-control-system-2/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1177
+        }
+      ]
+    },
+    {
+      "url": "https://blog.bambulab.com/updates-and-third-party-integration-with-bambu-connect/",
+      "status": 200,
+      "final_url": "https://blog.bambulab.com/updates-and-third-party-integration-with-bambu-connect/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1178
+        }
+      ]
+    },
+    {
+      "url": "https://blog.bambulab.com/xcellence-made-simple-bambu-lab-presents-the-x2d/",
+      "status": 200,
+      "final_url": "https://blog.bambulab.com/xcellence-made-simple-bambu-lab-presents-the-x2d/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1164
+        }
+      ]
+    },
+    {
+      "url": "https://blog.linux-ng.de/2024/06/10/bambu-labs-a1/",
+      "status": 200,
+      "final_url": "https://blog.linux-ng.de/2024/06/10/bambu-labs-a1/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 86
+        }
+      ]
+    },
+    {
+      "url": "https://botorch.org/docs/v0.13.0/overview",
+      "status": 200,
+      "final_url": "https://botorch.org/docs/v0.13.0/overview",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 237
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 903
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 937
+        }
+      ]
+    },
+    {
+      "url": "https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo",
+      "status": 200,
+      "final_url": "https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 291
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1308
+        }
+      ]
+    },
+    {
+      "url": "https://build.nvidia.com/nvidia/isaac-gr00t-synthetic-manipulation/blueprintcard",
+      "status": 200,
+      "final_url": "https://build.nvidia.com/nvidia/isaac-gr00t-synthetic-manipulation/blueprintcard",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/research/isaac_pick_place_leisaac_alignment.md",
+          "line": 67
+        }
+      ]
+    },
+    {
+      "url": "https://chemrxiv.org/engage/api-gateway/chemrxiv/assets/orp/resource/item/654a9b52a8b423585a29763e/original/keeping-an-eye-on-the-experiment-computer-vision-for-real-time-monitoring-and-control.pdf",
+      "status": 403,
+      "final_url": "https://chemrxiv.org/engage/api-gateway/chemrxiv/assets/orp/resource/item/654a9b52a8b423585a29763e/original/keeping-an-eye-on-the-experiment-computer-vision-for-real-time-monitoring-and-control.pdf",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 110
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 497
+        }
+      ]
+    },
+    {
+      "url": "https://community.home-assistant.io/t/bambu-lab-x1-x1c-mqtt/489510/738",
+      "status": 200,
+      "final_url": "https://community.home-assistant.io/t/bambu-lab-x1-x1c-mqtt/489510/738",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 84
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 901
+        }
+      ]
+    },
+    {
+      "url": "https://daniliants.com/insights/graphify-knowledge-graph-skill-for-ai-coding-assistants/",
+      "status": 200,
+      "final_url": "https://daniliants.com/insights/graphify-knowledge-graph-skill-for-ai-coding-assistants/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/knowledge_graphify_graph_backend_plan.md",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "url": "https://deepxde.readthedocs.io/",
+      "status": 200,
+      "final_url": "https://deepxde.readthedocs.io/en/latest/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 292
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1676
+        }
+      ]
+    },
+    {
+      "url": "https://developer.nvidia.com/physicsnemo",
+      "status": 200,
+      "final_url": "https://developer.nvidia.com/physicsnemo",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 294
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1678
+        }
+      ]
+    },
+    {
+      "url": "https://dicengine.github.io/dice/",
+      "status": 200,
+      "final_url": "https://dicengine.github.io/dice/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 275
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1675
+        }
+      ]
+    },
+    {
+      "url": "https://docs.3dque.com/docs/getting-started/slicing-for-auto-ejection/bambu-lab-slicing-guide/",
+      "status": 200,
+      "final_url": "https://docs.3dque.com/docs/getting-started/slicing-for-auto-ejection/bambu-lab-slicing-guide/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 920
+        }
+      ]
+    },
+    {
+      "url": "https://docs.3dque.com/docs/installation-guides/auto-ejection-kit-installation/Bambu-X1-P1",
+      "status": 200,
+      "final_url": "https://docs.3dque.com/docs/installation-guides/auto-ejection-kit-installation/Bambu-X1-P1/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 227
+        }
+      ]
+    },
+    {
+      "url": "https://docs.3dque.com/docs/installation-guides/auto-ejection-kit-installation/Bambu-X1-P1/",
+      "status": 200,
+      "final_url": "https://docs.3dque.com/docs/installation-guides/auto-ejection-kit-installation/Bambu-X1-P1/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 919
+        }
+      ]
+    },
+    {
+      "url": "https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site",
+      "status": 200,
+      "final_url": "https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 538
+        }
+      ]
+    },
+    {
+      "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-citation-files",
+      "status": 200,
+      "final_url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-citation-files",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 129
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/4.2.0/replicator_tutorials/tutorial_replicator_augmentation.html",
+      "status": 404,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/4.2.0/replicator_tutorials/tutorial_replicator_augmentation.html",
+      "classification": "historical_unavailable_annotated",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4068
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/5.0.0/replicator_tutorials/index.html",
+      "status": 404,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/5.0.0/replicator_tutorials/index.html",
+      "classification": "historical_unavailable_annotated",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4066
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/assets/usd_assets_camera_depth_sensors.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/assets/usd_assets_camera_depth_sensors.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4071
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/physics/physics_resources.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/physics/physics_resources.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4081
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/replicator_tutorials/tutorial_replicator_scene_based_sdg.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/replicator_tutorials/tutorial_replicator_scene_based_sdg.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4067
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/ext_isaacsim_asset_generator_occupancy_map.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/ext_isaacsim_asset_generator_occupancy_map.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4064
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/index.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/index.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4062
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/rtsp_camera_streaming.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/rtsp_camera_streaming.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4063
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/troubleshooting.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/digital_twin/troubleshooting.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4065
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_03_inspect_asset.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_03_inspect_asset.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4079
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_04_collider_pairs.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_04_collider_pairs.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4080
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_05_joint_drive_tuning.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_05_joint_drive_tuning.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4076
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_06_joint_gains_tuning.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/openusd_tuning_tutorials/tutorial_06_joint_gains_tuning.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4077
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/overview/release_notes.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/overview/release_notes.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4061
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/robot_setup/troubleshooting.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/robot_setup/troubleshooting.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4073
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/robot_setup_tutorials/tutorial_configure_manipulator.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/robot_setup_tutorials/tutorial_configure_manipulator.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4074
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/robot_simulation/articulation_controller.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.0/robot_simulation/articulation_controller.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4075
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.1/physics/simulation_fundamentals.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/6.0.1/physics/simulation_fundamentals.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4078
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/latest/replicator_tutorials/index.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/latest/replicator_tutorials/index.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4069
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/latest/sensors/isaacsim_sensors_camera_structured_light.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/latest/sensors/isaacsim_sensors_camera_structured_light.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4072
+        }
+      ]
+    },
+    {
+      "url": "https://docs.isaacsim.omniverse.nvidia.com/latest/synthetic_data_generation/tutorial_replicator_teleop_sdg.html",
+      "status": 200,
+      "final_url": "https://docs.isaacsim.omniverse.nvidia.com/latest/synthetic_data_generation/tutorial_replicator_teleop_sdg.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4070
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langchain/guardrails",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langchain/guardrails",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 87
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 699
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 157
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 639
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langchain/multi-agent/router",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langchain/multi-agent/router",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 143
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 640
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langchain/multi-agent/subagents",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langchain/multi-agent/subagents",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 119
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 142
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 638
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langchain/observability",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langchain/observability",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 411
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 534
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 923
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 327
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 938
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 256
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 755
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langchain/supervisor",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langchain/multi-agent/subagents-personal-assistant",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 118
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 637
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langgraph/frontend/graph-execution",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langgraph/frontend/graph-execution",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 409
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 426
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 533
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 216
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 753
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langgraph/frontend/overview",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langgraph/frontend/overview",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 170
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 641
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langgraph/interrupts",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langgraph/interrupts",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 410
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 781
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 922
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 86
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 215
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 698
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 643
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 754
+        }
+      ]
+    },
+    {
+      "url": "https://docs.langchain.com/oss/python/langgraph/persistence",
+      "status": 200,
+      "final_url": "https://docs.langchain.com/oss/python/langgraph/persistence",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 85
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 697
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 642
+        }
+      ]
+    },
+    {
+      "url": "https://docs.nvidia.com/deeplearning/modulus/modulus-v2209/user_guide/theory/phys_informed.html",
+      "status": 200,
+      "final_url": "https://docs.nvidia.com/physicsnemo/latest/overview.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 295
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1679
+        }
+      ]
+    },
+    {
+      "url": "https://docs.pyvista.org/api/core/_autosummary/pyvista.datasetfilters.warp_by_vector",
+      "status": 200,
+      "final_url": "https://docs.pyvista.org/api/core/_autosummary/pyvista.datasetfilters.warp_by_vector",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 339
+        }
+      ]
+    },
+    {
+      "url": "https://docs.pyvista.org/api/plotting/_autosummary/pyvista.Plotter.html",
+      "status": 200,
+      "final_url": "https://docs.pyvista.org/api/plotting/_autosummary/pyvista.plotter",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 314
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1682
+        }
+      ]
+    },
+    {
+      "url": "https://docs.pyvista.org/api/plotting/_autosummary/pyvista.Plotter.screenshot.html",
+      "status": 200,
+      "final_url": "https://docs.pyvista.org/api/plotting/_autosummary/pyvista.plotter.screenshot",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 313
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1683
+        }
+      ]
+    },
+    {
+      "url": "https://docs.pyvista.org/examples/01-filter/slice.html",
+      "status": 200,
+      "final_url": "https://docs.pyvista.org/examples/01-filter/slice.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 339
+        }
+      ]
+    },
+    {
+      "url": "https://docs.ros.org/en/jazzy/Installation.html",
+      "status": 200,
+      "final_url": "https://docs.ros.org/en/jazzy/Installation.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md",
+          "line": 702
+        }
+      ]
+    },
+    {
+      "url": "https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html",
+      "status": 200,
+      "final_url": "https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md",
+          "line": 701
+        }
+      ]
+    },
+    {
+      "url": "https://docs.software.vt.edu/abaqusv2025/English/SIMACAECAERefMap/simacae-c-connavigating.htm",
+      "status": 200,
+      "final_url": "https://docs.software.vt.edu/abaqusv2025/English/SIMACAECAERefMap/simacae-c-connavigating.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 335
+        }
+      ]
+    },
+    {
+      "url": "https://docs.software.vt.edu/abaqusv2025/English/SIMACAECAERefMap/simacae-t-conproduce.htm",
+      "status": 200,
+      "final_url": "https://docs.software.vt.edu/abaqusv2025/English/SIMACAECAERefMap/simacae-t-conproduce.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 335
+        }
+      ]
+    },
+    {
+      "url": "https://dspy.ai/learn/optimization/optimizers/",
+      "status": 200,
+      "final_url": "https://dspy.ai/learn/optimization/optimizers/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 223
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1314
+        }
+      ]
+    },
+    {
+      "url": "https://echarts.apache.org/",
+      "status": 200,
+      "final_url": "https://echarts.apache.org/en/index.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 62
+        }
+      ]
+    },
+    {
+      "url": "https://engineering.cmu.edu/news-events/news/2026/02/06-ai-saves-3d-prints.html",
+      "status": 200,
+      "final_url": "https://engineering.cmu.edu/news-events/news/2026/02/06-ai-saves-3d-prints.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 108
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 390
+        }
+      ]
+    },
+    {
+      "url": "https://epubs.siam.org/doi/10.1137/19M1274067",
+      "status": 403,
+      "final_url": "https://epubs.siam.org/doi/10.1137/19M1274067",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 293
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1677
+        }
+      ]
+    },
+    {
+      "url": "https://forum.bambulab.com/t/auto-eject-repeat-print-concept/72761",
+      "status": 200,
+      "final_url": "https://forum.bambulab.com/t/auto-eject-repeat-print-concept/72761",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 924
+        }
+      ]
+    },
+    {
+      "url": "https://forum.bambulab.com/t/how-to-remotely-print-custom-g-code-with-bambu-studio/80649",
+      "status": 200,
+      "final_url": "https://forum.bambulab.com/t/how-to-remotely-print-custom-g-code-with-bambu-studio/80649",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 85
+        }
+      ]
+    },
+    {
+      "url": "https://forum.bambulab.com/t/project-to-automatically-remove-parts-from-build-plate/17231",
+      "status": 200,
+      "final_url": "https://forum.bambulab.com/t/project-to-automatically-remove-parts-from-build-plate/17231",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 925
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/CederGroupHub/alabos",
+      "status": 200,
+      "final_url": "https://github.com/CederGroupHub/alabos",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 112
+        },
+        {
+          "path": "docs/paper/01_problem_and_contributions.md",
+          "line": 146
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/DMontgomery40/bambu-printer-mcp",
+      "status": 200,
+      "final_url": "https://github.com/DMontgomery40/bambu-printer-mcp",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 230
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/Doridian/OpenBambuAPI/blob/main/ftp.md",
+      "status": 200,
+      "final_url": "https://github.com/Doridian/OpenBambuAPI/blob/main/ftp.md",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1175
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md",
+      "status": 200,
+      "final_url": "https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 57
+        },
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 449
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 83
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1174
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 212
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 898
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/Doridian/OpenBambuAPI/blob/main/video.md",
+      "status": 200,
+      "final_url": "https://github.com/Doridian/OpenBambuAPI/blob/main/video.md",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1176
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/Doridian/OpenBambuAPI/issues/10",
+      "status": 200,
+      "final_url": "https://github.com/Doridian/OpenBambuAPI/issues/10",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 213
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/DrozmotiX/ioBroker.bambulab/issues/258",
+      "status": 200,
+      "final_url": "https://github.com/DrozmotiX/ioBroker.bambulab/issues/258",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 60
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 82
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 216
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/JIN9811/autonomous_researcher/security/advisories/new",
+      "status": 200,
+      "final_url": "https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FJIN9811%2Fautonomous_researcher%2Fsecurity%2Fadvisories%2Fnew",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "SECURITY.md",
+          "line": 35
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/JinheonBaek/ResearchAgent",
+      "status": 200,
+      "final_url": "https://github.com/JinheonBaek/ResearchAgent",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 115
+        },
+        {
+          "path": "docs/paper/01_problem_and_contributions.md",
+          "line": 147
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/NIMS-DA/nimo",
+      "status": 200,
+      "final_url": "https://github.com/NIMS-DA/nimo",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 109
+        },
+        {
+          "path": "docs/paper/01_problem_and_contributions.md",
+          "line": 145
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/NVIDIA-Omniverse-blueprints/synthetic-manipulation-motion-generation",
+      "status": 200,
+      "final_url": "https://github.com/NVIDIA-Omniverse-blueprints/synthetic-manipulation-motion-generation",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/research/isaac_pick_place_leisaac_alignment.md",
+          "line": 68
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/NickiAndersen/looprint",
+      "status": 200,
+      "final_url": "https://github.com/NickiAndersen/looprint",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 59
+        },
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 453
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 228
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 913
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/NousResearch/hermes-agent-self-evolution",
+      "status": 200,
+      "final_url": "https://github.com/NousResearch/hermes-agent-self-evolution",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 222
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1313
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/OrcaSlicer/OrcaSlicer/discussions/7693",
+      "status": 200,
+      "final_url": "https://github.com/OrcaSlicer/OrcaSlicer/discussions/7693",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 452
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 916
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/OrcaSlicer/OrcaSlicer/pull/13177",
+      "status": 200,
+      "final_url": "https://github.com/OrcaSlicer/OrcaSlicer/pull/13177",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 918
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/Physical-Intelligence/openpi",
+      "status": 200,
+      "final_url": "https://github.com/Physical-Intelligence/openpi",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 83
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 290
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 739
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/ROBOTIS-GIT/cyclo_control/blob/f94efd39c64d239a47096f106ca917bea063f07d/cyclo_motion_controller_ros/config/omx_config.yaml",
+      "status": 200,
+      "final_url": "https://github.com/ROBOTIS-GIT/cyclo_control/blob/f94efd39c64d239a47096f106ca917bea063f07d/cyclo_motion_controller_ros/config/omx_config.yaml",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/superpowers/specs/2026-09-22-omx-movej-inference-design.md",
+          "line": 193
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/ROBOTIS-GIT/cyclo_control/blob/f94efd39c64d239a47096f106ca917bea063f07d/cyclo_motion_controller_ros/src/nodes/omx/omx_movej_controller_node.cpp",
+      "status": 200,
+      "final_url": "https://github.com/ROBOTIS-GIT/cyclo_control/blob/f94efd39c64d239a47096f106ca917bea063f07d/cyclo_motion_controller_ros/src/nodes/omx/omx_movej_controller_node.cpp",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/superpowers/specs/2026-09-22-omx-movej-inference-design.md",
+          "line": 192
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/ROBOTIS-GIT/physical_ai_tools",
+      "status": 200,
+      "final_url": "https://github.com/ROBOTIS-GIT/physical_ai_tools",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 584
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/SakanaAI/ai-scientist-v2",
+      "status": 200,
+      "final_url": "https://github.com/SakanaAI/ai-scientist-v2",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 119
+        },
+        {
+          "path": "docs/paper/01_problem_and_contributions.md",
+          "line": 148
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/SoftFever/OrcaSlicer/issues/11046",
+      "status": 200,
+      "final_url": "https://github.com/OrcaSlicer/OrcaSlicer/issues/11046",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 917
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/aspuru-guzik-group/atlas",
+      "status": 200,
+      "final_url": "https://github.com/the-matter-lab/atlas",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 676
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1299
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/bambulab/BambuStudio/blob/master/resources/profiles/BBL/machine/Bambu%20Lab%20X2D%200.4%20nozzle%20template%20machine_start_gcode.json",
+      "status": 200,
+      "final_url": "https://github.com/bambulab/BambuStudio/blob/master/resources/profiles/BBL/machine/Bambu%20Lab%20X2D%200.4%20nozzle%20template%20machine_start_gcode.json",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/device_bridges/x2d_pre_eject_cleanup.md",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/bambulab/BambuStudio/issues/10148",
+      "status": 200,
+      "final_url": "https://github.com/bambulab/BambuStudio/issues/10148",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 219
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/bambulab/BambuStudio/wiki/Command-Line-Usage",
+      "status": 200,
+      "final_url": "https://github.com/bambulab/BambuStudio/wiki/Command-Line-Usage",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 54
+        },
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 445
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1165
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 897
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/calculix/ccx2paraview",
+      "status": 200,
+      "final_url": "https://github.com/calculix/ccx2paraview",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 233
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 330
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1306
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 257
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1672
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/darkorb/bambu-ftp-and-print",
+      "status": 404,
+      "final_url": "https://github.com/darkorb/bambu-ftp-and-print",
+      "classification": "historical_unavailable_annotated",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 214
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/dicengine/dice",
+      "status": 200,
+      "final_url": "https://github.com/dicengine/dice",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 274
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1674
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/disconn3ct/bambu-proxy",
+      "status": 200,
+      "final_url": "https://github.com/disconn3ct/bambu-proxy",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 215
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/facebookresearch/dinov3",
+      "status": 200,
+      "final_url": "https://github.com/facebookresearch/dinov3",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 44
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 490
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/gomesgroup/coscientist",
+      "status": 200,
+      "final_url": "https://github.com/gomesgroup/coscientist",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/assets/presentation/README.md",
+          "line": 96
+        },
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-09-11-research-first-presentation.md",
+          "line": 35
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/greghesp/ha-bambulab/discussions/307",
+      "status": 200,
+      "final_url": "https://github.com/greghesp/ha-bambulab/discussions/307",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 58
+        },
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 451
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 217
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 904
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/greghesp/ha-bambulab/discussions/628",
+      "status": 200,
+      "final_url": "https://github.com/greghesp/ha-bambulab/discussions/628",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 218
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/greghesp/ha-bambulab/issues/1293",
+      "status": 200,
+      "final_url": "https://github.com/greghesp/ha-bambulab/issues/1293",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 905
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/huggingface/lerobot",
+      "status": 200,
+      "final_url": "https://github.com/huggingface/lerobot",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/assets/presentation/README.md",
+          "line": 95
+        },
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-09-11-research-first-presentation.md",
+          "line": 34
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 577
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/huggingface/lerobot/blob/main/docs/source/lerobot-dataset-v3.mdx",
+      "status": 200,
+      "final_url": "https://github.com/huggingface/lerobot/blob/main/docs/source/lerobot-dataset-v3.mdx",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 124
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 498
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/hylee12345/UTM",
+      "status": 200,
+      "final_url": "https://github.com/hylee12345/UTM",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md",
+          "line": 10
+        },
+        {
+          "path": "docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md",
+          "line": 704
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/isaac-sim/IsaacLab.git",
+      "status": 200,
+      "final_url": "https://github.com/isaac-sim/IsaacLab",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "references/official_isaac_lab_mimic/README.md",
+          "line": 13
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/isaac-sim/IsaacLab/discussions/6249",
+      "status": 200,
+      "final_url": "https://github.com/isaac-sim/IsaacLab/discussions/6249",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4060
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/isaac-sim/IsaacLab/releases",
+      "status": 200,
+      "final_url": "https://github.com/isaac-sim/IsaacLab/releases",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 46
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/maziggy/bambuddy/issues/1150",
+      "status": 200,
+      "final_url": "https://github.com/maziggy/bambuddy/issues/1150",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 906
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/mgonzs13/yolo_ros",
+      "status": 200,
+      "final_url": "https://github.com/mgonzs13/yolo_ros",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md",
+          "line": 703
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/openvla/openvla",
+      "status": 200,
+      "final_url": "https://github.com/openvla/openvla",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/assets/presentation/README.md",
+          "line": 94
+        },
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-09-11-research-first-presentation.md",
+          "line": 33
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 98
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 496
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 63
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 744
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/paperswithcode/releasing-research-code",
+      "status": 200,
+      "final_url": "https://github.com/paperswithcode/releasing-research-code",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 123
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml",
+      "status": 200,
+      "final_url": "https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt",
+          "line": 999
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/prusa3d/Prusa-Link/releases",
+      "status": 200,
+      "final_url": "https://github.com/prusa3d/Prusa-Link/releases",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt",
+          "line": 1001
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/prusa3d/PrusaSlicer",
+      "status": 200,
+      "final_url": "https://github.com/prusa3d/PrusaSlicer",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt",
+          "line": 1003
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/prusa3d/PrusaSlicer/wiki/Command-Line-Interface",
+      "status": 200,
+      "final_url": "https://github.com/prusa3d/PrusaSlicer/wiki/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt",
+          "line": 1004
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/sandialabs/matcal/blob/main/README.rst",
+      "status": 200,
+      "final_url": "https://github.com/sandialabs/matcal/blob/main/README.rst",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 263
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/somedaybegreat/autonomous_researcher_bo/blob/f03189a7c9b55b4e5bd046bd65311ced3345871f/docs/superpowers/specs/2026-09-02-bo-orchestrator-bounds-logei-cleanup-design.md",
+      "status": 200,
+      "final_url": "https://github.com/somedaybegreat/autonomous_researcher_bo/blob/f03189a7c9b55b4e5bd046bd65311ced3345871f/docs/superpowers/specs/2026-09-02-bo-orchestrator-bounds-logei-cleanup-design.md",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-07-single-compression-experiment-slot-design.md",
+          "line": 334
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/somedaybegreat/autonomous_researcher_human_orchestration/blob/62f0f22692921d11fa61329d11b103c3a4521f76/orchestrator/research_intake/compiler.py",
+      "status": 200,
+      "final_url": "https://github.com/somedaybegreat/autonomous_researcher_human_orchestration/blob/62f0f22692921d11fa61329d11b103c3a4521f76/orchestrator/research_intake/compiler.py",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-07-single-compression-experiment-slot-design.md",
+          "line": 331
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/somedaybegreat/autonomous_researcher_human_orchestration/blob/62f0f22692921d11fa61329d11b103c3a4521f76/orchestrator/research_intake/service.py",
+      "status": 200,
+      "final_url": "https://github.com/somedaybegreat/autonomous_researcher_human_orchestration/blob/62f0f22692921d11fa61329d11b103c3a4521f76/orchestrator/research_intake/service.py",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-07-single-compression-experiment-slot-design.md",
+          "line": 332
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/somedaybegreat/autonomous_researcher_human_orchestration/blob/62f0f22692921d11fa61329d11b103c3a4521f76/orchestrator/research_intake/store.py",
+      "status": 200,
+      "final_url": "https://github.com/somedaybegreat/autonomous_researcher_human_orchestration/blob/62f0f22692921d11fa61329d11b103c3a4521f76/orchestrator/research_intake/store.py",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-07-single-compression-experiment-slot-design.md",
+          "line": 333
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/sparks-baird/self-driving-lab-demo",
+      "status": 200,
+      "final_url": "https://github.com/sparks-baird/self-driving-lab-demo",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 137
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1296
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/t0nyz0/BambuBoard",
+      "status": 200,
+      "final_url": "https://github.com/t0nyz0/BambuBoard",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 229
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/t0nyz0/BambuBoard/blob/0784168fc451d7206300bb1a1cf3cbef21dfae2d/VIDEO_STREAMING_SETUP.md",
+      "status": 200,
+      "final_url": "https://github.com/t0nyz0/BambuBoard/blob/0784168fc451d7206300bb1a1cf3cbef21dfae2d/VIDEO_STREAMING_SETUP.md",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 450
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 909
+        }
+      ]
+    },
+    {
+      "url": "https://gmsh.info/doc/texinfo/gmsh.html#gmsh_002fmodel_002fmesh_002fgetElementQualities",
+      "status": 200,
+      "final_url": "https://gmsh.info/doc/texinfo/gmsh.html#gmsh_002fmodel_002fmesh_002fgetElementQualities",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 296
+        }
+      ]
+    },
+    {
+      "url": "https://graphify.homes/en",
+      "status": 200,
+      "final_url": "https://graphify.homes/en",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/knowledge_graphify_graph_backend_plan.md",
+          "line": 50
+        }
+      ]
+    },
+    {
+      "url": "https://graphify.net/zh/",
+      "status": 200,
+      "final_url": "https://graphify.net/zh/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/knowledge_graphify_graph_backend_plan.md",
+          "line": 49
+        }
+      ]
+    },
+    {
+      "url": "https://help.prusa3d.com/article/prusa-connect-and-prusalink-explained_302608",
+      "status": 200,
+      "final_url": "https://help.prusa3d.com/article/prusa-connect-and-prusalink-explained_302608",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt",
+          "line": 995
+        }
+      ]
+    },
+    {
+      "url": "https://help.prusa3d.com/article/sending-g-codes-to-printer-via-network-prusa-connect-prusalink-octoprint_196761",
+      "status": 200,
+      "final_url": "https://help.prusa3d.com/article/sending-g-codes-to-printer-via-network-prusa-connect-prusalink-octoprint_196761",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt",
+          "line": 997
+        }
+      ]
+    },
+    {
+      "url": "https://help.simplyprint.io/en/article/3mf-splitting-feature-bambu-lab-1qgdreg/",
+      "status": 200,
+      "final_url": "https://help.simplyprint.io/en/article/3mf-splitting-feature-bambu-lab-1qgdreg/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 903
+        }
+      ]
+    },
+    {
+      "url": "https://help.simplyprint.io/en/article/bambu-lab-lan-only-mode-and-developer-mode-how-to-enable-xa0hch/",
+      "status": 200,
+      "final_url": "https://help.simplyprint.io/en/article/bambu-lab-lan-only-mode-and-developer-mode-how-to-enable-xa0hch/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 61
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 902
+        }
+      ]
+    },
+    {
+      "url": "https://help.simplyprint.io/en/article/bambu-lab-webcam-not-working-guide-pw6z3q/",
+      "status": 200,
+      "final_url": "https://help.simplyprint.io/en/article/bambu-lab-webcam-not-working-guide-pw6z3q/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 61
+        }
+      ]
+    },
+    {
+      "url": "https://help.zenodo.org/docs/github/",
+      "status": 200,
+      "final_url": "https://help.zenodo.org/docs/github/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 131
+        }
+      ]
+    },
+    {
+      "url": "https://help.zenodo.org/docs/github/archive-software/github-upload/",
+      "status": 200,
+      "final_url": "https://help.zenodo.org/docs/github/archive-software/github-upload/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md",
+          "line": 132
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/act",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/act",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/lerobot_dataset_policy_naming.md",
+          "line": 232
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/dataset_subtask",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/dataset_subtask",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 576
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/en/omx",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/en/omx",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md",
+          "line": 1058
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 573
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/en/rtc",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/en/rtc",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 101
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 742
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/main/en/inference",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/main/en/inference",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/lerobot_dataset_policy_naming.md",
+          "line": 289
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/main/en/so101",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/main/en/so101",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md",
+          "line": 1059
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 574
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/main/inference",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/main/inference",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md",
+          "line": 1060
+        },
+        {
+          "path": "docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt",
+          "line": 575
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 125
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 499
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 102
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 741
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 779
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/pi05",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/pi05",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 84
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 740
+        },
+        {
+          "path": "docs/runtime/lerobot_dataset_policy_naming.md",
+          "line": 232
+        },
+        {
+          "path": "docs/runtime/lerobot_dataset_policy_naming.md",
+          "line": 290
+        }
+      ]
+    },
+    {
+      "url": "https://huggingface.co/docs/lerobot/xvla",
+      "status": 200,
+      "final_url": "https://huggingface.co/docs/lerobot/xvla",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/lerobot_dataset_policy_naming.md",
+          "line": 232
+        }
+      ]
+    },
+    {
+      "url": "https://ideas.repec.org/a/bla/jorssb/v63y2001i3p425-464.html",
+      "status": 200,
+      "final_url": "https://ideas.repec.org/a/bla/jorssb/v63y2001i3p425-464.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 294
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1311
+        }
+      ]
+    },
+    {
+      "url": "https://ideas.repec.org/a/nat/natcom/v13y2022i1d10.1038_s41467-022-31985-y.html",
+      "status": 200,
+      "final_url": "https://ideas.repec.org/a/nat/natcom/v13y2022i1d10.1038_s41467-022-31985-y.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 120
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 391
+        }
+      ]
+    },
+    {
+      "url": "https://ideas.repec.org/a/nat/nature/v624y2023i7990d10.1038_s41586-023-06734-w.html",
+      "status": 200,
+      "final_url": "https://ideas.repec.org/a/nat/nature/v624y2023i7990d10.1038_s41586-023-06734-w.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 97
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 371
+        }
+      ]
+    },
+    {
+      "url": "https://img.shields.io/badge/FastAPI-10324D?style=flat&logo=fastapi&logoColor=white",
+      "status": 200,
+      "final_url": "https://img.shields.io/badge/FastAPI-10324D?style=flat&logo=fastapi&logoColor=white",
+      "content_type": "image/svg+xml;charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 40
+        },
+        {
+          "path": "README.md",
+          "line": 39
+        }
+      ]
+    },
+    {
+      "url": "https://img.shields.io/badge/LangGraph-10324D?style=flat&logo=langgraph&logoColor=white",
+      "status": 200,
+      "final_url": "https://img.shields.io/badge/LangGraph-10324D?style=flat&logo=langgraph&logoColor=white",
+      "content_type": "image/svg+xml;charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 41
+        },
+        {
+          "path": "README.md",
+          "line": 40
+        }
+      ]
+    },
+    {
+      "url": "https://img.shields.io/badge/LeRobot-10324D?style=flat&logo=huggingface&logoColor=white",
+      "status": 200,
+      "final_url": "https://img.shields.io/badge/LeRobot-10324D?style=flat&logo=huggingface&logoColor=white",
+      "content_type": "image/svg+xml;charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 42
+        },
+        {
+          "path": "README.md",
+          "line": 41
+        }
+      ]
+    },
+    {
+      "url": "https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&logo=python&logoColor=white",
+      "status": 200,
+      "final_url": "https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&logo=python&logoColor=white",
+      "content_type": "image/svg+xml;charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 39
+        },
+        {
+          "path": "README.md",
+          "line": 38
+        }
+      ]
+    },
+    {
+      "url": "https://img.shields.io/badge/vLLM-10324D?style=flat",
+      "status": 200,
+      "final_url": "https://img.shields.io/badge/vLLM-10324D?style=flat",
+      "content_type": "image/svg+xml;charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 43
+        },
+        {
+          "path": "README.md",
+          "line": 42
+        }
+      ]
+    },
+    {
+      "url": "https://infinityflow3d.com/blogs/3d-printer-automation/3d-printer-auto-bed-clearing-bambu-p1s-example",
+      "status": "unresolved",
+      "reason": "<urlopen error [Errno 101] Network is unreachable>",
+      "classification": "network_unresolved",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 226
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 921
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.envs.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.envs.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 50
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.envs.mdp.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.envs.mdp.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.managers.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.managers.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4058
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab_mimic/isaaclab_mimic.envs.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/api/lab_mimic/isaaclab_mimic.envs.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4059
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/augmented_imitation.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/augmented_imitation.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4055
+        },
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 49
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/teleop_imitation.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/imitation-learning/teleop_imitation.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4054
+        },
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/reinforcement-learning/rl_existing_scripts.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/reinforcement-learning/rl_existing_scripts.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4056
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/refs/release_notes.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/refs/release_notes.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4053
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4052
+        }
+      ]
+    },
+    {
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/tutorials/03_envs/create_manager_rl_env.html",
+      "status": 200,
+      "final_url": "https://isaac-sim.github.io/IsaacLab/main/source/tutorials/03_envs/create_manager_rl_env.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-06-29-lerobot-augmentation-visualization-improvements.md",
+          "line": 4057
+        }
+      ]
+    },
+    {
+      "url": "https://journals.plos.org/plosone/article?id=10.1371%2Fjournal.pone.0229862",
+      "status": 200,
+      "final_url": "https://journals.plos.org/plosone/article?id=10.1371%2Fjournal.pone.0229862",
+      "content_type": "text/html;charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 73
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 369
+        }
+      ]
+    },
+    {
+      "url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0299402",
+      "status": 200,
+      "final_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0299402",
+      "content_type": "text/html;charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 209
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 884
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 920
+        }
+      ]
+    },
+    {
+      "url": "https://js.cytoscape.org/",
+      "status": 200,
+      "final_url": "https://js.cytoscape.org/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 68
+        }
+      ]
+    },
+    {
+      "url": "https://kitware.github.io/vtk-js/docs/",
+      "status": 200,
+      "final_url": "https://kitware.github.io/vtk-js/docs/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 339
+        }
+      ]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards",
+      "status": 200,
+      "final_url": "https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips",
+      "status": 200,
+      "final_url": "https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 59
+        }
+      ]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-usefortesting",
+      "status": 200,
+      "final_url": "https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-usefortesting",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 143
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 878
+        }
+      ]
+    },
+    {
+      "url": "https://link.springer.com/article/10.1557/s43577-021-00051-1",
+      "status": 200,
+      "final_url": "https://link.springer.com/article/10.1557/s43577-021-00051-1?error=cookies_not_supported&code=6eddf011-c89d-4ed8-aaf1-3580a7404c02",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 81
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 387
+        }
+      ]
+    },
+    {
+      "url": "https://mermaid.ai/open-source/syntax/flowchart.html",
+      "status": 200,
+      "final_url": "https://mermaid.ai/open-source/syntax/flowchart.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 71
+        }
+      ]
+    },
+    {
+      "url": "https://microsoft.github.io/autogen/0.2/docs/Use-Cases/agent_chat",
+      "status": 200,
+      "final_url": "https://microsoft.github.io/autogen/0.2/docs/Use-Cases/agent_chat/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 185
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 645
+        }
+      ]
+    },
+    {
+      "url": "https://neo4j.com/developer/languages/python/tutorials/get-started-with-neo4j-and-python/",
+      "status": 200,
+      "final_url": "https://neo4j.com/developer/languages/python/tutorials/get-started-with-neo4j-and-python/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/runtime/knowledge_graphify_graph_backend_plan.md",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "url": "https://neuraloperator.github.io/",
+      "status": 200,
+      "final_url": "https://neuraloperator.github.io/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 296
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1680
+        }
+      ]
+    },
+    {
+      "url": "https://openaccess.thecvf.com/content/CVPR2024/html/Wen_FoundationPose_Unified_6D_Pose_Estimation_and_Tracking_of_Novel_Objects_CVPR_2024_paper.html",
+      "status": 200,
+      "final_url": "https://openaccess.thecvf.com/content/CVPR2024/html/Wen_FoundationPose_Unified_6D_Pose_Estimation_and_Tracking_of_Novel_Objects_CVPR_2024_paper.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 83
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 494
+        }
+      ]
+    },
+    {
+      "url": "https://openreview.net/pdf/01d70bfa8e028d270c07056a9409380971c5758b.pdf",
+      "status": 403,
+      "final_url": "https://openreview.net/pdf/01d70bfa8e028d270c07056a9409380971c5758b.pdf",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 137
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 374
+        }
+      ]
+    },
+    {
+      "url": "https://opentelemetry.io/docs/concepts/semantic-conventions/",
+      "status": 200,
+      "final_url": "https://opentelemetry.io/docs/concepts/semantic-conventions/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 535
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 328
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 257
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 217
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 757
+        }
+      ]
+    },
+    {
+      "url": "https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html",
+      "status": 200,
+      "final_url": "https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 200
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1303
+        }
+      ]
+    },
+    {
+      "url": "https://par.nsf.gov/biblio/10327769-black-box-simplex-architecture-runtime-assurance-autonomous-cps",
+      "status": "unresolved",
+      "reason": "<urlopen error timed out>",
+      "classification": "network_unresolved",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 133
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 704
+        }
+      ]
+    },
+    {
+      "url": "https://plotly.com/python/",
+      "status": 200,
+      "final_url": "https://plotly.com/python/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 315
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1684
+        }
+      ]
+    },
+    {
+      "url": "https://printflow3d.com/pages/how-to-use-the-printflow3d-software",
+      "status": 200,
+      "final_url": "https://printflow3d.com/pages/how-to-use-the-printflow3d-software",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 922
+        }
+      ]
+    },
+    {
+      "url": "https://pubs.rsc.org/en/content/articlehtml/2025/dd/d5dd00175g",
+      "status": 403,
+      "final_url": "https://pubs.rsc.org/en/content/articlehtml/2025/dd/d5dd00175g",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 156
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1306
+        }
+      ]
+    },
+    {
+      "url": "https://pyautogui.readthedocs.io/en/latest/index.html",
+      "status": 200,
+      "final_url": "https://pyautogui.readthedocs.io/en/latest/index.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 121
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 874
+        }
+      ]
+    },
+    {
+      "url": "https://pyautogui.readthedocs.io/en/latest/keyboard.html",
+      "status": 200,
+      "final_url": "https://pyautogui.readthedocs.io/en/latest/keyboard.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 123
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 876
+        }
+      ]
+    },
+    {
+      "url": "https://pyautogui.readthedocs.io/en/latest/mouse.html",
+      "status": 200,
+      "final_url": "https://pyautogui.readthedocs.io/en/latest/mouse.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 124
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 877
+        }
+      ]
+    },
+    {
+      "url": "https://pyautogui.readthedocs.io/en/latest/screenshot.html",
+      "status": 200,
+      "final_url": "https://pyautogui.readthedocs.io/en/latest/screenshot.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 122
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 875
+        }
+      ]
+    },
+    {
+      "url": "https://pymeshlab.readthedocs.io/en/latest/filter_list.html#meshing-isotropic-explicit-remeshing",
+      "status": 200,
+      "final_url": "https://pymeshlab.readthedocs.io/en/latest/filter_list.html#meshing-isotropic-explicit-remeshing",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-09-09-sparse-native-fem-improvement.md",
+          "line": 81
+        }
+      ]
+    },
+    {
+      "url": "https://pypi.org/project/frd2vtu/",
+      "status": 200,
+      "final_url": "https://pypi.org/project/frd2vtu/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 258
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1673
+        }
+      ]
+    },
+    {
+      "url": "https://python-watchdog.readthedocs.io/",
+      "status": 200,
+      "final_url": "https://python-watchdog.readthedocs.io/en/stable/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 176
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 882
+        }
+      ]
+    },
+    {
+      "url": "https://python-watchdog.readthedocs.io/en/stable/quickstart.html",
+      "status": 200,
+      "final_url": "https://python-watchdog.readthedocs.io/en/stable/quickstart.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 177
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 883
+        }
+      ]
+    },
+    {
+      "url": "https://pytorch.org/blog/neuraloperatorjoins-the-pytorch-ecosystem/",
+      "status": 200,
+      "final_url": "https://pytorch.org/blog/neuraloperatorjoins-the-pytorch-ecosystem/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 297
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1681
+        }
+      ]
+    },
+    {
+      "url": "https://pywinauto.readthedocs.io/en/0.6.3/getting_started.html",
+      "status": 200,
+      "final_url": "https://pywinauto.readthedocs.io/en/0.6.3/getting_started.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 144
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 879
+        }
+      ]
+    },
+    {
+      "url": "https://raw.githubusercontent.com/isaac-sim/IsaacLab/release/3.0.0-beta2/README.md",
+      "status": 200,
+      "final_url": "https://raw.githubusercontent.com/isaac-sim/IsaacLab/release/3.0.0-beta2/README.md",
+      "content_type": "text/plain; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/plans/2026-07-02-isaac-lab-mimic-current-code-integration.md",
+          "line": 47
+        }
+      ]
+    },
+    {
+      "url": "https://sikulix.com",
+      "status": 200,
+      "final_url": "https://sikulix.com",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 210
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 885
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 921
+        }
+      ]
+    },
+    {
+      "url": "https://sikulix.github.io/docs",
+      "status": 404,
+      "final_url": "https://sikulix.github.io/docs",
+      "classification": "historical_unavailable_annotated",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 210
+        }
+      ]
+    },
+    {
+      "url": "https://snl-dakota.github.io/docs/6.19.0/users/usingdakota/studytypes/nonlinearleastsquares.html",
+      "status": 200,
+      "final_url": "https://snl-dakota.github.io/docs/6.19.0/users/usingdakota/studytypes/nonlinearleastsquares.html",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 263
+        }
+      ]
+    },
+    {
+      "url": "https://specs.frictionlessdata.io/tabular-data-package/",
+      "status": 200,
+      "final_url": "https://specs.frictionlessdata.io/tabular-data-package/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 180
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1300
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 158
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1308
+        }
+      ]
+    },
+    {
+      "url": "https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=957942",
+      "status": 200,
+      "final_url": "https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=957942",
+      "content_type": "application/pdf;charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 69
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 388
+        }
+      ]
+    },
+    {
+      "url": "https://unc-robotics.github.io/eos/",
+      "status": 200,
+      "final_url": "https://unc-robotics.github.io/eos/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 166
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1297
+        }
+      ]
+    },
+    {
+      "url": "https://unpkg.com/vtk.js@34.15.4/Copyright.txt",
+      "status": 200,
+      "final_url": "https://unpkg.com/vtk.js@34.15.4/Copyright.txt",
+      "content_type": "text/plain; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "web/static/vendor/README.md",
+          "line": 5
+        }
+      ]
+    },
+    {
+      "url": "https://unpkg.com/vtk.js@34.15.4/vtk.js",
+      "status": 200,
+      "final_url": "https://unpkg.com/vtk.js@34.15.4/vtk.js",
+      "content_type": "text/javascript; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "web/static/vendor/README.md",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "url": "https://vega.github.io/vega-lite/",
+      "status": 200,
+      "final_url": "https://vega.github.io/vega-lite/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 65
+        }
+      ]
+    },
+    {
+      "url": "https://web.mit.edu/calculix_v2.7/CalculiX/ccx_2.7/doc/ccx/node160.html",
+      "status": 200,
+      "final_url": "https://web.mit.edu/calculix_v2.7/CalculiX/ccx_2.7/doc/ccx/node160.html",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 232
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1305
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 239
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1670
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambuddy.cool/features/slicer-api/",
+      "status": 200,
+      "final_url": "https://wiki.bambuddy.cool/features/slicer-api/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 907
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambulab.com/en/general/printer-network-ports",
+      "status": 200,
+      "final_url": "https://wiki.bambulab.com/en/general/printer-network-ports",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 56
+        },
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 447
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1167
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 210
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 900
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambulab.com/en/knowledge-sharing/access-code-connect",
+      "status": 200,
+      "final_url": "https://wiki.bambulab.com/en/knowledge-sharing/access-code-connect",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1169
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode",
+      "status": 200,
+      "final_url": "https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 55
+        },
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 446
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1166
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 209
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 899
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambulab.com/en/software/bambu-connect",
+      "status": 200,
+      "final_url": "https://wiki.bambulab.com/en/software/bambu-connect",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1171
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambulab.com/en/software/bambu-farm-manager",
+      "status": 200,
+      "final_url": "https://wiki.bambulab.com/en/software/bambu-farm-manager",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1173
+        }
+      ]
+    },
+    {
+      "url": "https://wiki.bambulab.com/en/software/third-party-integration",
+      "status": 200,
+      "final_url": "https://wiki.bambulab.com/en/software/third-party-integration",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 448
+        },
+        {
+          "path": "docs/oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md",
+          "line": 1170
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 211
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 908
+        }
+      ]
+    },
+    {
+      "url": "https://www.3djake.ie/info/guide/fully-automate-your-3d-printer-auto-ejection-queues-and-loops",
+      "status": 200,
+      "final_url": "https://www.3djake.ie/info/guide/fully-automate-your-3d-printer-auto-ejection-queues-and-loops",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 224
+        }
+      ]
+    },
+    {
+      "url": "https://www.calculix.de/",
+      "status": "unresolved",
+      "reason": "<urlopen error [Errno -3] Temporary failure in name resolution>",
+      "classification": "network_unresolved",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-02-calculix-quasistatic-compression-design.md",
+          "line": 45
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 231
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 329
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1304
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 240
+        },
+        {
+          "path": "docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md",
+          "line": 1671
+        }
+      ]
+    },
+    {
+      "url": "https://www.cambridge.org/engage/chemrxiv/article-details/64ed86aa3fdae147fa0be615",
+      "status": 200,
+      "final_url": "https://www.cambridge.org/engage/chemrxiv/article-details/64ed86aa3fdae147fa0be615",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 219
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 901
+        }
+      ],
+      "note": "Initial 404; retry HTTP 200 and matching article title/abstract/DOI verified."
+    },
+    {
+      "url": "https://www.dhondt.de/ccx_2.20.pdf",
+      "status": 200,
+      "final_url": "https://www.dhondt.de/ccx_2.20.pdf",
+      "content_type": "application/pdf",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 315
+        }
+      ]
+    },
+    {
+      "url": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/06319.pdf",
+      "status": 200,
+      "final_url": "https://www.ecva.net/papers/eccv_2024/papers_ECCV/papers/06319.pdf",
+      "content_type": "application/pdf",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 56
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 491
+        }
+      ]
+    },
+    {
+      "url": "https://www.fabbaloo.com/news/factorian-designs-shows-how-to-implement-auto-ejection-on-desktop-3d-printers",
+      "status": 200,
+      "final_url": "https://www.fabbaloo.com/news/factorian-designs-shows-how-to-implement-auto-ejection-on-desktop-3d-printers",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 225
+        }
+      ]
+    },
+    {
+      "url": "https://www.fabbaloo.com/news/new-free-looprint-utility-enables-hands-free-batch-production",
+      "status": 200,
+      "final_url": "https://www.fabbaloo.com/news/new-free-looprint-utility-enables-hands-free-batch-production",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 915
+        }
+      ]
+    },
+    {
+      "url": "https://www.fda.gov/inspections-compliance-enforcement-and-criminal-investigations/fda-bioresearch-monitoring-information/guidance-industry-computerized-systems-used-clinical-trials",
+      "status": 404,
+      "final_url": "https://www.fda.gov/apology_objects/abuse-detection-apology.html",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 152
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 707
+        }
+      ]
+    },
+    {
+      "url": "https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html",
+      "status": 200,
+      "final_url": "https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 300
+        }
+      ]
+    },
+    {
+      "url": "https://www.mdpi.com/1996-1944/11/7/1095",
+      "status": 403,
+      "final_url": "https://www.mdpi.com/1996-1944/11/7/1095",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-02-analysis-stress-strain-energy-design.md",
+          "line": 47
+        }
+      ]
+    },
+    {
+      "url": "https://www.microsoft.com/en-us/research/publication/autogen-enabling-next-gen-llm-applications-via-multi-agent-conversation-framework/",
+      "status": 200,
+      "final_url": "https://www.microsoft.com/en-us/research/publication/autogen-enabling-next-gen-llm-applications-via-multi-agent-conversation-framework/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 184
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 644
+        }
+      ]
+    },
+    {
+      "url": "https://www.nasa.gov/directorates/stmd/space-tech-research-grants/multi-platform-multi-architecture-runtime-verification-of-autonomous-space-systems/",
+      "status": 200,
+      "final_url": "https://www.nasa.gov/directorates/stmd/space-tech-research-grants/multi-platform-multi-architecture-runtime-verification-of-autonomous-space-systems/",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 132
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 703
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/nature02236",
+      "status": "unresolved",
+      "reason": "<urlopen error timed out>",
+      "classification": "network_unresolved",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 61
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 368
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41467-020-19597-w",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41467-020-19597-w?error=cookies_not_supported&code=9bc1b979-43e5-4b10-a215-2b35f4531ceb",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 85
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 370
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41467-022-28580-6",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41467-022-28580-6?error=cookies_not_supported&code=242f8919-5be5-4b5d-8872-d52c6d89d148",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 123
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1295
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41467-023-36965-4",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41467-023-36965-4?error=cookies_not_supported&code=8507ecd4-e9cd-4a57-8f36-85d685d12a74",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-02-analysis-stress-strain-energy-design.md",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41467-023-44599-9",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41467-023-44599-9?error=cookies_not_supported&code=918c09a4-0de9-4e49-b849-5c4c8effa3d0",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 126
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1304
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41467-025-59231-1",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41467-025-59231-1?error=cookies_not_supported&code=a3c31216-5389-4b0e-9e15-ad488c4fb540",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 102
+        },
+        {
+          "path": "README.md",
+          "line": 103
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41524-021-00656-9",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41524-021-00656-9?error=cookies_not_supported&code=03208ccb-c94d-44b7-989c-d883755ef280",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 115
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 893
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41524-021-00662-x",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41524-021-00662-x?error=cookies_not_supported&code=8794df44-d93c-4a96-814d-6923644e81d2",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 116
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 894
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41524-022-00947-9",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41524-022-00947-9?error=cookies_not_supported&code=c93f31e5-c6ea-4ca8-81a5-b08ef9fe5232",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 290
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1307
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41524-023-01173-7",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41524-023-01173-7?error=cookies_not_supported&code=3d05de7c-8b0f-4909-9b40-bea01c079ea7",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 292
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1309
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41524-024-01274-x",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41524-024-01274-x?error=cookies_not_supported&code=b64bc003-bae5-4096-9e70-5e564c61e8a4",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 125
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 373
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 293
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1310
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41586-023-06734-w",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41586-023-06734-w?error=cookies_not_supported&code=12bf59b0-240a-484a-9cae-b6aa51609789",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 141
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1305
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41586-023-06792-0",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41586-023-06792-0?error=cookies_not_supported&code=53c03540-6eea-4a36-a646-1a326211b93c",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 113
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 372
+        }
+      ]
+    },
+    {
+      "url": "https://www.nature.com/articles/s41598-026-55663-x",
+      "status": 200,
+      "final_url": "https://www.nature.com/articles/s41598-026-55663-x?error=cookies_not_supported&code=078065aa-36ea-4038-b5e2-58c580ebd0d0",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-02-analysis-stress-strain-energy-design.md",
+          "line": 46
+        }
+      ]
+    },
+    {
+      "url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "status": 200,
+      "final_url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 70
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 695
+        }
+      ]
+    },
+    {
+      "url": "https://www.nist.gov/programs-projects/development-standards-support-modular-and-autonomous-laboratory-ecosystem",
+      "status": 200,
+      "final_url": "https://www.nist.gov/programs-projects/development-standards-support-modular-and-autonomous-laboratory-ecosystem",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "README.ko.md",
+          "line": 103
+        },
+        {
+          "path": "README.md",
+          "line": 104
+        }
+      ]
+    },
+    {
+      "url": "https://www.nist.gov/programs-projects/digital-thread-smart-manufacturing",
+      "status": 200,
+      "final_url": "https://www.nist.gov/programs-projects/digital-thread-smart-manufacturing",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 57
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 385
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 424
+        }
+      ]
+    },
+    {
+      "url": "https://www.nist.gov/programs-projects/real-time-monitoring-and-control-additive-manufacturing-processes",
+      "status": 200,
+      "final_url": "https://www.nist.gov/programs-projects/real-time-monitoring-and-control-additive-manufacturing-processes",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 93
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 386
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 425
+        }
+      ]
+    },
+    {
+      "url": "https://www.nist.gov/publications/human-loop-bayesian-autonomous-materials-phase-mapping",
+      "status": 200,
+      "final_url": "https://www.nist.gov/publications/human-loop-bayesian-autonomous-materials-phase-mapping",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 132
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 895
+        }
+      ]
+    },
+    {
+      "url": "https://www.nlr.gov/materials-science/autonomous-experimentation",
+      "status": 200,
+      "final_url": "https://www.nlr.gov/materials-science/autonomous-experimentation",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 902
+        }
+      ]
+    },
+    {
+      "url": "https://www.nngroup.com/articles/dashboards-preattentive/",
+      "status": 200,
+      "final_url": "https://www.nngroup.com/articles/dashboards-preattentive/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/live_gui_upgrade/01_orc_one_page_briefing_upgrade.md",
+          "line": 53
+        }
+      ]
+    },
+    {
+      "url": "https://www.nngroup.com/articles/ten-usability-heuristics/",
+      "status": 200,
+      "final_url": "https://www.nngroup.com/articles/ten-usability-heuristics/",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 412
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 427
+        },
+        {
+          "path": "docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md",
+          "line": 536
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 782
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 332
+        },
+        {
+          "path": "docs/oldversion/개선안/07_bo_agent_reasoning_augmented_optimizer_research.md",
+          "line": 940
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 259
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 218
+        },
+        {
+          "path": "docs/oldversion/개선안/10_orchestration_agent_supervisor_followup_loop_research.md",
+          "line": 758
+        }
+      ]
+    },
+    {
+      "url": "https://www.ornl.gov/autonomousscience",
+      "status": 200,
+      "final_url": "https://www.ornl.gov/autonomousscience",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 182
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 711
+        }
+      ]
+    },
+    {
+      "url": "https://www.osha.gov/enforcement/directives/std-01-12-002",
+      "status": 200,
+      "final_url": "https://www.osha.gov/enforcement/directives/std-01-12-002",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 117
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 702
+        }
+      ]
+    },
+    {
+      "url": "https://www.osha.gov/incident-investigation",
+      "status": 200,
+      "final_url": "https://www.osha.gov/incident-investigation",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 167
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 709
+        }
+      ]
+    },
+    {
+      "url": "https://www.osha.gov/robotics",
+      "status": 200,
+      "final_url": "https://www.osha.gov/robotics",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 116
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 701
+        }
+      ]
+    },
+    {
+      "url": "https://www.physicalintelligence.company/download/pi05.pdf",
+      "status": 429,
+      "final_url": "https://www.physicalintelligence.company/download/pi05.pdf",
+      "classification": "rate_limited",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 82
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 737
+        }
+      ]
+    },
+    {
+      "url": "https://www.pi.website/blog/pi05",
+      "status": 429,
+      "final_url": "https://www.pi.website/blog/pi05",
+      "classification": "rate_limited",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 82
+        },
+        {
+          "path": "docs/oldversion/개선안/04_manipulation_agent_pi05_vla_loop_research.md",
+          "line": 736
+        }
+      ]
+    },
+    {
+      "url": "https://www.pyvisa.org/docs",
+      "status": 200,
+      "final_url": "https://www.pyvisa.org/docs",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 154
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 880
+        }
+      ]
+    },
+    {
+      "url": "https://www.pyvisa.org/docs/interfaces",
+      "status": 200,
+      "final_url": "https://www.pyvisa.org/docs/interfaces",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 155
+        },
+        {
+          "path": "docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md",
+          "line": 881
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/11wexiz/automatic_print_ejection_and_print_queue/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/11wexiz/automatic_print_ejection_and_print_queue/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 454
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 220
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/144z4mx/part_1_auto_eject_on_bambu_p1p/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/144z4mx/part_1_auto_eject_on_bambu_p1p/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 935
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1erqr3i/auto_eject_gcode/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1erqr3i/auto_eject_gcode/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 931
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1eyw99x/auto_eject_for_print_farm/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1eyw99x/auto_eject_for_print_farm/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 936
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1jfayjd/a1_mini_auto_eject_end_g_code/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1jfayjd/a1_mini_auto_eject_end_g_code/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 221
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 930
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1jfv2of/i_built_an_autoeject_system_and_motorized_door/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1jfv2of/i_built_an_autoeject_system_and_motorized_door/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 456
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 937
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1k7ffzl/a1_mini_auto_ejection_fail_build_plate_shifts/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1k7ffzl/a1_mini_auto_ejection_fail_build_plate_shifts/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 455
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 222
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 932
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1kob69u/automation_success_a1_mini_autoeject_working/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1kob69u/automation_success_a1_mini_autoeject_working/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 223
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 933
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1poqj8x/automated_multiloop_printing_for_bambu_lab/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1poqj8x/automated_multiloop_printing_for_bambu_lab/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 914
+        }
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/BambuLab/comments/1t9pbn8/bambu_p1s_mqtt_project_file_command_returns/",
+      "status": 200,
+      "final_url": "https://www.reddit.com/r/BambuLab/comments/1t9pbn8/bambu_p1s_mqtt_project_file_command_returns/",
+      "content_type": "text/html",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 934
+        }
+      ]
+    },
+    {
+      "url": "https://www.sandia.gov/files/cubit/15.8/help_manual/WebHelp/mesh_generation/mesh_quality_assessment/tetrahedral_metrics.htm",
+      "status": 200,
+      "final_url": "https://www.sandia.gov/files/cubit/15.8/help_manual/WebHelp/mesh_generation/mesh_quality_assessment/tetrahedral_metrics.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md",
+          "line": 296
+        }
+      ]
+    },
+    {
+      "url": "https://www.sciencedirect.com/org/science/article/pii/S2635098X23001158",
+      "status": 403,
+      "final_url": "https://www.sciencedirect.com/org/science/article/pii/S2635098X23001158",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 181
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 710
+        }
+      ]
+    },
+    {
+      "url": "https://www.sciencedirect.com/org/science/article/pii/S2635098X25002013",
+      "status": 403,
+      "final_url": "https://www.sciencedirect.com/org/science/article/pii/S2635098X25002013",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 152
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1298
+        }
+      ]
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/pii/S0264127525000644",
+      "status": 403,
+      "final_url": "https://www.sciencedirect.com/science/article/pii/S0264127525000644",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 132
+        },
+        {
+          "path": "docs/oldversion/개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md",
+          "line": 392
+        }
+      ]
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/pii/S1367578824000166",
+      "status": 403,
+      "final_url": "https://www.sciencedirect.com/science/article/pii/S1367578824000166",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 135
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 706
+        }
+      ]
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/pii/S2666386425006186",
+      "status": 403,
+      "final_url": "https://www.sciencedirect.com/science/article/pii/S2666386425006186",
+      "classification": "access_restricted",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 152
+        },
+        {
+          "path": "docs/oldversion/개선안/01_design_agent_agentic_loop_research.md",
+          "line": 376
+        }
+      ]
+    },
+    {
+      "url": "https://www.tomshardware.com/3d-printing/new-auto-ejection-tool-for-bambu-lab-print-farms-automatically-ejects-finished-3d-prints-from-the-machine-usd129-kit-includes-auto-door-opener-and-special-bed-surface-for-frictionless-part-ejection",
+      "status": 200,
+      "final_url": "https://www.tomshardware.com/3d-printing/new-auto-ejection-tool-for-bambu-lab-print-farms-automatically-ejects-finished-3d-prints-from-the-machine-usd129-kit-includes-auto-door-opener-and-special-bed-surface-for-frictionless-part-ejection",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 458
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 926
+        }
+      ]
+    },
+    {
+      "url": "https://www.w3.org/TR/prov-overview/",
+      "status": "unresolved",
+      "reason": "<urlopen error [SSL: WRONG_VERSION_NUMBER] wrong version number (_ssl.c:1000)>",
+      "classification": "network_unresolved",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 181
+        },
+        {
+          "path": "docs/oldversion/개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md",
+          "line": 1301
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 157
+        },
+        {
+          "path": "docs/oldversion/개선안/08_knowledge_agent_self_evolution_memory_rag_research.md",
+          "line": 1307
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 153
+        },
+        {
+          "path": "docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md",
+          "line": 708
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=-kBrIGv4A2Q",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=-kBrIGv4A2Q",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 941
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=7ec-NC-M-D0",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=7ec-NC-M-D0",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 939
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=SFd0sxN2eqk",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=SFd0sxN2eqk",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 940
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=VHI3ywHX7yU",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=VHI3ywHX7yU",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 231
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=Vxj1ii6dPYo",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=Vxj1ii6dPYo",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md",
+          "line": 457
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 231
+        },
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 938
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=ejWIhWr_lZk",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=ejWIhWr_lZk",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 942
+        }
+      ]
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=uNFLK3T05lY",
+      "status": 200,
+      "final_url": "https://www.youtube.com/watch?v=uNFLK3T05lY",
+      "content_type": "text/html; charset=utf-8",
+      "classification": "reachable",
+      "references": [
+        {
+          "path": "docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md",
+          "line": 943
+        }
+      ]
+    }
+  ]
+}

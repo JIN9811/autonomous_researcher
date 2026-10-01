@@ -19,8 +19,8 @@ source_of_truth:
   - backends/prompt_registry.py
   - app/controller.py
   - policies/validation_policy.py
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13-executable-agent-ide
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -30,6 +30,10 @@ related_docs:
   - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Design Agent Reference
 
@@ -168,7 +172,8 @@ in a four-value cell-size table.
 | Historical request without domain metadata | Retain the compatible legacy validation path |
 
 For example, a supplied `cell_size_mm=7.13789` and
-`relative_density=0.32123456` remain those values in the geometry request.
+`wall_thickness_mm=0.8123456` remain those values in the geometry request.
+Under `wall_cell_v1`, relative density is derived rather than a second free input.
 Display formatting is not coordinate rounding. Minimum-wall, bridge-distance,
 envelope and other manufacturing checks remain independent of BO bounds;
 Design's LLM still cannot rewrite the requested experiment point.
@@ -243,7 +248,7 @@ and **Constraint Check** (actual values, limits and margins). Historical heurist
 scores do not substitute for missing evaluation evidence in these cards. Unassessed
 performance remains unassessed; manufacturing verification belongs to Specimen.
 
-Design Space plots recorded relative density against wall thickness, with an
+Design Space plots recorded cell size against wall thickness, with an
 outlined selected point and a variable/range table. It does not encode objective
 scores. Coincident candidates share a position. Constraint Check adds per-row
 actual-value bars, limit markers and allowed-region shading; each row has its own

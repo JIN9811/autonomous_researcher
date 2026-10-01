@@ -146,11 +146,13 @@ show surface breadth and documentation drift; they are not usability or
 reliability metrics.
 
 Mutation-capable workspaces must make review and apply distinct where the
-underlying service requires it. The Knowledge workspace exposes Markdown,
-Memory, Ontology and Source Library. Source intake preserves originals and
+underlying service requires it. The current Knowledge workspace exposes shared
+Wiki, scoped Memory, Source Library, Agent Delivery and Ontology. Source intake preserves originals and
 publishes derived notes only through validated agent-local tools; retrieval
 retains source citations and caller scope. Ontology is the shared vocabulary,
-not an active graph database. See the [Knowledge Reference](../agents/knowledge_agent.md).
+not an active graph database. See the [Knowledge Reference](../agents/knowledge_agent.md)
+and [Wiki and Memory](../knowledge/wiki_memory.md). This current UI clarification
+is based on `web/templates/knowledge.html` at `dd0d772`, not a new browser test.
 
 ## Deployment Topology
 

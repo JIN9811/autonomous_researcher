@@ -75,7 +75,7 @@ supersedes: []
 | **[Device bridges](docs/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
 | **[Results and evidence](docs/paper/06_evaluation_and_results.md)** | Demonstrated outcomes and their supporting artifacts. |
-| **[Setup and operation](README.md)** | Installation, configuration, and operator workflows. |
+| **[Setup and operation](install/README.md)** | Installation, configuration, and operator workflows. |
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
 
 </div>
@@ -217,7 +217,7 @@ workflow, tools, interfaces, artifacts, and verification.
 | Vision | Capture observations and review visual evidence | [Vision](docs/agents/vision_agent.md) |
 | Manipulation | Select robot skills and review transfer completion | [Manipulation](docs/agents/manipulation_agent.md) |
 | Lab Equipment | Execute stored workflows and review acquisition results | [Lab Equipment](docs/agents/equipment_agent.md) |
-| Analysis | Process measurements and develop computational models | [Analysis](docs/agents/analysis_agent.md) |
+| Analysis | Parse measurements, compute properties and SEA, and publish evidence for BO | [Analysis](docs/agents/analysis_agent.md) |
 | Knowledge | Curate Markdown knowledge and retrieve scoped context | [Knowledge](docs/agents/knowledge_agent.md) |
 | Bayesian Optimization | Select optimization strategy and review numerical proposals | [BO](docs/agents/bo_agent.md) |
 | Guardian | Review execution evidence and advise continuation | [Guardian](docs/agents/guardian_agent.md) |
@@ -255,7 +255,7 @@ at 1920 × 1080.
 | Reader | Start here |
 |---|---|
 | Researcher or reviewer | [Problem and contributions](docs/paper/01_problem_and_contributions.md) → [Results](docs/paper/06_evaluation_and_results.md) |
-| Operator | [Installation and operation](README.md) → [Device bridges](docs/device_bridges/README.md) |
+| Operator | [Installation](install/README.md) → [First-run tutorial](docs/tutorials/first_autonomous_run.en.md) → [Device bridges](docs/device_bridges/README.md) |
 | Developer | [Runtime reference](docs/runtime/current_code_snapshot.md) → [Agent APIs](docs/agents/agent_api_connection_matrix.md) |
 | Contributor | [Contributing](CONTRIBUTING.md) → [Documentation rules](docs/standards/documentation_standard.md) |
 

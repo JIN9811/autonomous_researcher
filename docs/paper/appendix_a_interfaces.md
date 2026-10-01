@@ -66,7 +66,8 @@ closed-loop, execution/effect, and connection figures.
 
 Included are system-critical agent/stage, orchestrator, Guardian, device/model,
 knowledge, graph/module, and operator interfaces. The appendix does not list
-all 346 FastAPI routes individually.
+all FastAPI routes individually; the 346-entry count belongs to the initial
+2026-08-09 evidence, not the current API inventory.
 
 ## Source of Truth
 
@@ -107,10 +108,12 @@ concrete handoff used by the selected scenario.
 ## API Families
 
 The current route surface groups runtime/run/events/approvals, graphs/modules,
-knowledge/evolution, equipment workers, printers, robotics, optimization,
+Wiki/scoped knowledge memory and source delivery, equipment workers, printers, robotics, optimization,
 analysis, and operator pages. The current code snapshot records counts and
 representative responses. Routes are implementation interfaces; they are not
-independent paper contributions.
+independent paper contributions. The Self-Evolution service and graph-relation
+review APIs are retired; historical schema/record names do not establish active
+endpoints. See [the current Knowledge contract](../knowledge/wiki_memory.md).
 
 The working-tree [Orchestrator Agent Reference](../agents/orchestrator_agent.md)
 owns the bounded Setup proposal, confirmation, and next-new-run admission

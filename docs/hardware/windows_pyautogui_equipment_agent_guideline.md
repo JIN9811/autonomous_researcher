@@ -19,7 +19,7 @@ UTM은 `utm_windows_v1` Profile의 첫 적용 사례입니다. Agent 본체에 �
 3. 선택 provider의 `equipment.pyautogui.run`만 호출합니다.
 4. worker의 원시 결과와 증거를 수집합니다.
 5. Linux에서 completion policy를 한 번 적용합니다.
-6. 완료된 evidence package만 Analysis에 전달합니다.
+6. 완료된 evidence package를 유지하고, Manipulation의 post-test clear와 새 Vision clearance를 통과한 뒤 Analysis에 전달합니다.
 
 `utm.run_protocol`은 tool 부재 시 자동 fallback으로 사용하지 않습니다. native/direct UTM은 별도 Profile로 명시 등록해야 합니다.
 
@@ -34,7 +34,9 @@ Agent, Workspace, Live GUI, CUI, Runtime IDE는 동일 execution record를 읽�
 - validated/deployed: Linux 검증 후 배포
 - retired: 신규 실행 금지
 
-Skill 원본은 Linux `memory/equipment_skills/`입니다. 정상 Skill은 결정론적으로 실행하며 예외에서만 제한된 LLM 복구를 사용합니다.
+Skill 원본은 Linux `memory/equipment_skills/`입니다. 정상 Skill block 실행은 결정론적입니다.
+Managed Flow에서는 시작 전 bounded LLM selection과 종료 후 result review가 정상 경로에도 존재하며,
+block 사이마다 모델을 polling하지 않습니다. 예외 복구도 별도의 제한된 권한과 증거를 따릅니다.
 
 ## 녹화 기반 Skill 생성
 

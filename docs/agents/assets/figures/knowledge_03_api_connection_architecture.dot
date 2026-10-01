@@ -5,7 +5,7 @@ digraph knowledge_api_connection_architecture {
   ui [label="Knowledge Workspace\nMarkdown / Memory / Ontology / Sources"];
   api [label="Existing FastAPI app\n/api/knowledge/*"];
   md [label="Markdown store\nquery / detail / lifecycle", fillcolor="#E9F7EF", color="#2E7D59"];
-  typed [label="Existing JSONL + audit ledger\npatterns / performance / Evolution"];
+  typed [label="Existing JSONL + audit ledger\npatterns / performance"];
   ontology [label="Ontology registry\nclasses + relation definitions"];
   sources [label="Source library\nfull MD / curated notes / citations"];
   watcher [label="Opt-in source watcher\nlow-priority curation tools"];

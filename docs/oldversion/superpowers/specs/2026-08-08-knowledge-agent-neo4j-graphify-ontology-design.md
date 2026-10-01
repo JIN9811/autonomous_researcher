@@ -1,6 +1,8 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
+
+> Archive reading note (2026-09-29): The Neo4j-primary and Graph Explorer architecture below is the August 8 target design, not a current deployment requirement or proof that its full acceptance matrix passed. Current public/operator surfaces are [Wiki + Memory](../../../knowledge/wiki_memory.md) and [Knowledge Agent](../../../agents/knowledge_agent.md). Graph/ontology compatibility services remain in source, but their presence does not make Neo4j mandatory or prove it is enabled on a host. Do not execute the historical migration/start instructions as part of reading this archive.
 # Knowledge Agent Neo4j·Graphify Ontology Architecture Design
 
 ## 1. Document Purpose

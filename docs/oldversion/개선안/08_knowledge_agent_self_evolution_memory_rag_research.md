@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. SelfEvolutionService/Evolution Lab 중심의 현재형 설명과 graph DB 로드맵은 역사적 아키텍처 기록이다. 현재 운영 UI와 source-backed memory/delivery 계약은 [Wiki + Memory](../../knowledge/wiki_memory.md) 및 [Knowledge Agent](../../agents/knowledge_agent.md)를 따른다. 저장·전달·사용·개선 효과는 별도 증거가 필요하며, 본문의 roadmap/예시 outcome은 자율 배포 또는 성능 향상 실증을 뜻하지 않는다.
+
 # 08. Knowledge Agent + Self-Evolution 고도화안 - 연구 기억, 실패 패턴, 에이전트 진화 증거 루프
 
 작성일: 2026-05-28

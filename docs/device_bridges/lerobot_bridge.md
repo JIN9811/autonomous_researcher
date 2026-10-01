@@ -24,8 +24,8 @@ source_of_truth:
   - app/main.py
   - scripts/lerobot_managed_replay.py
   - utils/utm_clear_cycle.py
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/manipulation_agent.md
@@ -34,6 +34,10 @@ related_docs:
   - docs/hardware/isaac_sim_robotis_omx_mirror_mode.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # LeRobot Bridge Reference
 
@@ -353,13 +357,16 @@ Managed-replay update (2026-09-06, uncommitted working tree):
 `tests/unit/test_lerobot_replay.py` covers session identity, duplicate start,
 stop/start races, port ownership, partial cleanup failure and measured return;
 `tests/unit/test_utm_clear_cycle.py` covers downstream gates and cancellation.
-These are non-actuating tests. The new managed wrapper and post-sweep Vision
-confirmation have not been commissioned on hardware. Broader pre-existing
+These are non-actuating tests. At that 2026-09-06 check, the new managed wrapper
+and post-sweep Vision confirmation had not been commissioned on hardware.
+The later [2026-09-07 supervised cycle](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+records its own physical scope; neither record commissions every replay/profile.
+Broader pre-existing
 bridge failures were not hidden or treated as passing by this focused check.
 
 Standalone readiness update (2026-09-06, working tree): 23 focused driver,
 ActiveCam-loop, and artifact tests plus nine selected bridge ActiveCam tests
-passed without hardware actuation. Broader checks still reported three Isaac
+passed without hardware actuation. Broader checks at that time reported three Isaac
 timeout-expectation failures (0.15 versus 0.5 seconds) and one missing-camera
 teleop lease-metadata failure. Those paths were not changed by this update;
 this is not a clean full-suite or physical-performance verification.

@@ -17,11 +17,15 @@ source_of_truth:
   - graphs/modules/analysis/module.yaml
   - graphs/modules/analysis/ui.yaml
   - packages/agents/analysis/package.yaml
-last_verified: 2026-09-14
-verified_against: measurement-only-owner-unit-tests
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs: [docs/agents/README.md, docs/agents/equipment_agent.md, docs/agents/bo_agent.md, docs/agents/knowledge_agent.md]
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Analysis Agent Reference
 
@@ -204,8 +208,8 @@ The measurement-only revision passed 44 guarded orchestration-mode/loop checks
 Analysis/core-plan checks and two frontend lifecycle/rendering tests. Fresh-app
 API checks confirm retired computation routes are absent. These checks use
 controlled LLM responses and blocked device boundaries, not new registered-model
-or physical validation. The wider legacy UI suite and documentation validator
-still contain unrelated Equipment/Windows documentation expectations; this is
+or physical validation. At that revision, the wider legacy UI suite and
+documentation validator reported unrelated Equipment/Windows expectations; this is
 not a claim that every repository test passes. The prior supervised physical demonstration
 is documented separately in the [cycle evidence](../paper/evidence/2026-09-07-supervised-closed-loop.md).
 

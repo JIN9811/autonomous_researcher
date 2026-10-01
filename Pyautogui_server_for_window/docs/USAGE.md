@@ -144,7 +144,8 @@ LabEquipmentAgent
   -> Windows bridge /execute
   -> raw evidence collection
   -> one completion interpretation
-  -> Analysis handoff or explicit block
+  -> required post-test clearance / evidence gates (or explicit block)
+  -> Analysis handoff only after those gates pass
 ```
 
 모든 화면은 같은 `execution_id`의 기록을 읽습니다. 표시 상태는 Profile, Skill, provider 계약에 따라 달라질 수 있으며 하나의 고정 상태 순서를 모든 장비에 강제하지 않습니다.

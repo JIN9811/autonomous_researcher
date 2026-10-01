@@ -1,5 +1,12 @@
 # Measurement-only Analysis and retired computation services
 
+Status (source audit 2026-09-29, `dd0d772`): retained implementation record.
+Measurement-only Analysis and the retirement archive are present in main.
+The checklist and dated results below preserve their original verification
+scope; unchecked visual/commissioning work is not certified by this audit.
+Use [Analysis Agent](../../agents/analysis_agent.md) for current operation.
+Execution instructions below describe the original task, not a new authorization.
+
 > Execute in the current working tree, preserving existing unrelated changes. Use the executing-plans and test-driven-development workflows. Do not operate hardware or commit without a new request.
 
 **Goal:** Retain experimental postprocessing, quantitative metrics, LLM evidence decisions and BO delivery; retire FEM/CAE and Self-Evolution from active functionality.

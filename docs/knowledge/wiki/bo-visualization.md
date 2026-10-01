@@ -1,5 +1,5 @@
 ---
-{"topic_id":"bo-visualization","owner":"documentation","source_refs":["docs/agents/bo_agent.md","docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"c94fd36eaae85610dc266287337db37f8315640ca1fe4a7a7f26a22bdea47c14","docs/agents/analysis_agent.md":"92288bc305c63d5864c9e7680e233fa4ec85d3a1996e742541734972672400ad"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: bo-visualization","status":"reviewed"}
+{"topic_id":"bo-visualization","owner":"documentation","source_refs":["docs/agents/bo_agent.md","docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"1ba8c389239b02ff03943b167d01eba7f50f196a3c36a3a6b0f273cf7d371d33","docs/agents/analysis_agent.md":"708ad6643bc4055b589b48237b69e4948412af8293d0eec918cf12aef5f71516"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: bo-visualization","status":"reviewed"}
 ---
 
 # BO Visualization — LHS, Live Posterior and Objective

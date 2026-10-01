@@ -13,14 +13,18 @@ source_of_truth:
   - knowledge/source_api.py
   - agents/core/knowledge/source_curation.py
   - mcp_tools/source_tools.py
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-core-agent-roots
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/markdown_memory_operations.ko.md
   - docs/oldversion/superpowers/specs/2026-09-11-source-curation-design.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source inspection at `dd0d772`.
+Historical provider/test results retain their original scope; this review did not
+invoke models, mutate Knowledge stores or operate devices.
 
 # Source Library Operations
 

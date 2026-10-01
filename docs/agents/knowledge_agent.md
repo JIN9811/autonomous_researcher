@@ -31,8 +31,8 @@ source_of_truth:
   - utils/agent_artifact_archive.py
   - graphs/modules/knowledge/module.yaml
   - graphs/modules/knowledge/ui.yaml
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-core-agent-roots
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/knowledge/wiki_memory.md
   - docs/knowledge/publication.md
@@ -46,6 +46,10 @@ related_docs:
   - docs/modularity.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Knowledge Agent Reference
 
@@ -110,7 +114,7 @@ These are responsibility areas, not five new runtime stages.
 
 ![Knowledge source-backed composite control areas](assets/figures/knowledge_control_areas.svg)
 
-**Figure Knowledge-3.** The executable module remains a single composite task
+**Knowledge control areas.** The executable module remains a single composite task
 followed by delivery. CODE relationships expose the real decision, retrieval,
 storage and evidence sources without creating independently runnable stages.
 
@@ -207,7 +211,7 @@ presented as successful model reasoning.
 |---|---|---|
 | `inspect_evidence` | Empty arguments | Read frozen current source identities and content |
 | `search_knowledge` | Query, optional narrower scope, top_k, corpus | Ranked metadata/excerpts; no full bodies |
-| `read_knowledge` | ID previously returned by search | Read full selected record within the same scope |
+| `read_knowledge` | ID returned by search or a successful write receipt in this decision | Read full selected record within the same scope |
 | `write_knowledge_note` | Title/body, ontology class, source IDs, kind, tags | Validated atomic Markdown revision receipt |
 | `publish_context` | Summary, source IDs, explicit no-note reason when applicable | Accepted cited context or evidence-gap report |
 
@@ -445,9 +449,10 @@ query/detail responses did not replace newer selections. Console errors and
 retired-endpoint requests were empty. The fixture was stopped after verification. Lifecycle mutation
 remains API-only; the workspace displays and filters lifecycle status.
 
-Eight changed governed documents passed their focused validation. The full
-documentation manifest still reports pre-existing Windows bridge/PLC document
-governance errors in files outside this change.
+Eight changed governed documents passed their focused validation. At that
+2026-09-11 check, the full documentation manifest reported pre-existing Windows
+bridge/PLC document governance errors outside the change. This is historical
+test provenance, not the current validator result.
 
 The earlier 2026-09-10 execution-memory decision verification remains applicable:
 

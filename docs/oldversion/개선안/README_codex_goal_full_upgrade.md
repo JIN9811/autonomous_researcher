@@ -3,6 +3,8 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # Codex Goal Full Upgrade Implementation README
 
+> Review note (2026-09-29): This is an archived instruction artifact, not an active implementation request. Its FEM, Self-Evolution, simulated fallback, route, and validation requirements must not be applied to the current runtime. Use [current architecture](../../runtime/architecture.md), [module contracts](../../modularity.md), and [documentation index](../../README.md) for current behavior.
+
 대상 프로젝트: Autonomous Researcher Framework
 목표: `개선안/01`부터 `개선안/17`까지의 agent 고도화안, device bridge 고도화안, Live GUI 고도화안, 멀티피델리티/UTM ROS runtime 자가개선 루프 계획을 한 번의 장기 Codex Goal 작업에서 현재 코드 구조 기준으로 실제 구현한다.
 

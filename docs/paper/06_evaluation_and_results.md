@@ -66,7 +66,7 @@ into this paper's evaluated result set.
 - `E-INSPECT-ARCH-001`: inspected FastAPI and graph structure.
 - `E-INSPECT-CAMPAIGN-001`: [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md), including hashes, owner identity, curves, SEA normalization and retained failed attempts.
 - `E-LIVE-LOOP-001`: [one supervised mixed-mode iteration](evidence/2026-09-07-supervised-closed-loop.md), with raw archives retained locally and a public result/hash index.
-- `E-LIVE-LOOP-002`: [latest one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with measured-data quality, Analysis-to-BO feedback, and next-design continuity.
+- `E-LIVE-LOOP-002`: [later September 7 one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with measured-data quality, Analysis-to-BO feedback, and next-design continuity.
 - `E-TEST-DOC-001`: automated documentation-governance and publication
   contract tests.
 
@@ -78,7 +78,7 @@ Each record names its environment, commit, command, inputs, outputs, and hash.
 |---|---|---|---|---|---|
 | Declared closed-loop architecture | RQ1 | Inspection | `supported` | `E-INSPECT-ARCH-001` | The configured graph and route surface exist at the recorded baseline. |
 | Stage-contract integrity through a complete run | RQ1 | Archive inspection plus bounded live records | `partially_supported` | `E-LIVE-LOOP-001`, `E-INSPECT-CAMPAIGN-001` | Fifteen completed observations and a terminal BO final report are retained; this audit does not certify every physical action or an exhaustive failure matrix. |
-| Latest one-cycle integration demonstration | RQ1, RQ2 | Live / mixed mode | `supported` within one-cycle scope | `E-LIVE-LOOP-002` | Live compression CSV, placement and clearance verification, Analysis, BO-managed LHS, and next-design entry completed; no full-manufacturing claim. |
+| Later September 7 one-cycle integration demonstration | RQ1, RQ2 | Live / mixed mode | `supported` within one-cycle scope | `E-LIVE-LOOP-002` | Live compression CSV, placement and clearance verification, Analysis, BO-managed LHS, and next-design entry completed; no full-manufacturing claim. |
 | Checkpoint and resume behavior by failure class | RQ1 | Replay/simulation/live | `not_evaluated` | No qualifying record | Recovery effectiveness remains open. |
 | Claim-evidence schema integrity | RQ2 | Test | `partially_supported` | `E-TEST-DOC-001` | Structural references and hashes are checked; complete scientific lineage is not. |
 | Full run artifact lineage | RQ2 | Archive inspection | `partially_supported` | `E-INSPECT-CAMPAIGN-001` | 15/15 Design-result/Specimen/Analysis identities and STL hashes match; raw data remain local. This does not independently establish physical specimen identity. |
@@ -115,7 +115,7 @@ agent selected initial-design point 2/8, not an acquisition-ranked optimum.
 The next Design retained the requested parameters. See the evidence report
 for timestamps, printer skips, specimen substitution, and the archive index.
 
-The latest record `E-LIVE-LOOP-002` independently documents one completed
+The later September 7 record `E-LIVE-LOOP-002` separately documents one completed
 feedback cycle using a nonzero measured compression curve. All eight Equipment
 Skill blocks completed, both required placement/clearance verification
 boundaries were satisfied, Analysis accepted the data, and BO's next LHS point

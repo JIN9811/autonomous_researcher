@@ -3,6 +3,8 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # System Instruction Docs
 
+> Archive clarification (2026-09-29): the usage rules and package-contract statements below describe the retired development workflow. They do not require a branch/package change for archival navigation repairs or activate the preserved prompts.
+
 이 폴더는 **운영 설명 문서에서 제외**한 시스템 지시/프롬프트 자료만 보관합니다.
 
 ## 목적
@@ -28,5 +30,7 @@
 - 이 폴더의 문서를 변경할 때는 레포 루트 브랜치/패키지 변경이 동반되어야 한다.
 
 ## 참고
+
+보관 탐색: IDE 이미지·아이콘은 [원래 IDE 자산 묶음](../ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/README_ASSETS.md), Live GUI 이미지는 [원래 Live GUI 패키지](../ATR_Live_GUI_Graph_Package/docs/PACKAGING_README.md), Evolution 설계는 [원래 Evolution 패키지](../ATR_Self_Evolution_Package/docs/SELF_EVOLUTION_SPEC.md)에 보존되어 있습니다. 아래 프롬프트 안의 자산 경로는 작성 당시 패키지 기준이며 `system/`의 실제 파일 경로가 아닙니다.
 
 패키지 내부(`ATR_*_Package`)에도 패키지 범위의 지시 문서가 존재할 수 있다. 해당 문서는 패키지 구현 계약의 일부로 유지한다.

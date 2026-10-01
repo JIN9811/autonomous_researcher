@@ -413,7 +413,9 @@ The Live GUI card is intentionally compact. Full RQT-like flow is exposed in the
 Test mode:
 
 - If ROS2/UTM camera evidence exists, use the real ROS observer.
-- If ROS2/topic/camera evidence is unavailable, continue through `virtual_utm_bridge` and leave a fallback trace.
+- If ROS2/topic/camera evidence is unavailable, the explicitly configured virtual
+  Test path may use `virtual_utm_bridge` when `allow_virtual_bridge_in_test` permits
+  it, leaving a fallback trace. Do not reinterpret an effective-live device path as virtual.
 - Do not claim physical UTM completion from virtual evidence.
 
 Live mode:
@@ -445,7 +447,10 @@ artifacts/browser_checks/utm_runtime_live_gui_flow_compact.png
 artifacts/browser_checks/utm_live_gui_test_mode_fullpath_summary.json
 ```
 
-The full-path summary records the Live GUI `테스트 모드, 가상 브릿지` run. A valid completed run has `workflow_complete=true`, `stage=complete`, `loop_count=5`, and one message from every agent stage from Design through Guardian.
+The full-path summary records that historical Live GUI `테스트 모드, 가상 브릿지` fixture:
+it completed with `workflow_complete=true`, `stage=complete`, `loop_count=5`, and
+messages from Design through Guardian. Five loops is that fixture's count, not
+a universal completion requirement for current configured runs.
 
 Short runtime preflight performed on 2026-06-22:
 
@@ -488,7 +493,10 @@ GUI pacing: `/image_utm` is capped once in green-dot; the MJPEG worker does not 
 
 ## D455F Specimen Pose Tracker Separation
 
-The UTM/BRIO bridge remains the inspection and placement-verification camera path. D455F specimen pose tracking is a separate one-shot ROS runtime used before manipulation.
+The UTM/BRIO bridge remains the inspection and placement-verification camera path.
+D455F specimen pose tracking is a separate optional one-shot ROS runtime, not the
+current default ActiveCam wrist-camera pickup workflow. See the
+[Vision Reference](../agents/vision_agent.md) for current pickup ownership.
 
 The D455F tracker does not reuse `/image_utm` and does not keep a shared ROS topic open for VLA. It captures one RGB-D pose, stops ROS, confirms release, and returns the camera to VLA.
 

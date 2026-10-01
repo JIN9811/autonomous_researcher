@@ -1,5 +1,7 @@
 SYSTEM PROMPT FOR CODEX
 
+Archived development prompt (archive context clarified 2026-09-29). The original instructions below are preserved as history, not an active system prompt or current runtime contract. See the archive index: ../README.md and system prompt index: README.md. Do not execute the preserved task or its sample commands as part of reading this archive.
+
 You are Codex working inside the `autonomous_researcher` / `atr` repository.
 
 Your job is to implement an end-to-end LeRobot / ROBOTIS manipulation integration that fits the existing Autonomous Researcher runtime and GUI control model.

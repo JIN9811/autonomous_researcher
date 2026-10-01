@@ -1,5 +1,13 @@
 # Image Assets
 
+> Historical presentation set, reviewed 2026-09-29. These generated prompts and
+> diagrams preserve an earlier Prusa-centric architecture and model labels;
+> they are not current runtime instructions or experimental evidence. Current
+> diagrams are in the [agent references](../docs/agents/README.md),
+> [bridge references](../docs/device_bridges/README.md), and
+> [presentation source index](../docs/assets/presentation/README.md).
+> The workflow below reproduces this older set, not the current documentation.
+
 This folder contains PPT-ready academic presentation figure-style vector diagrams generated from `diagram_manifest.json`.
 
 - `prompt/*.prompt.md`: image-generation prompts, one per diagram.

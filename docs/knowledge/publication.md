@@ -8,12 +8,16 @@ scope: [knowledge, publication_boundary, github]
 summary: Pre-commit and CI procedures for preventing private Knowledge data from entering public publication.
 source_of_truth:
   - scripts/verify_knowledge_publication.py
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/knowledge/wiki_memory.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source inspection at `dd0d772`.
+Historical provider/test results retain their original scope; this review did not
+invoke models, mutate Knowledge stores or operate devices.
 
 # Knowledge Publication Boundary
 

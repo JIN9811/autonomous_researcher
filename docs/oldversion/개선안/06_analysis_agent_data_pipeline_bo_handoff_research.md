@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. 현재 parsing·metric·BO handoff 계약은 [Analysis Agent](../../agents/analysis_agent.md)를 따른다. 특히 본문의 peak-boundary 차단안/0.85 confidence threshold는 역사적 제안이다. 현재 구현은 정의된 50% 높이 적분 구간과 데이터 품질을 평가하며, curve boundary 경고만으로 해당 SEA observation을 자동 무효화하지 않는다. FEM blend·multi-fidelity·PINN 예시는 실제 측정 또는 활성 backend의 증거가 아니다.
+
 # 06. Analysis Agent 고도화안 - 실험 파일 자동 전처리/분석/비교/BO handoff 루프
 
 작성일: 2026-05-28
@@ -16,7 +19,7 @@ Analysis Agent의 역할은 단순히 UTM curve에서 `objective_score`를 계�
 Analysis Agent = raw experiment artifact + FEM/CAE prediction artifact -> canonical dataset -> validated UTM/FEM metrics -> objective/evaluation -> BO-ready JSON owner
 ```
 
-따라서 핵심 출력은 하나의 summary가 아니라 아래 네 가지여야 한다.
+따라서 제안하는 핵심 출력은 하나의 summary가 아니라 아래 여섯 묶음이다.
 
 ```text
 1. analysis_report.json
@@ -285,7 +288,7 @@ project_docs/
 출처:
 
 - Multi-fidelity materials screening, npj Computational Materials: https://www.nature.com/articles/s41524-022-00947-9
-- BoTorch multi-fidelity BO tutorial: https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo/
+- BoTorch multi-fidelity BO tutorial: https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo
 - Physics-informed BO for material design, npj Computational Materials: https://www.nature.com/articles/s41524-023-01173-7
 - Constrained multi-objective BO in self-driving labs, npj Computational Materials: https://www.nature.com/articles/s41524-024-01274-x
 - Bayesian calibration of computer models, Kennedy and O'Hagan: https://ideas.repec.org/a/bla/jorssb/v63y2001i3p425-464.html
@@ -1302,7 +1305,7 @@ Analysis Agent가 이 역할을 제대로 해주면, 뒤의 Knowledge/BO/Guardia
 - CalculiX input deck reference: https://web.mit.edu/calculix_v2.7/CalculiX/ccx_2.7/doc/ccx/node160.html
 - ccx2paraview postprocessor: https://github.com/calculix/ccx2paraview
 - Multi-fidelity materials screening, npj Computational Materials: https://www.nature.com/articles/s41524-022-00947-9
-- BoTorch multi-fidelity BO tutorial: https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo/
+- BoTorch multi-fidelity BO tutorial: https://botorch.org/docs/v0.16.0/tutorials/multi_fidelity_bo
 - Physics-informed BO for material design, npj Computational Materials: https://www.nature.com/articles/s41524-023-01173-7
 - Constrained multi-objective BO in self-driving labs, npj Computational Materials: https://www.nature.com/articles/s41524-024-01274-x
 - Bayesian calibration of computer models, Kennedy and O'Hagan: https://ideas.repec.org/a/bla/jorssb/v63y2001i3p425-464.html

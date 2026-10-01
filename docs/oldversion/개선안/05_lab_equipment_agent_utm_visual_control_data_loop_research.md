@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. program1 demo, 미구현 artifact pull 및 미래 protocol/action 목록은 작성 당시 상태와 제안이다. 현재 서버 소유 workflow 선택, terminal/recovery 판단과 실행 경계는 [Equipment Agent](../../agents/equipment_agent.md), 입력 데이터 처리는 [Analysis Agent](../../agents/analysis_agent.md)를 따른다. 예시 macro·retry·stop 명령은 실행 지침 또는 현행 allowlist가 아니다.
+
 # 05. Lab Equipment Agent 고도화안 - UTM 시각제어/화면제어 + 데이터 회수 루프
 
 작성일: 2026-05-28
@@ -204,7 +207,7 @@ Windows GUI locator stack:
 출처:
 
 - FACS automation case: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0299402
-- SikuliX visual automation docs: https://sikulix.github.io/docs
+- SikuliX official overview: https://sikulix.com (2026-09-29 접근 확인; 원래 문서 주소 `https://sikulix.github.io/docs`는 HTTP 404, 동일 문서의 대체본으로 단정하지 않음)
 - Visual GUI testing industrial case study: https://arxiv.org/abs/2005.09303
 - Survey on MLLM-based GUI agents: https://arxiv.org/abs/2504.13865
 
@@ -879,7 +882,7 @@ Guardian            = 위험/반복 실패 stop authority
 - watchdog documentation: https://python-watchdog.readthedocs.io/
 - watchdog quickstart: https://python-watchdog.readthedocs.io/en/stable/quickstart.html
 - PLOS One FACS automation with PyAutoGUI and commercial instrument GUI: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0299402
-- SikuliX visual automation documentation: https://sikulix.github.io/docs
+- SikuliX official overview: https://sikulix.com (기존 역사적 docs 경로는 위 접근성 메모 참조)
 - Visual GUI testing in practice, industrial case study: https://arxiv.org/abs/2005.09303
 - A Survey on MLLM-Based GUI Agents: https://arxiv.org/abs/2504.13865
 
@@ -915,6 +918,6 @@ Lab Equipment Agent의 Live GUI는 Windows PC의 PyAutoGUI 호출 성공 여부�
 ### 참고 출처
 
 - PyAutoGUI 기반 상용 장비 GUI 자동화 사례는 FACS 자동화 논문에서 확인된다: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0299402
-- SikuliX는 image 기반 GUI automation/verification의 참고 구현이다: https://sikulix.github.io/docs
+- SikuliX는 image 기반 GUI automation/verification의 참고 구현이다: https://sikulix.com (현재 공식 개요; 역사적 docs 경로와 구분)
 - LangGraph interrupt는 위험한 장비 명령 전 human approval UI에 적합하다: https://docs.langchain.com/oss/python/langgraph/interrupts
 - LangSmith observability는 tool call, error, decision point 추적 기준으로 쓸 수 있다: https://docs.langchain.com/oss/python/langchain/observability

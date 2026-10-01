@@ -3,6 +3,8 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
 # ORC One-Page Briefing Upgrade Plan
 
+> Review note (2026-09-29): The five-loop June run and proposed briefing layout below are historical observations, not current campaign evidence or a shipped UI specification. Use [Orchestrator agent](../../../agents/orchestrator_agent.md) and [GUI reference](../../../gui/reference/live_gui_reference_alignment.md) for the implemented report.
+
 ## 0. 목적
 
 현재 ORC 리포트는 데이터가 부족하다기보다, 오케스트레이터가 가진 판단 데이터를 한 화면에서 읽히는 형태로 압축하는 프론트엔드 계층이 부족하다.

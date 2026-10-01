@@ -1,5 +1,7 @@
 # 11. Live GUI Control Surface 고도화안 - 개선안 1~10 + UI/UX Package v2 통합판
 
+> 보관 안내 (2026-09-29): 아래 내용은 2026-06-01 당시 설계와 구현 기록입니다. visual target, 테스트 수치, 다음 작업·실행·commit/push 지시는 현재 운영 계약이나 실행 요청이 아닙니다. [보관 색인](../../../../README.md)에서 현재 대체 문서로 이동할 수 있습니다. 본문 자산 경로는 [보존된 패키지 루트](../../README.md) 기준입니다.
+
 대상: `web/templates/planning.html`, `web/static/planning.js`, `web/static/styles.css`, `app/controller.py`, `app/main.py`, `tests/ui/planning_browser_audit.py`, `tests/ui/live_runtime_ide_browser_audit.py`, `docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2`
 
 작성 목적: 개선안 01~10에 흩어진 Live GUI 요구사항과 `docs/oldversion/livegui_package`의 UI/UX asset/spec bundle을 현재 코드 구조에 맞춰 하나의 실행 가능한 프론트엔드/백엔드 개선안으로 정리한다.

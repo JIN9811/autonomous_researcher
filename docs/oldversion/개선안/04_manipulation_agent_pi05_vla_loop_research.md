@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. 아래 Pi0.5 설정·시간·clamp 값은 역사적 권고/예시이며 현행 기본값을 덮어쓰지 않는다. 현재 명시적으로 선택한 strategy/profile/policy를 존중하는 규칙은 [LeRobot naming/runtime policy](../../runtime/lerobot_dataset_policy_naming.md), stopped-rollout/Vision 검증과 owner review는 [Manipulation Agent](../../agents/manipulation_agent.md)를 따른다. base checkpoint만으로 실험실 task 성공을 보장하지 않는다.
+
 # 04. Manipulation Agent 고도화안 - Pi0.5 VLA Agentic Loop
 
 작성일: 2026-05-28
@@ -9,7 +12,7 @@
 아래 조사와 고도화 순서는 최초 작성 당시의 제안이다. 현재 실행 계약은 preflight,
 측정된 interlock, 명시적인 stage machine, 중지된 rollout과 Vision 증거를 읽는
 LLM task judgment를 따른다. 불확실한 결과는 owner review로 넘기며 자동 motion
-retry를 생성하지 않는다. 실제 기준은 `docs/agents/manipulation_agent.md`를 따른다.
+retry를 생성하지 않는다. 실제 기준은 [Manipulation Agent](../../agents/manipulation_agent.md)를 따른다.
 
 ## 1. 결론
 

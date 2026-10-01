@@ -18,8 +18,9 @@ Runtime identity
 
 Five responsibility areas
 - High: interpret context, select permitted strategy/tools, judge result/evidence sufficiency.
-- Middle: freeze request, validate and dispatch, preserve numerical result, package handoff.
-- Low: LHS, SingleTaskGP fitting, acquisition optimization and numerical diagnostics.
+- Middle: freeze request, validate and dispatch, run LHS/SingleTaskGP/acquisition
+  numerical computation, preserve numerical result and package handoff.
+- Low: no owned device-execution layer; BO cannot command laboratory hardware.
 - Guardian/Safety: input identity, bounds, fixed parameters, candidate integrity and budgets.
 - Knowledge/Evidence: local source-labelled context and loop-scoped decision/tool/numeric artifacts.
 - These are responsibility areas, not five mandatory model calls.
@@ -163,8 +164,9 @@ Visualization
 - Do not recompute scores or GP confidence bands in the browser.
 - Continuous bounds must not be presented as two discrete choices or integer cell counts.
 - Signed UCB acquisition values remain signed; EI threshold annotations apply only to EI.
-- Input-space coordinates belong in the LHS/domain card and backend audit data.
-- The posterior is the scalar-score view on the backend normalized search path.
+- Current LHS and posterior surfaces use physical cell-size/wall-thickness coordinates.
+- The current posterior offers backend-provided 2D/3D GP surface views; normalized
+  search-path payloads are legacy projections, not the current surface.
 - Workspace, Live GUI and saved Matplotlib figures share the projection contract.
 - Step selection only inspects existing records; completed-step events replace figures.
 - Historical discrete plots retain their original domain semantics.

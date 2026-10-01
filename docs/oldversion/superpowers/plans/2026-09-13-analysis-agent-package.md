@@ -12,7 +12,7 @@ governing_design:
   - docs/oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md
 related_docs:
   - docs/agents/analysis_agent.md
-  - docs/device_bridges/cae_computation_bridges.md
+  - docs/device_bridges/README.md
   - docs/oldversion/superpowers/specs/2026-09-13-executable-agent-ide-contract-design.md
 supersedes: []
 -->
@@ -21,6 +21,8 @@ supersedes: []
 
 
 # Analysis Agent Package implementation
+
+> Archive navigation note (2026-09-29): the former `docs/device_bridges/cae_computation_bridges.md` reference is retired. Its local-only copy is `oldversion/2026-09-14-retired-computation/docs/device_bridges/cae_computation_bridges.md`, outside this public archive. The [maintained bridge index](../../../device_bridges/README.md) is navigation, not a replacement for the historical computational evidence below.
 
 ## Status at a Glance
 

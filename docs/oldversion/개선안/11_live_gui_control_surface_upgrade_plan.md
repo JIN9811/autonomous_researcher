@@ -3,6 +3,8 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # 11. Live GUI Control Surface 고도화안 - 개선안 1~10 + 현재 코드 기준
 
+> Review note (2026-09-29): Current UI behavior and screenshots are documented in [GUI structure](../../gui/visual_structure.md) and [Live GUI reference](../../gui/reference/live_gui_reference_alignment.md). This proposal's renderer, page, and acceptance requirements are historical, not an instruction to change the running UI.
+
 대상: `web/templates/planning.html`, `web/static/planning.js`, `web/static/styles.css`, `app/controller.py`, `app/main.py`, `tests/ui/planning_browser_audit.py`, `tests/ui/live_runtime_ide_browser_audit.py`
 
 작성 목적: 개선안 01~10에 흩어진 Live GUI 요구사항을 현재 코드 구조에 맞춰 하나의 실행 가능한 프론트엔드/백엔드 개선안으로 정리한다.

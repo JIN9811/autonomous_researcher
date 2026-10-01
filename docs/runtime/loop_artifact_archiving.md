@@ -82,8 +82,9 @@ results whose loop ownership is unknown.
 ### Live GUI file explorer
 
 The Artifacts view projects the existing run artifact index into a folder tree
-and file list. Opening it from an agent selects that agent and the current
-`loop_count`; switching agents or loops resets this default scope. Manual folder
+and file list. Live GUI opens it for the selected agent across all indexed loops
+(`includeHistory=true`); an explicit loop filter narrows that scope. Switching
+agent/run context resets the default scope. Manual folder
 and filter choices survive ordinary polling. **All files** includes other agents
 and unowned legacy files without assigning them a synthetic loop or agent.
 

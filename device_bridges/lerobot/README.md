@@ -32,6 +32,10 @@ original robot transform and joints, aligns the 175 mm tray midpoint with the
 robot, and rotates the environment clockwise by 90 degrees. The upper platform
 matches the 395 mm lower assembly width; the lower working surface remains at
 Z=0 with its underside extended to the robot anchor at Z=-20 mm.
-Live Robot Pose uses the matching web manifest. The original USD is retained as
+Live Robot Pose uses a separate
+[web display manifest](../../sim/robotis_omx/scene/omx_table_layout.web.json)
+derived from this scene, including a display-only −30 mm X offset for the platen
+objects. It is not an exact calibrated copy of the USD or a robot control target.
+The original USD is retained as
 the overlay's sublayer, not replaced. These geometry changes do not recalibrate
 camera poses or robot control targets.

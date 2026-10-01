@@ -3,6 +3,8 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # 17. Vision Agent Camera Device Bridge + Live GUI Inspection Dashboard Plan
 
+> Review note (2026-09-29): For implemented capture, inspection, recovery, and device-effect boundaries, use [Vision agent](../../agents/vision_agent.md) and [Vision recovery](../../gui/vision_review_recovery.md). The proposed read-only behavior and page names below are historical, not the current execution contract.
+
 작성일: 2026-06-22
 
 대상 코드:

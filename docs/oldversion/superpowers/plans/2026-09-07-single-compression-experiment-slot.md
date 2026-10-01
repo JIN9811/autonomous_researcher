@@ -1,9 +1,11 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
+
+> Archive reading note (2026-09-29): This cancelled 2026-09-07 plan remains cancelled. Its successor links below identify the historical planning sequence, not a presently authorized execution plan. For current Setup/handoff behavior use the [Orchestrator reference](../../../agents/orchestrator_agent.md); slot registration, device readiness and execution authorization remain different concepts.
 # Single Compression Experiment Slot Implementation Plan
 
-> **대체됨 — 이 계획을 실행하지 말 것.** 연구 캠페인과 BO 연속값 지원을 제외한 잘못된 범위로 작성됐다. 최신 실행 기준은 [에이전트 소유 설정·변경 전파·연속 BO 통합 구현안](2026-09-07-agent-owned-campaign-continuous-bo.md)과 [통합 설계안](../specs/2026-09-07-single-compression-experiment-slot-design.md)이다. 아래 작업/코드는 과거 계획 기록이며 통합 범위의 실행 지침이 아니다.
+> **대체됨 — 이 계획을 실행하지 말 것.** 연구 캠페인과 BO 연속값 지원을 제외한 잘못된 범위로 작성됐다. 당시의 후속 계획은 [에이전트 소유 설정·변경 전파·연속 BO 통합 구현안](2026-09-07-agent-owned-campaign-continuous-bo.md)과 [통합 설계안](../specs/2026-09-07-single-compression-experiment-slot-design.md)이며, 이들 역시 현재는 archive다. 아래 작업/코드는 과거 계획 기록이며 통합 범위의 실행 지침이 아니다.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. 위임 실행은 사용자 또는 적용 지침의 허용 범위에서만 한다.
 
@@ -267,7 +269,7 @@ Run: `.venv/bin/python -m pytest tests/unit/test_controller_experimental_slot.py
 
 Expected: 신규 메서드가 아직 없어 FAIL. 구현 후에는 PASS.
 
-- [ ] **3. 以下の薄い投影・記録を追加し、既存入口に接続する。**
+- [ ] **3. 아래의 얇은 투영·기록을 추가하고 기존 진입점에 연결한다.**
 
 ```python
 def _experimental_slot_context(self) -> dict[str, Any]:

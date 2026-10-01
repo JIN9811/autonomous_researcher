@@ -28,7 +28,7 @@ evidence package.
 | SDL adoption barriers | [Motivation prompt](motivation-contribution-sunburst.jsonl), entry 1 | Root README Motivation; conceptual barriers, not a quantitative cost comparison |
 | Three system contributions | [Horizontal three-module redesign](system-contribution-horizontal.txt) · [Two-line typography refinement](system-contribution-typography.txt) | Root README immediately above the contribution table; three parallel contributions, not sequential runtime stages |
 | Framework overview, agent architecture, integration architecture | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 1–3 | Root README System Architecture |
-| Ten agent role diagrams | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 4–13; [Design handoff refinement](sunburst-design-handoff-refinement.txt) | [Agent references](../../agents/README.md); existing image paths retained |
+| Ten agent role diagrams | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 4–13; [Design handoff refinement](sunburst-design-handoff-refinement.txt); [measurement-only Analysis refinement](analysis-measurement-only-sunburst.txt) | [Agent references](../../agents/README.md); existing image paths retained |
 | Device Bridge integration overview | [Device Bridge prompt](device-bridge-overview.txt) · [Shared evidence-return refinement](device-bridge-evidence-refinement.txt) | [Device Bridge index](../../device_bridges/README.md); physical integration approaches with a separate evidence return |
 
 Final agent assets reside in [agent figures](../../agents/assets/figures/).

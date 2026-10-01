@@ -7,7 +7,7 @@
 
 ## 문서
 
-- `01_orc_one_page_briefing_upgrade.md`
+- [01_orc_one_page_briefing_upgrade.md](01_orc_one_page_briefing_upgrade.md)
   - ORC 리포트를 한 페이지 안에서 읽히는 지휘관 브리핑 화면으로 재구성하는 제안서.
   - 현재 코드와 최근 test run `run-20260612T161643Z-6aab68`에서 확인된 payload를 기준으로 작성했다.
   - Build Web Data Visualization 플러그인의 운영형 시각화 원칙과 외부 dashboard/data visualization 자료를 반영했다.

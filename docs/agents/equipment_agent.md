@@ -24,8 +24,8 @@ source_of_truth:
   - packages/agents/equipment/package.yaml
   - graphs/modules/equipment/module.yaml
   - graphs/modules/equipment/ui.yaml
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/windows_pyautogui_bridge.md
   - docs/hardware/windows_pyautogui_equipment_agent_guideline.md
@@ -33,6 +33,10 @@ related_docs:
   - docs/oldversion/superpowers/plans/2026-09-09-equipment-workflow-decision-layer.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Lab Equipment Agent Reference
 
@@ -565,7 +569,7 @@ without a loop field is bound to its current merge invocation.
 
 Equipment retains ownership of the UTM test and clearance restoration. The
 [Manipulation Agent](manipulation_agent.md#post-test-utm-clearance) owns the
-recorded sweep; [Vision](vision_agent.md#post-test-compressed-specimen-verification)
+recorded sweep; [Vision](vision_agent.md#post-test-clearance-baseline)
 owns the subsequent fresh empty-fixture snapshot. Only their verified result
 releases Analysis. This is not another UTM test, a new CSV parser, or an
 Equipment-owned robot motion. A real Equipment test cannot continue using a
@@ -636,8 +640,9 @@ cycle 469.367 seconds). The first attempt reached successful Equipment and
 Analysis handling, then Knowledge returned a tool-contract-invalid sequence and
 Guardian blocked before BO. Both attempts remain recorded. This is one complete
 guarded virtual cycle with an observed stochastic reliability caveat; it does not
-establish hardware proof. The earlier physical eight-block provenance below
-remains the only cited physical demonstration for this workflow.
+establish hardware proof. The earlier physical eight-block provenance below was
+the physical demonstration cited by that 2026-09-13 check; later evidence linked
+in this Reference retains its own date, scope and limitations.
 
 ### Non-actuating verification (2026-09-09)
 

@@ -19,6 +19,8 @@ supersedes: []
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
 
+> Archive reading note (2026-09-29): Completion and test counts below belong to the bounded 2026-09-12 verification epoch, not a new run or current whole-repository pass. Current owner modules live under `agents/core/orchestrator/` and `agents/bo/`; old flat paths in planned examples are historical. Follow the [Orchestrator reference](../../../agents/orchestrator_agent.md) and [dated verification evidence](../../../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) for authority and coverage.
+
 
 # Orchestrator · Dynamic Experimental Setup Implementation Plan
 
@@ -276,7 +278,7 @@ def test_model_cannot_call_a_bridge():
 
 ```python
 choice = validate_choice(parsed_response, set(handlers), evidence_ids)
-effect = await handlers[choice["tool"]](../../../superpowers/plans/choice["arguments"])
+effect = await handlers[choice["tool"]](choice["arguments"])
 trace.append({"choice": choice, "result": effect})
 ```
 

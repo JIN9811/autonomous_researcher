@@ -25,12 +25,12 @@ User/GUI
         -> ToolRegistry / RAG / DB / FailureMemory / Backends
 ```
 
-Cycle order:
+Nominal cycle roles (not a fixed transition list):
 
 1. `design`
 2. `specimen`
 3. `vision`
-4. `manipulation`
+4. `manipulation`, then executable `vision` placement verification
 5. `equipment`
 6. `analysis`
 7. `knowledge`
@@ -38,6 +38,11 @@ Cycle order:
 9. `guardian`
 10. `guardian=continue` routes back to `design`
 11. `guardian=stop` routes to `complete`, `guardian=error` routes to `error`
+
+The graph owns conditional transfer, active-rollout monitoring and post-equipment
+UTM clearance before Analysis. Its defaults include `manipulation -> vision`
+and `vision -> equipment`; scoped candidates select additional visits. See
+[the current routing contract](langgraph_runtime.md#execution-order).
 
 ## Hard Contracts (Do Not Break)
 
@@ -172,11 +177,11 @@ MTP assistant mapping:
 
 NemoClaw/vLLM GPU residency profile:
 
-- `gemma4:31b`: `--gpu-memory-utilization 0.37`
+- `gemma4:31b`: `--gpu-memory-utilization 0.55`, `--max-model-len 32768`, as declared in [the managed deployment](../../deploy/nemoclaw-vllm.yaml). These are configured limits, not measured current residency.
 - `gemma4:e4b-it-nvfp4`: `--gpu-memory-utilization 0.14` with `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0`
 - The current managed model list is intentionally limited to two deployments: 31B and E4B. E2B is not part of the active `/api/runtime/models` surface.
-- This profile is intentionally asymmetric so the two managed deployments can remain resident on the 120 GB class GPU.
-- Keep E4B at the low-residency `0.14` profile while 31B remains resident. vLLM 0.21 CUDA graph memory estimation can incorrectly force a higher reservation on this GB10/NVFP4 profile, so E4B disables `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` instead of raising the memory fraction. This profile was verified with 31B loaded: both `/v1/chat/completions` probes returned `OK`, E4B reserved about 15.7 GiB, and total system memory stayed at about 99 GiB used. Revalidate before raising E4B above `0.14`.
+- E4B retains the low-residency `0.14` configuration. Its CUDA-graph profiler override is specific to this GB10/NVFP4 deployment; it is not a general vLLM requirement.
+- Historical probe evidence for the earlier **31B `0.37` / E4B `0.14`** profile reported both completion probes returning `OK`, E4B reserving about 15.7 GiB, and about 99 GiB total system memory used. That observation does not verify simultaneous residency or available headroom for the current `0.55` / 32768 profile. Inspect current deployment/resource evidence before changing residency settings.
 
 Live GUI startup policy:
 
@@ -376,8 +381,9 @@ Frequently written by run loop merge:
 - CLI: `atr gpu clear`
 - Behavior:
   1. stops active run if needed
-  2. calls Ollama `/api/ps`
-  3. unloads each resident model via `/api/generate` with `keep_alive=0`
+  2. scales down managed vLLM deployments, including persistent ones
+  3. calls Ollama `/api/ps` and unloads its resident models via `/api/generate` with `keep_alive=0`
+- The response records vLLM and Ollama outcomes separately; a successful vLLM scale-down does not imply a successful Ollama query. This is a mutating model/run control, not a read-only resource refresh. See `MainController.clear_gpu` in [the controller](../../app/controller.py).
 - Designed to free resident GPU model memory without killing the whole process tree.
 
 ## CLI Control Baseline
@@ -428,9 +434,9 @@ Frequently written by run loop merge:
 
 ## Test Mode Baseline
 
-- Test mode should remain full-loop executable without real hardware.
-- Real LLM path can be enabled in test mode; timeouts degrade gracefully in stage agents.
-- Keep deterministic fallback outputs for required schema keys.
+- An all-virtual device profile supports a full loop without physical equipment I/O. `mode=test` alone is not that guarantee: installed-printer or physical-print selections retain their explicit device authority.
+- The application uses real model decisions in TEST by default. Explicit offline fixtures may substitute model responses, but required owner decisions fail closed when valid model evidence is unavailable; deterministic success must not replace a failed decision.
+- Synthetic device/analysis evidence remains labeled and cannot establish live physical success. See [Test Mode](test_mode.md) and the [Runtime IDE virtual-device contract](runtime_ide.md#virtual-device-execution-contract).
 
 ## Integration Checklist Before Merge
 

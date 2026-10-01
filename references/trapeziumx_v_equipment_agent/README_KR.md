@@ -1,5 +1,11 @@
 # TRAPEZIUMX-V Lab Equipment Agent 운용 레퍼런스
 
+> 이 문서는 2026-09-01 시연과 2026-09-18 method 설정의 화면 참고 기록이다.
+> 아래 예시 숫자·화면 순서를 현재 실행 계약이나 신규 시험의 고정값으로 사용하지 않는다.
+> 현재 자동화의 판정·복구 경로는 [EQP Reference](../../docs/agents/equipment_agent.md)와
+> [Windows Bridge](../../docs/device_bridges/windows_pyautogui_bridge.md)를 따른다.
+> 장비 센서값의 의미와 브릿지가 실제로 수신하는 화면/OCR 증거는 구분해야 한다.
+
 ## 목적
 
 이 자료는 Shimadzu TRAPEZIUMX-V 압축시험을 Lab Equipment Agent로 운용하기 위한 작업 순서와 화면 상태를 정리한 레퍼런스다.

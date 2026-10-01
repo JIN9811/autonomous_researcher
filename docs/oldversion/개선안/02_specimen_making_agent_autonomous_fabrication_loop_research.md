@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-27 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. 본문의 Prusa 중심 경로, 기본 ejection 비활성, report-first 계획은 작성 당시 진단·제안이다. 현재 선택된 printer fleet/provider와 실행 권한은 [Specimen Agent](../../agents/specimen_agent.md), TEST의 가상/물리 경계는 [runtime baseline](../../runtime/agent_program_baseline.md)을 따른다. 이 문서의 미래 layer-wise correction이나 예시 성공 필드는 구현·실측 증거가 아니다.
+
 # Specimen Making Agent 자율 제조 루프 조사 노트
 
 조사 일자: 2026-05-27

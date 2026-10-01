@@ -96,7 +96,7 @@ The public API is intentionally uniform:
 |---|---|---|
 | `test` | `virtual` | No hardware write. Deterministic objective calculation. |
 | `test` | `printer` | Slice/upload/start boundary can be checked through configured test path. |
-| `live` | `printer` | Uses existing live gates, PrusaLink connection memory, and physical-start flags. |
+| `live` | `printer` | Uses the explicitly selected Printer Fleet provider (Bambu or Prusa), its connection memory, live gates and physical-start flags. |
 | `virtual` | `virtual` | Pure evaluator path for benchmark and BO comparison. |
 | `replay` | `analysis` | Reserved for replaying existing records without hardware writes. |
 
@@ -114,7 +114,7 @@ When a tool is registered with a device name, the call is serialized through
 
 Queued hardware-facing tools:
 
-- `printer.prepare` -> `printer:prusa_mk4s`
+- `printer.prepare` -> `printer:fleet` (the selected provider remains bridge-owned)
 - `equipment.pyautogui.run` -> `equipment:windows_pyautogui`
 - `lerobot.teleoperate.start` -> `robot:lerobot`
 - `lerobot.record.start` -> `robot:lerobot`
@@ -223,7 +223,10 @@ The runtime merge layer stores these under `state.run_metadata.vision_report`,
 The generic `handoff_packets` registry also receives the Vision signal packet.
 
 Manipulation rejects expired Vision signals before issuing robot commands. Vision
-remains an observer/signal agent and does not execute hardware actions.
+owns observation/review, but is not purely passive: registered LeRobot tools may
+perform Active Cam capture and stop the identity-bound rollout after verification.
+Those effects remain in the owning bridge, with camera-return/stop evidence;
+Vision does not introduce an independent robot driver. See [the Vision owner](../../agents/vision/agent.py).
 
 ### 2026-05-29 Manipulation Report and Robot Task Result Contract
 
@@ -248,7 +251,8 @@ The runtime merge layer stores these under:
 The generic `handoff_packets` registry also receives `robot_task_result.v1`.
 Physical handoff remains Vision-gated: successful LeRobot rollout can produce
 `reported_complete`, but final downstream progression should wait for the
-appropriate Vision verification signal when available.
+appropriate identity-bound Vision verification required by the configured handoff;
+missing evidence must not be interpreted as successful placement or clearance.
 
 ### 2026-05-30 Knowledge Memory and Improvement Evidence Contract
 

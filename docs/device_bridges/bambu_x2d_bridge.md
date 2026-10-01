@@ -22,14 +22,18 @@ source_of_truth:
   - utils/specimen_placement.py
   - utils/bambu_material_priority.py
   - web/static/printer.js
-last_verified: 2026-09-17
-verified_against: print-start profile round-trip and G-code validation; no physical printing
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/printer_fleet_bridge.md
   - docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md
   - docs/agents/specimen_agent.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Bambu Lab X2D Bridge Reference
 
@@ -405,7 +409,8 @@ override saved values, and top-level experiment values override constraints.
 Layer heights, bed temperatures, and the enabled first-layer speed setting are
 applied to the exported profiles. The current PLA setup uses Textured PEI at
 60°C, 0.2 mm layers, and **10 mm/s for both first-layer walls and infill**.
-Outside the [early-layer caps](#print-start--early-layers), other speeds retain resolved vendor settings; there is no blanket 75% speed
+Outside the [early-layer caps](#print-start--early-layers), the configured XYZ
+speed scale applies to resolved vendor settings; there is no fixed blanket 75% speed
 multiplier. Existing no-skirt/brim/raft policy remains in place.
 
 | Execution mode | Print body | Temperature-gated ejection wait | Device execution |

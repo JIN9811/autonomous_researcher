@@ -1,6 +1,11 @@
 # Optional OMX MoveJ downstream control
 
-Status: proposed design, awaiting written-spec review. Not implemented or enabled.
+Status (source audit 2026-09-29, `dd0d772`): historical proposal, superseded by
+the shipped [linear joint interpolation option](../../../libs/joint_linear_interpolation/README.md).
+The Cyclo/QP-based MoveJ design below was not implemented as described and is
+not the current UI/driver contract. Linear interpolation is not a Cyclo
+collision-constrained controller. Preserve the following as design history,
+not installation, execution, or commissioning instructions.
 
 ## Agreed intent
 

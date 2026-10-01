@@ -24,8 +24,8 @@ source_of_truth:
   - mcp_tools/utm_tools.py
   - configs/devices.yaml
   - app/main.py
-last_verified: 2026-09-13
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/vision_agent.md
@@ -33,6 +33,10 @@ related_docs:
   - docs/hardware/utm_ros_vision_runtime_bridge.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # UTM Vision Bridge Reference
 

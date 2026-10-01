@@ -42,7 +42,7 @@ Example command shape:
 
 ```text
 --dataset.repo_id=jin/eval_pick_and_place_cube_rollout_20260508T131538
---dataset.root=/home/jin/.cache/huggingface/lerobot/jin/eval_pick_and_place_cube_rollout_20260508T131538
+--dataset.root=$HOME/.cache/huggingface/lerobot/jin/eval_pick_and_place_cube_rollout_20260508T131538
 ```
 
 This matches the currently installed LeRobot implementation, where `LeRobotDataset.create(..., root=<path>)` creates the dataset directly at `<path>`.
@@ -172,9 +172,9 @@ Pi0.5 support is intentionally isolated from the ROBOTIS OMX live runtime.
 
 Rules:
 
-- Default robot runtime: `/home/jin/lerobot` in conda env `lerobot`.
-- Pi0.5 training runtime: `/home/jin/lerobot_pi05` in conda env `lerobot-pi05-torch211`.
-- Pi0.5 Hugging Face cache: `HF_HOME=/home/jin/.cache/huggingface_pi05`, `HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub`, `HF_HUB_DISABLE_XET=1`.
+- Default robot runtime: `$HOME/lerobot` in conda env `lerobot`.
+- Pi0.5 training runtime: `$HOME/lerobot_pi05` in conda env `lerobot-pi05-torch211`.
+- Pi0.5 Hugging Face cache: `HF_HOME=$HOME/.cache/huggingface_pi05`, `HF_HUB_CACHE=$HOME/.cache/huggingface_pi05/hub`, `HF_HUB_DISABLE_XET=1`.
 - TorchCodec-first video decoding: training commands prefer `--dataset.video_backend=torchcodec`; live runs fall back to `pyav` if the selected conda environment does not expose `torchcodec`.
 - GUI policy type: `pi05`.
 - Default HF source policy: `lerobot/pi05_base`.
@@ -193,8 +193,8 @@ conda run -n lerobot-pi05-torch211 python -m pip install --force-reinstall fsspe
 Prefetch command:
 
 ```bash
-mkdir -p /home/jin/.cache/huggingface_pi05
-HF_HOME=/home/jin/.cache/huggingface_pi05 HF_HUB_CACHE=/home/jin/.cache/huggingface_pi05/hub HF_HUB_DISABLE_XET=1 conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
+mkdir -p $HOME/.cache/huggingface_pi05
+HF_HOME=$HOME/.cache/huggingface_pi05 HF_HUB_CACHE=$HOME/.cache/huggingface_pi05/hub HF_HUB_DISABLE_XET=1 conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
 ```
 
 Recommended additional train args for Pi0.5 on this workstation. Quantile stats are generated automatically for `observation.state` and `action` when missing; do not override Pi0.5 normalization unless intentionally debugging a dataset.
@@ -212,7 +212,7 @@ Manual local conversion command shape:
 ```bash
 conda run --no-capture-output -n lerobot-pi05-torch211 python -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
   --repo-id=local-pi05-v30/jin-record-test-20260512t063639z \
-  --root=/home/jin/.cache/huggingface/lerobot \
+  --root=$HOME/.cache/huggingface/lerobot \
   --push-to-hub=false \
   --force-conversion
 ```
@@ -263,15 +263,19 @@ Rules:
 
 ## Pi0.5 Transfer Rollout Rule
 
-When the workflow reaches Manipulation after a ready 3DP specimen, the default robot-transfer policy is Pi0.5 LeRobot rollout unless the experiment spec explicitly requests `fixed_kinematic`.
+For a ready 3DP specimen, Pi0.5 is the fallback only when no explicit strategy,
+policy/profile/path selects another supported execution path. Saved Manipulation
+defaults and explicit experiment overrides are resolved by
+[`ManipulationAgent._strategy` / `_policy_type`](../../agents/manipulation/agent.py);
+generic LeRobot selections such as SmolVLA are not overwritten by this fallback.
 
-Rules:
+Rules when Pi0.5 is selected:
 
 - Manipulation Agent sends `policy_type=pi05`.
 - Test mode may use `policy_path=fake://pi05_policy`.
 - Live mode requires a real `policy_path`, `policy_checkpoint_path`, or `policy_repo_id`.
 - The LeRobot bridge runs Pi0.5 rollout in conda env `lerobot-pi05-torch211`.
-- Pi0.5 rollout command preview uses `lerobot-rollout`, `--policy.type=pi05`, `--device=<device>`, and `--inference.type=rtc` by default.
+- The ordinary Pi0.5 rollout command uses `python scripts/lerobot_pi05_rollout_wrapper.py` in the resolved environment; mirror-enabled workflows may use the shared mirror wrapper. The exact arguments and RTC selection come from the saved/requested profile and [the bridge command builder](../../device_bridges/lerobot/bridge.py), not a universal `lerobot-rollout` command.
 - On the ROBOTIS OMX-AI follower, Pi0.5 live rollout must pass
   `--robot.disable_torque_on_disconnect=false`. A successful rollout can
   otherwise be converted into a failed GUI session if a Dynamixel reports a

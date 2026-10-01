@@ -1,5 +1,7 @@
 # Autonomous Researcher Live GUI — UI/UX Package v2
 
+> Archived development material (archive context clarified 2026-09-29). The original instructions, example values and visual targets below are historical, not current runtime requirements or measured evidence. See the [archive index](../../README.md) for maintained replacements.
+
 이 패키지는 한 장짜리 레퍼런스 이미지가 아니라, 실제 구현에 바로 분해해서 쓸 수 있도록 나눈 UI/UX 패키지다.
 
 ## 포함 내용

@@ -1,6 +1,8 @@
 # Report Agent and Existing Module Extension Lifecycle
 
-Status: design approved; implementation planning in progress.
+Status (source audit 2026-09-29): approved design with implementation in the
+separate `feature/report-agent` worktree; not merged into reviewed main
+`dd0d772`. RPT is not a current main agent or active production graph stage.
 
 ## Intent and non-negotiable boundary
 

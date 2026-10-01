@@ -1,5 +1,5 @@
 ---
-{"topic_id":"control-levels","owner":"documentation","source_refs":["docs/runtime/three_level_control_model.md"],"source_revision":{"docs/runtime/three_level_control_model.md":"85195ea1600067c61996f1201b29d3221cd2c91a05a038067d494b1de52d661b"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: control-levels","status":"reviewed"}
+{"topic_id":"control-levels","owner":"documentation","source_refs":["docs/runtime/three_level_control_model.md"],"source_revision":{"docs/runtime/three_level_control_model.md":"e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: control-levels","status":"reviewed"}
 ---
 
 # High, Middle and Low — Control Levels

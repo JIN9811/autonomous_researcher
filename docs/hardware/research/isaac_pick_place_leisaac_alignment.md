@@ -2,6 +2,11 @@
 
 Date: 2026-06-30
 
+Historical research/implementation note. "Implemented Now" and verification
+below refer to that dated change, not a fresh hardware acceptance test.
+Current operation is described in the [Isaac mirror guide](../isaac_sim_robotis_omx_mirror_mode.md)
+and [LeRobot Reference](../../device_bridges/lerobot_bridge.md).
+
 ## Scope
 
 This note tracks the safe LeIsaac-inspired changes for the ROBOTIS OMX Isaac mirror. The goal is to improve pick-and-place observability and keep the live teleoperation bridge stable. Teleop input and follower/leader runtime code are out of scope for this pass.

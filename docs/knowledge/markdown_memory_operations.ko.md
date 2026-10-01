@@ -11,13 +11,17 @@ source_of_truth:
   - knowledge/markdown_runtime.py
   - knowledge/http_api.py
   - agents/core/knowledge/decision.py
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-core-agent-roots
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/manual_rag_knowledge.ko.md
 supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 -->
+
+Verification scope: full-document read and static source inspection at `dd0d772`.
+Historical provider/test results retain their original scope; this review did not
+invoke models, mutate Knowledge stores or operate devices.
 
 # Markdown Knowledge 운영 가이드
 
@@ -32,8 +36,10 @@ supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 
 ## 무엇이 바뀌었는가
 
-지식 그래프와 Neo4j 운영 의존성만 제거했다. 온톨로지 정의, 원본 아티팩트,
-기존 JSONL 기억·패턴·성능·Evolution 계약과 매뉴얼 RAG는 보존한다.
+지식 그래프와 Neo4j 운영 의존성은 제거했다. 온톨로지 정의, 원본 아티팩트,
+기존 JSONL 기억·패턴·성능 기록은 보존한다. Evolution 생성은 퇴역했으며
+과거 기록만 유지한다. 매뉴얼 전용 RAG는 Source Library로 대체됐고,
+기존 `/api/knowledge/manuals/*` 경로는 HTTP 410을 반환한다.
 실행 순서를 표현하는 폐루프 그래프는 지식 그래프가 아니며 변경하지 않는다.
 
 Knowledge의 LLM은 근거를 읽고, 재사용 가치와 분류를 판단하고, 범위 내 지식을
@@ -45,7 +51,7 @@ Knowledge의 LLM은 근거를 읽고, 재사용 가치와 분류를 판단하고
 | 위치 | 내용 |
 |---|---|
 | `memory/knowledge/markdown/<run>/<cycle>/<agent>/<record>/revision-*.md` | 원본 출처와 분류를 포함한 불변 Markdown 리비전 |
-| `memory/knowledge/*.jsonl` | 기존 실험 기억, 패턴, 성능 및 Evolution 기록 |
+| `memory/knowledge/*.jsonl` | 실험 기억·패턴·성능 기록과 보존된 과거 Evolution 기록 |
 | `runs/<run>/knowledge/` | 현재 Knowledge 보고서, LLM 결정/툴 응답, 사전 입력 스냅샷 |
 | `runs/<run>/runtime/loops/` | 기존 루프·에이전트·시도별 원본 아카이브 |
 | `memory/knowledge/markdown_jobs/` | 명시적으로 시작한 과거 아카이브 후처리 상태 |
@@ -109,7 +115,8 @@ GUI 시작 시 모든 과거 로그를 스캔하거나 모델을 기동하는 �
 
 ## 검증 경계
 
-실제 API/로컬 모델 검증은 합성 근거로 수행한다. 두 사이클 통합 검증도 장비와
-FEM 실행 경계를 fixture로 대체한다. 결과와 재현 경로는
+기록된 API/로컬 모델 검증은 합성 근거로 수행했다. 당시 두 사이클 통합 검증은 장비와
+당시 존재하던 FEM 실행 경계를 fixture로 대체했다. 현재 Analysis는 측정 데이터
+후처리만 소유하며 FEM 실행 경로가 아니다. 결과와 재현 경로는
 [Knowledge Agent Reference](../agents/knowledge_agent.md#artifacts-and-verification)에 기록한다.
 이는 새로운 물리 실증이나 검색 품질의 비교 평가를 의미하지 않는다.

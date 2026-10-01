@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. LLM 미호출/proxy-only 진단과 임의 warm-start·search-space patch·preference weight 제안은 당시 기록이다. 현재 LHS와 수치 solver가 후보/좌표/목표/예산을 소유하고 model은 bounded 전략·증거 검토를 수행하는 계약은 [BO Agent](../../agents/bo_agent.md)를 따른다. 본문의 보수적 random fallback 제안은 현행 model 실패 시 임의 진행 권한을 뜻하지 않는다.
+
 # 07. BO Agent 고도화안 - LLM reasoning이 보이는 유연한 자율 최적화 루프
 
 작성일: 2026-05-28
@@ -201,6 +204,8 @@ Multi-Agent LLMs for Adaptive Acquisition in Bayesian Optimization 논문은 LLM
 
 ### 3.7 constrained multi-objective BO는 우리 목표와 잘 맞다
 
+인용 접근성 메모 (2026-09-29): 아래 Cambridge ChemRxiv URL은 첫 요청에서 HTTP 404였지만 재확인에서는 HTTP 200이었고, 해당 EGBO 논문 제목·초록·DOI가 확인되었다. 일시적인 접근 실패를 영구 삭제로 간주하지 않는다. 본문의 연구 인용과 현재 시스템 구현 여부는 별개다.
+
 EGBO는 self-driving lab에서 constrained multi-objective optimization을 다루며 feasible solution 제안을 강조한다. 우리도 압축 성능만 볼 수 없다. 출력 가능성, 조작 가능성, UTM 측정 가능성, 실패 위험, 재료 사용량 같은 constraint가 함께 들어간다.
 
 우리에게 주는 시사점:
@@ -229,7 +234,7 @@ Phase 3: optional Ax/BoTorch backend
 
 출처:
 
-- BoTorch overview: https://botorch.org/docs/v0.13.0/overview/
+- BoTorch overview: https://botorch.org/docs/v0.13.0/overview
 - Ax platform: https://ax.dev/
 
 ## 4. 권장 전체 루프
@@ -895,7 +900,7 @@ Communication Brain
 - Multi-Agent LLMs for Adaptive Acquisition in Bayesian Optimization: https://arxiv.org/abs/2603.28959
 - Evolution-guided Bayesian optimization for constrained multi-objective optimization in self-driving labs: https://www.cambridge.org/engage/chemrxiv/article-details/64ed86aa3fdae147fa0be615
 - NLR autonomous experimentation overview: https://www.nlr.gov/materials-science/autonomous-experimentation
-- BoTorch overview: https://botorch.org/docs/v0.13.0/overview/
+- BoTorch overview: https://botorch.org/docs/v0.13.0/overview
 - Ax adaptive experimentation platform: https://ax.dev/
 
 ## Live GUI 고도화 추가안 - 고도화안 기준
@@ -929,7 +934,7 @@ BO Agent의 Live GUI는 단순 "다음 파라미터 추천"이 아니라 surroga
 
 ### 참고 출처
 
-- BoTorch/Ax는 BO 모델과 adaptive experimentation UI/metadata 설계의 실무 기준이다: https://botorch.org/docs/v0.13.0/overview/ 및 https://ax.dev/
+- BoTorch/Ax는 BO 모델과 adaptive experimentation UI/metadata 설계의 실무 기준이다: https://botorch.org/docs/v0.13.0/overview 및 https://ax.dev/
 - LangSmith observability는 decision point와 metadata trace에 적합하다: https://docs.langchain.com/oss/python/langchain/observability
 - AutoGen Studio는 workflow 결과, action, profiling을 사람이 검토하는 패턴을 제공한다: https://autogenhub.github.io/autogen/docs/autogen-studio/usage/
 - NN/g recognition rather than recall 원칙상 BO 추천은 숫자만이 아니라 왜 추천했는지 함께 보여줘야 한다: https://www.nngroup.com/articles/ten-usability-heuristics/

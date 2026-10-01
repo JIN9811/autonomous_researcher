@@ -3,6 +3,12 @@
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
 # 12. 자유 모듈화 갭 분석 및 개선안
 
+2026-09-29 완독 감사: 아래의 route/파일/agent 개수와 검증 결과는 2026-06-17
+시점의 기록이다. 이후 owner-local module 구조 및 computation retirement를
+반영한 현재 계약은 [Agents](../../agents/README.md)와
+[Runtime IDE](../../runtime/runtime_ide.md)를 따른다. 아래의 목표 구조나
+체크리스트를 현재 설치 상태 또는 새 실행 지시로 해석하지 않는다.
+
 대상: Live GUI 카드/구성요소, LangGraph, Runtime IDE, agent module, device bridge, generated adapter, draft module flow
 
 작성 기준:

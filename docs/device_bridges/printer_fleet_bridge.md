@@ -20,8 +20,8 @@ source_of_truth:
   - mcp_tools/printer_tools.py
   - configs/devices.yaml
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 188a1d6
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/device_bridges/README.md
   - docs/device_bridges/bambu_x2d_bridge.md
@@ -29,6 +29,10 @@ related_docs:
   - docs/agents/specimen_agent.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Printer Fleet Bridge Reference
 

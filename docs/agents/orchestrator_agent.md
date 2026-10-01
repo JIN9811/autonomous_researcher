@@ -22,8 +22,8 @@ source_of_truth:
   - orchestrator/setup_application.py
   - orchestrator/langgraph_runtime.py
   - graphs/modules/orchestrator/module.yaml
-last_verified: 2026-09-14
-verified_against: working-tree-2026-09-14-core-agent-roots
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -33,6 +33,10 @@ related_docs:
   - docs/oldversion/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Orchestrator Agent Reference
 
@@ -364,8 +368,9 @@ checks, hashes, and command scope are in the [verification evidence](../runtime/
 
 Only `research.goal`, `bo.parameter_space`, and `bo.acquisition` have the
 current descriptor-to-owner-to-consumer path. Unknown availability remains
-unknown. The current reference is verified against intentional uncommitted
-working-tree scope, not a commit containing these changes.
+unknown. Earlier verification entries describe their then-uncommitted working
+tree; the documentation audit at `dd0d772` is a static source review, not a rerun
+of registered-model, full-suite or hardware validation.
 
 ### Related documents
 

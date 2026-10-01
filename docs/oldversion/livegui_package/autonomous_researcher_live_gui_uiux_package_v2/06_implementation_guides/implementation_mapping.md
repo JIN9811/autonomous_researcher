@@ -1,5 +1,7 @@
 # Implementation Mapping
 
+> Archived development material (archive context clarified 2026-09-29). The original instructions, example values and visual targets below are historical, not current runtime requirements or measured evidence. See the [archive index](../../../README.md) for maintained replacements.
+
 이 패키지는 기존 `/live` 구조를 갈아엎는 용도가 아니라, 현재 `planning.html`, `planning.js`, `styles.css`에 점진적으로 이식하기 위한 UI/UX asset bundle이다.
 
 ## Recommended first patch

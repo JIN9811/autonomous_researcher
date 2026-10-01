@@ -51,6 +51,11 @@ are available in every environment.
 
 ## Source of Truth
 
+Documentation-only review: 2026-09-29 against `dd0d772`. Current UI/owner
+descriptions were reconciled by static inspection; the dated inventory and test
+results below retain their original evidence dates and were not rerun as a live
+system inventory. See the [file-by-file audit](../maintenance/documentation_review_20260929.md).
+
 - `app/main.py`
 - `graphs/configs/atr_closed_loop.yaml`
 - `graphs/modules/*/module.yaml` and committed `ui.yaml` descriptors
@@ -59,6 +64,11 @@ are available in every environment.
 - `knowledge/` and `scripts/knowledge_graph_cli.py`
 
 ## Knowledge Graph Runtime (retained 2026-08-09 subsystem record)
+
+The following bullets are historical subsystem evidence, not a current page/API
+inventory. The current Knowledge Workspace exposes Wiki, Memory, Source Library,
+Agent Delivery and Ontology; graph-relation review/edit is retired. See
+[Wiki and Memory](../knowledge/wiki_memory.md) and [the current template](../../web/templates/knowledge.html).
 
 The current Knowledge owner uses reviewed Wiki context, scoped Markdown notes,
 typed memory and explicit publication contracts. Neo4j/reconciliation is an
@@ -184,7 +194,7 @@ Guardian. Their manifest entries expose `ui_path`, `cards[]`, and
 the main `/live` report so the established Design/Equipment/Guardian layouts
 are not displaced by descriptor preview cards. Draft/custom/generic modules use
 the descriptor cards and report sections directly in Live GUI preview. Modules
-without `ui.yaml` keep the generic renderer.
+without `ui.yaml` may still use an installed owner frontend; absence of a descriptor alone does not imply generic rendering.
 Module-local `ui.renderer` is normalized as presentation metadata when present:
 allowlisted ids are returned in each agent manifest as `renderer.dashboard`,
 `renderer.report`, `renderer.fallback`, `renderer.supported`,
@@ -256,7 +266,7 @@ Historical browser audit results do not establish current feature availability.
 | LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge, Isaac Sim mirror-state probe and mirror loop |
 | PyAutoGUI equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `utils/local_pyautogui_bridge.py`, `app/main.py` | Windows bridge discovery plus managed localhost development target, proof, execution |
 | Recorded Equipment Skills | `utils/equipment_skill_runtime.py`, `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `agents/equipment/agent.py`, `policies/guardian_gate.py` | Versioned demonstration packages, v2 image-first click/drag locators, deterministic segment execution, exact-model bounded recovery |
-| Knowledge APIs | `knowledge/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, relation review/edit, activity visualization, and improvement evidence |
+| Knowledge APIs | `knowledge/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Shared Wiki, scoped private/typed memory, Source Library, Agent Delivery receipts and Ontology; historical graph projections are not an active relation-review UI |
 
 Do not use this document as an instruction prompt. Use it as the "what the code
 currently does" layer when updating operator docs, README files, or improvement
@@ -351,15 +361,20 @@ The default closed-loop graph is:
 graphs/configs/atr_closed_loop.yaml
 ```
 
-Current execution order:
+Representative execution flow (not an exhaustive conditional route list):
 
 ```text
-dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment
+dispatch -> idle -> design -> specimen -> vision -> manipulation -> vision -> equipment
 -> analysis -> knowledge -> bo -> guardian
 guardian continue -> design
 guardian stop -> complete
 guardian error -> error
 ```
+
+Scoped transfer, active-rollout monitoring and UTM-clearance edges can revisit
+Manipulation/Vision before the next stage. Saved graph defaults and candidate
+conditions, not this abbreviated diagram, determine routing. See
+[Execution Order](langgraph_runtime.md#execution-order).
 
 `GET /api/runtime/agent-manifests` currently returns a dictionary payload:
 
@@ -397,8 +412,8 @@ graphs/modules/equipment/ui.yaml
 graphs/modules/guardian/ui.yaml
 ```
 
-All other modules still render through the generic Live GUI report/card
-fallback unless a module-local `ui.yaml` is added.
+Installed owner modules also supply their own Live GUI report/card
+assets through the manifest-driven host. Generic fallback applies when neither an admitted owner frontend nor a supported descriptor supplies the view.
 
 Current manifest details from `_runtime_agent_manifests_payload()`:
 
@@ -676,6 +691,7 @@ prusa_bridge
 lerobot_bridge
 windows_pyautogui_bridge
 camera_utm_bridge
+plc_bridge
 ```
 
 This registry is a graph/IDE/Live GUI discovery manifest. It does not execute
@@ -1166,6 +1182,14 @@ When code changes after this snapshot, update docs in this order:
 
 ## 13. Verification Commands
 
+The commands below are reproduction examples, not commands run by the
+2026-09-29 documentation audit. **Importing `app.main` constructs the runtime
+controller.** Use an isolated offline checkout with controller construction
+stubbed and external effects denied for route inventories; do not run these
+imports against a production workspace merely to count routes. The recorded
+2026-09-28 inventory used that stubbed boundary. Source/AST inspection is the
+non-initializing alternative.
+
 Use these commands when this snapshot needs to be refreshed:
 
 ```bash
@@ -1285,7 +1309,7 @@ print("stage_dispatch edges:", len(graph["stage_dispatch"]))
 PY
 ```
 
-The labeled counts were collected during the 2026-08-08 Asia/Seoul
+The current inventory counts above were reconciled on 2026-09-28; explicitly dated 2026-08-08 observations retain their original scope. The earlier counts were collected during that Asia/Seoul
 verification session from committed baseline `09bbe32`. Importing `app.main`
 may create an empty run directory; verification cleanup may remove only the
 directory proven to have been created by that import.
@@ -1313,9 +1337,11 @@ directory proven to have been created by that import.
   The generated mesh retains an independent minimum-wall check of 0.4 mm.
 - `BOParameterSpace` normalizes both dimensions to `[0,1]^2`. The first eight
   accepted observations use one deterministic balanced Latin Hypercube design.
-  The normal 20-cycle test run uses those eight initialization cycles followed
-  by twelve `SingleTaskGP` / Expected Improvement cycles when all observations
-  are accepted.
+  The default 15-cycle test run (`configs/test_modes.yaml`) uses those eight initialization cycles followed
+  by seven `SingleTaskGP` / Expected Improvement cycles when all observations
+  are accepted and default initialization count/bounds are unchanged. Explicit
+  request values and the captured BO workspace initial-design count can change
+  this split without changing the acquisition implementation.
 - In initial-design mode, `BOAgent` preserves the numeric LHS proposal without
   passing it through candidate/LLM reranking. The runtime exposes
   `optimization_phase=initial_design`, `backend_active=lhs`, and the explicit

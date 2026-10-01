@@ -64,9 +64,11 @@ completion of a higher one.
 
 ## Scope
 
-Tier 0 and the focused Tier 1 documentation checks are instantiated in the
-initial package. Other tests exist in the repository, but a paper-scoped Tier
-1–4 result requires a new evidence record.
+Tier 0 and focused Tier 1 documentation checks are reproducible from the public
+package. Bounded supervised mixed-mode Tier 4 observations were subsequently
+recorded on September 7; their private raw archives are not bundled. Repeating
+those experiments or claiming another Tier 1–4 result requires its own evidence
+record, environment and authorization.
 
 The [Orchestrator dynamic Setup verification](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
 is one such bounded working-tree/Tier 1 record. Its provider cases use guarded
@@ -82,13 +84,13 @@ complete experimental cycle.
 
 ## Reproduction Tiers
 
-| Tier | Environment | Objective | External effect | Initial package state |
+| Tier | Environment | Objective | External effect | Recorded/public reproduction state |
 |---|---|---|---|---|
 | 0 | Inspection | Validate files, narrative order, graph/route counts, figures, links, and evidence hashes | None | Available |
 | 1 | Test | Run focused unit and contract tests | Controlled local files/processes | Documentation subset available; full system subset not evaluated here |
 | 2 | Replay or simulation | Exercise workflow and failures without new physical action | None or simulated | `not_evaluated` |
 | 3 | Browser | Validate operator workflows against a declared server mode | UI/API state | `not_evaluated` in this package |
-| 4 | Live | Execute supervised physical or production-equivalent protocol | Consequential | `not_evaluated` |
+| 4 | Live | Execute supervised physical or production-equivalent protocol | Consequential | Bounded September 7 mixed-mode observations recorded; independent public reproduction and full fabrication certification remain unavailable |
 
 ## Prerequisites
 
@@ -128,6 +130,11 @@ verification files after comparison.
 
 Inspect `docs/paper/artifact_manifest.yaml`, recompute each declared SHA-256,
 and confirm that supported claims reference existing evidence.
+
+Do not import the production `app.main` merely to count routes: that import
+constructs the controller. Historical route commands belong to their recorded
+baseline. Use static inspection, or an isolated offline environment with
+controller construction stubbed and external effects denied.
 
 ## Tier 1 Procedure
 
@@ -197,8 +204,11 @@ consequential command.
 
 ## Limitations and Known Gaps
 
-The initial package does not provide a container image, archival dataset, fixed
-model weights, venue artifact badge, or Tier 2–4 evidence. Optional external
+The public package does not provide a complete archival dataset, pinned model
+weight bundle, or venue artifact badge. It contains bounded Tier 4 observations,
+but not public raw inputs sufficient to independently reproduce them, or a
+paper-scoped Tier 2/3 record. The later fifteen-observation audit is Tier 0
+inspection of retained evidence, not a new Tier 4 execution. Optional external
 services may require agreements or hardware unavailable to reviewers.
 
 ## Verification

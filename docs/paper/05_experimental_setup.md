@@ -58,7 +58,7 @@ record.
 ## Scope
 
 The current package includes repository inspection, documentation contract
-tests, and retained supervised mixed-mode closed-loop records linked in
+tests, a fifteen-observation archive audit, and retained supervised mixed-mode closed-loop records linked in
 [Results](06_evaluation_and_results.md). Broader comparative campaigns remain
 evaluation work.
 
@@ -94,6 +94,12 @@ actually used.
 
 Results MUST remain in their recorded environment. A test result cannot fill a
 live-evaluation row.
+
+These are evidence classes, not guarantees from the runtime's mode string.
+ATR's `test` mode can select installed-printer or physical-print profiles with
+real effects; only a resolved all-virtual device profile supplies simulated I/O.
+Record the actual device/model boundary, as the September 7 mixed-mode records do.
+See [Test Mode](../runtime/test_mode.md).
 
 ## Units of Evaluation
 

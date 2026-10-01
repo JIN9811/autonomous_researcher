@@ -30,8 +30,8 @@ source_of_truth:
   - agents/core/knowledge/plan.py
   - agents/core/guardian/plan.py
   - packages/service.py
-last_verified: 2026-09-14
-verified_against: working-tree
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/runtime/three_level_control_model.md
@@ -40,6 +40,10 @@ related_docs:
   - docs/modularity.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Agent API and Connection Matrix
 
@@ -70,7 +74,7 @@ and the current Sunburst figure references. It adds no runtime or device path.
 
 | Surface | Implemented boundary |
 |---|---|
-| Agent/package | `agent.manipulation_agent`, owner and package `manipulation@1.0.0`; canonical code under `agents/manipulation/` with legacy module aliases |
+| Agent/package | `agent.manipulation_agent`, owner and package `manipulation@1.0.0`; canonical code under `agents/manipulation/`; migrated flat agent wrappers retired |
 | Execution | `/api/modules/manipulation` uses two Middle composite operations, `manipulation.task` and `manipulation.deliver`; source-bound CODE relationships expose actual High/Low and cross-cutting responsibilities |
 | Live report | `/api/agents/manipulation/report` uses the owner projector; `/module-assets/manipulation/live_report.js` supplies eight existing cards through shared telemetry/lifecycle services |
 | Bridge | `lerobot@1.0.0`, one `lerobot_bridge` runtime identity shared with Vision; existing rollout/replay/status/stop and workspace APIs |
@@ -97,7 +101,7 @@ See the [Vision Reference](vision_agent.md) and
 
 | Surface | Current owner and boundary |
 |---|---|
-| Agent/package | `agent.equipment_agent`, installed `equipment@1.0.0`; canonical owner code under `agents/equipment/` with exact flat-module aliases |
+| Agent/package | `agent.equipment_agent`, installed `equipment@1.0.0`; canonical owner code under `agents/equipment/`; migrated flat agent wrappers retired |
 | Execution | `equipment.task` and `equipment.deliver` preserve the existing composite workflow/result; source-bound CODE relationships expose High decisions, Middle software and Low worker execution |
 | Live report | `/api/agents/equipment/report` uses the owner projector; `/module-assets/equipment/live_report.js` mounts the existing cards and passive actions through the common host |
 | Bridge | `windows_pyautogui@1.0.0`, runtime identity `windows_pyautogui_bridge`, existing 18 tool IDs and selected Windows/Local worker |
@@ -110,7 +114,7 @@ and [Windows/PyAutoGUI Reference](../device_bridges/windows_pyautogui_bridge.md)
 
 | Surface | Current owner and boundary |
 |---|---|
-| Agent/package | `agent.analysis_agent`, installed `analysis@1.0.0`; canonical code under `agents/analysis/` with exact flat-module aliases |
+| Agent/package | `agent.analysis_agent`, installed `analysis@1.0.0`; canonical code under `agents/analysis/`; migrated flat agent wrappers retired |
 | Execution | `analysis.task` and `analysis.deliver` preserve measured-data processing and BO delivery; High LLM decisions, Middle numerical processing, no Low device owner |
 | Live report | `/api/agents/analysis/report` projects owner evidence; the module frontend renders measured curves, metrics, quality and BO handoff |
 | Bridge | None; the Analysis package uses agent-local numerical processing |
@@ -123,7 +127,7 @@ and [Analysis Agent Reference](analysis_agent.md).
 
 | Surface | Current owner and boundary |
 |---|---|
-| Agent/package | `agent.bo_agent`, installed `bo@1.0.0`; canonical code under `agents/bo/` with exact flat-module aliases |
+| Agent/package | `agent.bo_agent`, installed `bo@1.0.0`; canonical code under `agents/bo/`; migrated flat agent wrappers retired |
 | Execution | `bo.task` and `bo.deliver` preserve one composite optimization/result path; both public entrypoints traverse it once and archive once |
 | Live report | `/api/agents/bo/report` uses the owner projector; `/module-assets/bo/live_report.js` retains initial-LHS, posterior, decision, ranking and Design-handoff cards |
 | Numerics | Existing `learning.BOParameterSpace`, `learning.botorch_backend` and `experiment.benchmark`; no BO Device Bridge and no direct physical effect |
@@ -158,7 +162,7 @@ through `module_configurations`. See the [Modularity Reference](../modularity.md
 | Manipulation | physical transfer and post-test clearance | Specimen result, fresh Vision, configured skill and execution evidence | LLM-selected bounded tool call; task-result judgment after Vision and termination | Vision, Equipment, Analysis, Knowledge | `physical_possible` through existing robot executors |
 | Lab Equipment | `equipment` | Verified placement/specimen, exact stacked Flow/Skills, approvals | Bounded LLM Flow selection; deterministic execution; terminal screenshot/log review | Manipulation clearance → fresh Vision → Analysis | `physical_possible` through existing gated workers |
 | Analysis | `analysis` | Identified measurement, geometry and bound objective | LLM processing/review; numerically computed curves and objective | Measured Knowledge/BO handoff | No direct device execution |
-| Knowledge | `knowledge` plus source-intake worker | Analysis, terminal archives and applicable source evidence | One composite executable task; ontology-guided Markdown, scoped retrieval and typed memory; optional pinned declaration overlays owner-supported inputs | Cited BO/agent context; separate Evolution review | none; persistent local Markdown/typed state |
+| Knowledge | `knowledge` plus source-intake worker | Analysis, terminal archives and applicable source evidence | One composite executable task; ontology-guided Markdown, scoped retrieval and typed memory; optional pinned declaration overlays owner-supported inputs | Cited BO/agent context; Evolution generation retired | none; persistent local Markdown/typed state |
 | BO | `bo` | Analysis observations, continuous domain, settings, Knowledge context | Bounded LLM strategy/tool decision and review of the numerical candidate | Guardian and next Design cycle | none; proposal only |
 | Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | One composite executable task; deterministic gates retain authority; an optional pinned declaration adds reference-only advisory context | Orchestrator route translation | no direct action; can block/stop downstream action |
 
@@ -223,7 +227,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Manipulation | scoped transfer/clearance task, fresh Vision, configured policy or replay and preflight | `manipulation_report.v1`, `robot_task_result.v1`, decision and handoff evidence | rollout/replay session, confirmed termination, measured return and Vision refs | preflight, stale/conflicting Vision, unconfirmed termination, rejected result review |
 | Lab Equipment | exact Profile/Flow/Skills, verified placement, bridge readiness | existing result/report/handoff plus decisions and workflow execution ID | durable invocation, completed-block checkpoint, terminal screenshot/hash, logs, CSV/readiness | existing hard gates, rejected review, changed scope, claimed invocation or unknown effects |
 | Analysis | Identified measurement, initial geometry, units and objective | Curves, metrics and measured BO handoff | Source hashes, parser/coverage record and decisions | Invalid measurement blocks BO |
-| Knowledge | source identities, allowed scope and evidence; separate terminal-archive/source intake | `knowledge_context.v1`, `knowledge_report.v1`, `evolution_proposal.v1`, typed records and one curated note per source | Markdown revisions, source/page/block citations, intake receipts and audit | provenance/ontology/scope rejection; failed source stays unavailable to default retrieval |
+| Knowledge | source identities, allowed scope and evidence; separate terminal-archive/source intake | `knowledge_context.v1`, `knowledge_report.v1`, typed records and one curated note per source | Markdown revisions, source/page/block citations, intake receipts and audit | provenance/ontology/scope rejection; failed source stays unavailable to default retrieval |
 | BO | valid observations and bounded search space | numerical candidate, decision, artifacts, Design constraints and domain | tool/evidence trace, numerical result, accepted candidate identity | model/optimizer failure, owner return, candidate validation rejection |
 | Guardian | current state, risk/device/failure/approval context | gate/decision/contract, incidents, corrective actions | Guardian events, approval and incident records | unsafe, uncertain, exhausted budget, missing approval or evidence |
 
@@ -274,9 +278,7 @@ evidence allowlists. See [Wiki and Memory](../knowledge/wiki_memory.md).
 
 | Surface | Purpose | Effect |
 |---|---|---|
-| `GET /api/analysis/fem/jobs` | Filter background jobs by run/loop/specimen | Read-only; never starts or resumes a solve |
-| `POST /api/analysis/fem/jobs/{job_id}/cancel` | Cancel the addressed computation with run scope | Computation cancellation only |
-| `GET /api/cae/fields`, `/metadata`, `/section`, `/render` under that prefix | Read fields/frames and perform local section/render postprocessing | No solver invocation or device action |
+| `GET /api/agents/analysis/report` | Inspect measured curves, metrics and BO handoff | Read-only owner projection; former FEM-job and CAE-field routes are retired, not active computation interfaces |
 | `POST /api/knowledge/markdown/query`, `/read` | Search/read scoped execution knowledge | Read-only retrieval |
 | `GET /api/knowledge/workspace/summary` | Wiki, authorized memory and delivery revisions | Read-only; no scan or model call |
 | `POST /api/knowledge/wiki/query`, `/read` | Checked public platform reference | Read-only |
@@ -305,7 +307,7 @@ LangGraph and the ontology vocabulary remain in use.
 | Vision | capture quality and signal freshness | not normally required for observation | camera/runtime probe | may request/perform verified rollout stop | stale or missing observation blocks downstream handoff |
 | Manipulation | profile/policy/Vision/return-to-VLA | configured live confirmation | camera/profile/bridge preflight | Guardian/operator plus rollout stop | status and visual verification before restarting motion |
 | Lab Equipment | exact Flow/Skill/Profile/bridge, placement, identity and Guardian | existing live equipment action scope | live preflight and exact Skill validation | Guardian/operator/bridge stop | never replay completed work or unknown effects; one wait/exact-window focus, fresh observation and explicit safe failed-block resume only |
-| Analysis | input identity/units/coverage; mesh/result and separate promotion gates | not_applicable to physical approval | registered prepare/solve with frozen evidence | scoped background-job/process cancellation | preserve raw and partial outputs; no fabricated measurement or automatic validated promotion |
+| Analysis | input identity, units, geometry, measured coverage and bound-objective admission | not_applicable to physical approval | deterministic measurement/parser validation | existing owner cancellation; no solver process | preserve original measurements and blocked evidence; no synthetic substitute or fabricated BO admission |
 | Knowledge | provenance/ontology/scope/lifecycle | operator reason for lifecycle changes | validate before note write/publication | bounded decision stop | retain original evidence; no fabricated model success |
 | BO | search-space/constraint/validator gates | candidate still requires downstream governance | benchmark/dry-run where selected | Guardian/Orchestrator | reject candidate; no external physical effect |
 | Guardian | safety policy, risk, budget, evidence | may require operator decision | reads device/queue health | Guardian/operator/controller | stop or review; uncertainty never becomes allow by default |

@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. 단회 mock capture와 수동적인 signal-only Vision은 당시 기준이다. 현재 같은 capture의 이미지 증거, bounded 판단 및 post-manipulation 검증은 [Vision Agent](../../agents/vision_agent.md)와 [실행 graph](../../runtime/langgraph_runtime.md)를 따른다. 아래 optional perception backend와 simulator degradation 제안은 현행 물리 실행의 fallback 허용이나 safety 보장을 뜻하지 않는다.
+
 # Vision Agent 실험실 인식/신호 루프 고도화 조사 노트
 
 조사 일자: 2026-05-28

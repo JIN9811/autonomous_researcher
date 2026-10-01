@@ -1,6 +1,7 @@
 # Windows PyAutoGUI Bridge 설치 및 운영 가이드
 
-현재 권위 문서는 `Pyautogui_server_for_window/README.md`와 `docs/USAGE.md`이며 이 문서는 ATR 시스템 관점의 설치 요약입니다.
+현재 권위 문서는 [Windows Bridge README](../../Pyautogui_server_for_window/README.md)와
+[Windows Bridge USAGE](../../Pyautogui_server_for_window/docs/USAGE.md)이며 이 문서는 ATR 시스템 관점의 설치 요약입니다.
 
 ## 설치
 
@@ -12,7 +13,7 @@
 4. 브라우저 Console 확인
 5. Linux ATR에서 4자리 코드로 Pair & Save
 
-표준 설치는 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 이 과정에서 `%LOCALAPPDATA%\Programs\ATR\PyAutoGUIBridge`가 canonical 실행·원격 업데이트 경로로 저장됩니다. 이후 package 폴더의 START 파일을 눌러도 설치본을 우선 실행합니다. PyAutoGUI는 interactive desktop이 필요하므로 Windows service가 아니라 로그인 사용자 세션에서 실행합니다.
+표준 설치는 전체 package를 유지할 폴더에 복사한 뒤 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 현재 installer는 그 package 폴더에 `.venv`를 만들고 같은 폴더의 supervisor를 로그인 작업·바로가기에 등록하며 별도 `%LOCALAPPDATA%\Programs` 설치본으로 복사하지 않습니다. 기본 데이터 경로는 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`입니다. PyAutoGUI는 interactive desktop이 필요하므로 Windows service가 아니라 로그인 사용자 세션에서 실행합니다.
 
 구버전에서 전환할 때만 최신 package를 한 번 복사해 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 그 다음 버전부터는 Linux `Lab Equipment Workspace > Saved Worker`의 `Check Update`와 `Update`로 server, launcher, updater, Python dependency를 같은 설치 폴더에 원격 반영합니다.
 

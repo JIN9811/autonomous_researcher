@@ -14,6 +14,8 @@ supersedes: []
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../../README.md) for current references.
 
+> Archive reading note (2026-09-29): The implementation/model/browser counts and approved restart below are dated 2026-09-13 evidence, not actions performed or authorized by this review. Later owner migrations are described in [Runtime IDE](../../../runtime/runtime_ide.md); current fabrication/provider contracts are [Specimen](../../../agents/specimen_agent.md) and [Printer Fleet](../../../device_bridges/printer_fleet_bridge.md). Synthetic full-cycle evidence does not establish physical validation.
+
 
 # Specimen Agent and Experimental Packages Implementation Plan
 
@@ -256,11 +258,11 @@ calls across eight owners. Its 506.483-second duration includes the review wait,
 not a latency benchmark. Its failed acceptance remains distinct from the passing
 post-correction cycle and the deterministic offline cycle above.
 
-Read-only tracing found that the current Analysis quality gate and BO handoff
-both permit BO. The warning `peak_at_curve_boundary` is misclassified by the
-existing Guardian substring check (`"BO" in text` matches `BOUNDARY`), and
-Knowledge promotes incident classification metadata such as `data` into failure
-tags. Guardian also consults older readiness locations rather than these canonical
+Read-only tracing of the earlier diagnostic failure found that the Analysis quality gate and BO handoff
+both permitted BO. The warning `peak_at_curve_boundary` was misclassified by the
+then-existing Guardian substring check (`"BO" in text` matches `BOUNDARY`), and
+Knowledge promoted incident classification metadata such as `data` into failure
+tags. Guardian also consulted older readiness locations rather than these canonical
 handoff fields. The user subsequently approved the scoped follow-up above:
 token-aware classification, conservative canonical readiness and separation of
 historical evidence from current failure signals. The original failure remains

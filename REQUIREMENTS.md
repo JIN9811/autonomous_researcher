@@ -1,5 +1,9 @@
 # Autonomous Researcher Requirements
 
+Source audit: 2026-09-29 against `dd0d772`. Installation examples describe the
+tracked configuration; dated workstation results below are historical evidence,
+not a fresh installation or hardware verification performed during this audit.
+
 ## Status at a Glance
 
 | At a glance | Details |
@@ -41,7 +45,7 @@ Windows limitations:
 - Native Windows is supported for API-key GUI/API use and the standalone
   Windows PyAutoGUI bridge server.
 - Linux-only runtime pieces such as NemoClaw/vLLM Kubernetes control,
-  RealSense RSUSB builds, Dockerized solver/slicer paths, and Linux device
+  RealSense RSUSB builds, Dockerized slicer paths, and Linux device
   permissions require Linux/WSL or equivalent manual setup.
 - Real robot LeRobot workflows require a separate conda environment and
   LeRobot checkout on that PC.
@@ -91,7 +95,8 @@ Optional but commonly used:
   `docs/device_bridges/plc_safety_bridge.md`. PLC validation does not authorize
   printer, robot, UTM, or other downstream motion.
 - `nvidia-smi` and NVIDIA driver stack for local GPU runtime checks.
-- Docker for PrusaSlicer, CalculiX, local Neo4j, or local vLLM/NemoClaw paths.
+- Docker for PrusaSlicer or local vLLM/NemoClaw paths. Retired CalculiX/Neo4j
+  experiments are not dependencies of the active application.
 - Local Ubuntu PyAutoGUI bridge development requires an X11 desktop session,
   `PyAutoGUI` and `python3-xlib` from `requirements.txt`, plus `python3-tk`,
   `scrot`, `wmctrl`, and `xdotool`. Install the complete local-control option:
@@ -247,7 +252,7 @@ Optional but commonly used:
   install/bambustudio/bambu-studio-wrapper --help
   atr doctor
   ```
-  Current Spark workstation smoke check:
+  Recorded Spark workstation smoke check (historical, not rerun in this audit):
   `timeout 15s "$HOME/.local/bin/bambu-studio" --help` reports
   `BambuStudio-02.07.01.57` and documents `--slice`, `--arrange`,
   `--ensure-on-bed`, `--outputdir`, `--load-settings`, and `--load-filaments`.
@@ -326,14 +331,15 @@ repair installs, but the canonical dependency path is now `requirements.txt` and
 `pyproject.toml` default dependencies. Installing BoTorch pulls in PyTorch and
 CUDA-related wheels on this aarch64/Linux host, so expect a large download.
 
-If BoTorch import or GP fitting fails at runtime, `botorch_optional` falls back to
-`lightweight_pool` and records the reason in `benchmark.backend_warnings` and
-`bo_result.benchmark.strategies.bo.backend_warnings`.
+The production `botorch` path fails with a typed error if dependencies or GP
+fitting are unavailable; it does not silently switch to `lightweight_pool`.
+The explicit legacy `botorch_optional` benchmark can retain pool-scoring fallback
+and warning records; that is not the production proposal contract.
 
 Implementation boundary:
 
-- `learning/botorch_backend.py` uses BoTorch `SingleTaskGP` posterior scoring over
-  the existing candidate pool.
+- `learning/botorch_backend.py` fits `SingleTaskGP` and proposes a point using
+  `optimize_acqf` or `optimize_acqf_mixed` in the schema-defined parameter space.
 - It does not bypass Design/Specimen/Guardian validation.
 - It does not perform unconstrained continuous optimization over categorical or
   boolean manufacturing parameters.
@@ -609,10 +615,10 @@ Pipeline` selector:
 
 - `legacy_lerobot`: standard LeRobot RGB/depth visual features only; ATR raw
   16-bit sidecar is disabled.
-- `rgbd_sidecar`: current default for ROBOTIS OMX-AI RealSense runs; standard
+- `rgbd_sidecar`: compatibility mode for ROBOTIS OMX-AI RealSense runs; standard
   LeRobot RGB-D features plus ATR 16-bit raw-depth sidecar and transform
   metadata.
-- `raw_depth_adapter`: training-time adapter mode that requires the raw sidecar
+- `raw_depth_adapter`: current configured default; training-time adapter mode that requires the raw sidecar
   manifest and sets `ATR_LEROBOT_RAW_DEPTH_ADAPTER=1` plus
   `ATR_LEROBOT_RAW_DEPTH_SOURCE_DIR=<dataset>/sidecar/depth_raw`. The patched
   LeRobot loader then replaces the standard `*_depth` feature tensors with
@@ -639,7 +645,7 @@ realsense_depth_align_to_color: true
 realsense_depth_scale_m_per_unit: 0.001
 realsense_depth_clip_min_mm: 0.0
 realsense_depth_clip_max_mm: 2000.0
-default_observation_pipeline_id: rgbd_sidecar
+default_observation_pipeline_id: raw_depth_adapter
 ```
 
 Install the RealSense Python SDK into the LeRobot environment as well when robot
@@ -950,13 +956,14 @@ conda run -n lerobot-pi05-torch211 hf download lerobot/pi05_base --max-workers 1
 ### Optional X-VLA Training Branch
 
 X-VLA is integrated as an additive LeRobot policy backend for lower-data
-experiments. It uses the normal `lerobot` conda environment and does not require
-the isolated Pi0.5 worktree/environment.
+experiments. The tracked `xvla_conda_env_name` selects `lerobot-pi05-torch211`;
+prepare the isolated environment/source checkout described above rather than
+assuming that installation into the base `lerobot` environment is sufficient.
 
 Optional model download:
 
 ```bash
-conda run -n lerobot hf download lerobot/xvla-base --max-workers 1
+conda run -n lerobot-pi05-torch211 hf download lerobot/xvla-base --max-workers 1
 ```
 
 When `policy_type=xvla` is selected, the GUI/bridge passes
@@ -1029,18 +1036,17 @@ are suppressed by the bridge.
 The Pi0.5 worktree, conda env, datasets, model cache, and offline W&B run files
 are not part of this Git repository.
 
-## CAE / CalculiX Runtime
+## Retired CAE / CalculiX Context
 
-The current CAE plan uses the project CAE bridge and a CalculiX-oriented runtime path. A separate Python FEM solver stack is no longer part of the documented new-machine install path. CalculiX integration remains optional until the CAE runner is explicitly enabled.
+FEM/CAE and Self-Evolution were retired from the active application on
+2026-09-14. No solver or CAE bridge installation is required for the current
+measurement-only Analysis path. Retained code and prior instructions are
+historical material under [the retirement archive](oldversion/2026-09-14-retired-computation/README.md),
+not optional features that can be enabled in the current runtime.
 
-Required CAE documentation lives in:
-
-```text
-docs/agents/cae_analysis_runtime_guideline.txt
-docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md
-```
-
-Keep physical UTM data as the measured source of truth. CAE output is simulation evidence only and must not be inserted into BO as a measured observation.
+Use [Analysis Agent](docs/agents/analysis_agent.md) for current operation.
+Physical UTM data remains measured evidence; archived simulation output must not
+be inserted into BO as a measured observation.
 
 ## Windows PyAutoGUI Bridge
 
@@ -1299,7 +1305,9 @@ and resume policy.
 
 ## ROS Specimen Pose Tracking
 
-Required for live D455F one-shot pose tracking:
+Optional dependencies for the D455F ROS one-shot pose-tracking integration.
+This is not the current ActiveCam2D Vision default; see
+[Vision Agent](docs/agents/vision_agent.md) for the active observation path:
 
 ```bash
 sudo apt install -y ros-jazzy-realsense2-camera ros-jazzy-cv-bridge ros-jazzy-image-transport python3-opencv python3-numpy
@@ -1322,7 +1330,7 @@ colcon build --packages-select atr_specimen_pose_tracker
 
 Live validation requires the D455F to enumerate as a USB3 RealSense device. If it is not visible to `rs-enumerate-devices` or appears only on a USB2/high-speed path, fix the physical cable/hub/port before using `vision.specimen_pose_snapshot` in live mode.
 
-The ROS driver publishes the current default D455F topics under the camera name:
+When that optional D455F ROS integration is selected, its topics use:
 
 ```text
 /camera/d455f/color/image_raw

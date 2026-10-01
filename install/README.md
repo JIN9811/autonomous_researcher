@@ -3,6 +3,10 @@
 This folder contains setup notes and launchers for the local
 `autonomous_researcher` checkout.
 
+Source audit: 2026-09-29 against `dd0d772`; this review did not install software,
+restart services, or commission hardware. Host-specific verification below is
+retained evidence rather than a new test result.
+
 ATR supports two inference modes:
 
 - Local-first: use `vllm`, `ollama`, or `nemoclaw` first, then fall back to the
@@ -52,7 +56,7 @@ Windows limitations:
 - The Linux `atr` launcher is intended for Linux, WSL, or Git Bash. Native
   Windows starts the backend with `python -m app.serve`.
 - LeRobot live hardware, RealSense RSUSB, local NemoClaw/vLLM, Dockerized
-  solvers/slicers, and Linux device permissions require WSL/Linux or separate
+  slicers, and Linux device permissions require WSL/Linux or separate
   conda/toolchain setup.
 - Hardware memory files such as `memory/bambu_connection.json`,
   `memory/prusa_connection.json`, and `memory/lerobot_device_ports.json` are
@@ -100,7 +104,7 @@ Required:
 
 Recommended:
 
-- Miniconda or Mambaforge for LeRobot and solver-specific environments
+- Miniconda or Mambaforge for LeRobot environments
 - Microsoft C++ Build Tools only if a Python dependency has to build from source
 - PrusaSlicer for local slicing, or Docker Desktop if using Linux containers
 
@@ -208,14 +212,16 @@ When `conda_executable` is left as `conda`, ATR first uses `conda` from PATH and
 then auto-detects common user installs such as
 `%USERPROFILE%\miniconda3\Scripts\conda.exe`.
 
-For SmolVLA training/rollout experiments, install the LeRobot extra and cache
-the required Hub repos in that same `lerobot` environment:
+For SmolVLA training/rollout experiments, the tracked `smolvla_conda_env_name`
+uses the isolated `lerobot-pi05-torch211` environment. Prepare that environment
+as described in [Requirements](../REQUIREMENTS.md#optional-smolvla-training-branch),
+then install the extra and cache the required Hub repos there:
 
 ```bash
-cd ~/lerobot
-conda run --no-capture-output -n lerobot python -m pip install -e ".[smolvla]"
-conda run --no-capture-output -n lerobot hf download lerobot/smolvla_base --max-workers 1
-conda run --no-capture-output -n lerobot hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
+cd ~/lerobot_pi05
+conda run --no-capture-output -n lerobot-pi05-torch211 python -m pip install -e ".[smolvla]"
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download lerobot/smolvla_base --max-workers 1
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
 ```
 
 Use the `/lerobot` GUI page for port detection, teleoperation, recording,
@@ -223,15 +229,16 @@ training, and rollout. Hardware actions still require live confirmation gates.
 
 ### 6. Optional Windows Equipment Bridge
 
-If this same or another Windows PC controls UTM software through PyAutoGUI, run:
+If this same or another Windows PC controls UTM software through PyAutoGUI,
+copy the complete bridge package and install it in an interactive Windows session:
 
 ```powershell
-py -m pip install pyautogui pywinauto Pillow
-$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<random-token>"
-py install\windows_pyautogui_bridge_server.py
+.\Pyautogui_server_for_window\INSTALL_WINDOWS_BRIDGE.cmd
 ```
 
-Save the bridge URL/token from `http://127.0.0.1:7860/equipment/windows`.
+Pair the selected worker with its one-time four-digit console code in Linux
+ATR's Lab Equipment Workspace. Do not distribute a model/API key to Windows.
+See [Windows bridge setup](../Pyautogui_server_for_window/README.md).
 
 ## Linux / WSL Quick Start
 
@@ -438,10 +445,12 @@ PowerShell alternative:
 ```powershell
 cd .\Pyautogui_server_for_window
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser -ShowToken
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_supervisor.ps1
 ```
 
-From the Live GUI, open `Windows Bridge` to scan the internal network, select the Windows PC, save the connection, and test `program1`.
+From the Live GUI, open `Windows Bridge` to scan the internal network, select the
+Windows PC, enter its four-digit code, and Pair & Save. Running `program1` is a
+separate operator-triggered check, not part of discovery or pairing.
 
 ## Packaged Piper TTS
 

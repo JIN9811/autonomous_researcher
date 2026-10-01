@@ -23,8 +23,8 @@ source_of_truth:
   - packages/agents/specimen/package.yaml
   - app/main.py
   - web/static/planning.js
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13-specimen-modularization
+last_verified: 2026-09-29
+verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -34,6 +34,10 @@ related_docs:
   - docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md
 supersedes: []
 -->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
 # Specimen Making Agent Reference
 
@@ -56,7 +60,8 @@ supersedes: []
 
 The installed [Specimen module](../../agents/specimen/module.py) binds the
 existing `SpecimenMakingAgent` to `AgentRegistry`. The handler remains
-`agent.specimen_agent`; flat Python imports remain compatibility adapters.
+`agent.specimen_agent`; maintained Python callers import `agents.specimen`
+directly after retirement of the flat agent wrappers.
 
 | Boundary | Specimen owns | Existing host retained |
 |---|---|---|

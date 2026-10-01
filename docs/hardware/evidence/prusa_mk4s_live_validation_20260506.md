@@ -1,5 +1,12 @@
 # Prusa MK4S Live Validation - 2026-05-06
 
+Historical evidence: device versions, local gates, UI and source paths below
+describe the May 6 validation, not current fleet defaults or a new live check.
+Use the [Prusa Reference](../../device_bridges/prusa_mk4s_bridge.md) and
+[Printer Fleet Reference](../../device_bridges/printer_fleet_bridge.md) for
+current operation. The recorded physical result is preserved without extending
+it to Bambu, automatic fallback, later firmware or unattended ejection.
+
 Purpose:
 - Record the actual Prusa MK4S bridge validation result for this repository.
 - Keep operator secrets out of documentation.

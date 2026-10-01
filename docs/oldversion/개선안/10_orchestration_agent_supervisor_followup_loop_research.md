@@ -1,6 +1,9 @@
 
 
 > Archived development history (2026-09-14). Not the current implementation or acceptance contract. See the [archive index](../README.md) for current references.
+
+> 읽기 범위 (2026-09-29): 본문의 “현재/지금”은 2026-05-28 조사 시점이며, 이후 추가된 제안도 현행 acceptance contract가 아니다. keyword-only 진단, flat agent 경로, Self-Evolution 연계와 제안 packet/event 이름은 당시 기록이다. 현재 semantic intake·bounded handoff·owner 권한은 [Orchestrator Agent](../../agents/orchestrator_agent.md), 조건부 실행 경로와 실행 가능한 module graph는 [LangGraph runtime](../../runtime/langgraph_runtime.md)을 따른다. 본문의 예시 route와 UTF-8 문제 진단은 현행 상태/장애를 뜻하지 않는다.
+
 # 10. Orchestration Agent 고도화안 - Supervisor, 중간 의견 팔로업, 전역 실행 조율 루프
 
 작성일: 2026-05-28

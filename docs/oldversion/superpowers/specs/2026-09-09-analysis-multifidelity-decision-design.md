@@ -11,7 +11,7 @@ related_docs:
   - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
   - docs/agents/analysis_agent.md
   - docs/agents/bo_agent.md
-  - docs/device_bridges/cae_computation_bridges.md
+  - docs/device_bridges/README.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/standards/documentation_standard.md
 supersedes: []
@@ -241,7 +241,8 @@ Explicit 준정적/손상 정규화/자기접촉은 현재 등록된 계산 경�
 보정 성공으로 취급하지 않는다. LLM의 hold는 후속 후보 실행과 사용 가능한 후보
 내보내기를 중단한다. 구체적인 구현·검증은
 [특징 기반 FEM 구현 계획](../plans/2026-09-09-feature-informed-fem-calibration.md)과
-[근거 문서](../../../paper/evidence/2026-09-09-feature-informed-fem-calibration.md)를 따른다.
+당시 근거 문서 `docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md`를 따른다.
+해당 근거는 현재 `oldversion/2026-09-14-retired-computation/docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md`에 로컬 보관되며 공개 아카이브에는 포함되지 않는다.
 
 개선 판단은 API와 등록된 로컬 vLLM에서 동일한 `analysis_reasoning` 계약으로
 수행한다. LLM에는 메쉬 품질·입력 hash·전체 구간 충족·개별 오차·최선 후보와
@@ -413,7 +414,7 @@ README는 전체 폴더를 복사해 호환 CalculiX에서 `ccx -i model`로 실
 
 ## Related Evidence and Plan
 
-상위 계약은 [5영역 설계](2026-09-07-five-area-agent-restructuring-contract-design.md), 현재 구현 설명은 [Analysis Reference](../../../agents/analysis_agent.md), 초기 작업 순서는 [승인 후 구현 계획](../plans/2026-09-09-analysis-background-improvement.md), 후속 실행은 [비차단 FEM/Live 카드 계획](../plans/2026-09-09-nonblocking-fem-live-cards.md), 실행 근거는 [비구동 검증 기록](../../../paper/evidence/2026-09-09-analysis-improvement-validation.md)에 둔다.
+상위 계약은 [5영역 설계](2026-09-07-five-area-agent-restructuring-contract-design.md), 현재 구현 설명은 [Analysis Reference](../../../agents/analysis_agent.md), 초기 작업 순서는 [승인 후 구현 계획](../plans/2026-09-09-analysis-background-improvement.md), 후속 실행은 [비차단 FEM/Live 카드 계획](../plans/2026-09-09-nonblocking-fem-live-cards.md)에 둔다. 당시 실행 근거 `docs/paper/evidence/2026-09-09-analysis-improvement-validation.md`는 현재 `oldversion/2026-09-14-retired-computation/docs/paper/evidence/2026-09-09-analysis-improvement-validation.md`에 로컬 보관되며 공개 아카이브에서는 제공하지 않는다. 현재 Reference는 이 과거 증거의 대체물이 아니다.
 
 ### 구현 범위와 후속 목표
 
@@ -439,7 +440,8 @@ README는 전체 폴더를 복사해 호환 CalculiX에서 `ccx -i model`로 실
 LLM은 3해상도 수렴 근거가 없어 검증 승인을 보류했다. 별도 복사 모델의 실제
 FEM 계산 중 소프트웨어 2회 루프가 12.72초에 완료됐고 검증용 해석은 취소했다.
 실제 장비는 사용하지 않았다. 수치·그림·자원 범위와 아티팩트 위치는
-[Analysis 문서](../../../agents/analysis_agent.md#completed-native-fem-case--2026-09-09)에 기록한다.
+당시 Analysis 문서의 `Completed Native FEM Case — 2026-09-09` 절에 기록했다.
+그 보관본은 로컬 전용 `oldversion/2026-09-14-retired-computation/docs/agents/analysis_agent.md`이며 공개 아카이브에는 포함되지 않는다.
 1회 해석을 3해상도 수렴이나 재료의 독립 검증으로 확대하지 않는다.
 
 ## Limitations and Known Gaps
@@ -459,6 +461,6 @@ BO/아티팩트 불변성이 유지됨을 비구동으로 검증한다. 모델·
 ## Related Documents
 
 - [Analysis 현재 Reference](../../../agents/analysis_agent.md)
-- [CAE 계산 브릿지 현재 Reference](../../../device_bridges/cae_computation_bridges.md)
+- [현재 Bridge Reference Index](../../../device_bridges/README.md); 당시 CAE reference `docs/device_bridges/cae_computation_bridges.md`는 로컬 전용 `oldversion/2026-09-14-retired-computation/docs/device_bridges/cae_computation_bridges.md`에 보관됨
 - [5영역 공통 계약](2026-09-07-five-area-agent-restructuring-contract-design.md)
 - [루프별 아티팩트 보관](../../../runtime/loop_artifact_archiving.md)

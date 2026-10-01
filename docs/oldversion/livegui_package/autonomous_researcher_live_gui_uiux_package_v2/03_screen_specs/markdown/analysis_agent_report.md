@@ -1,7 +1,9 @@
 # Analysis Agent Report
 
+> Archived development material (archive context clarified 2026-09-29). The original instructions, example values and visual targets below are historical, not current runtime requirements or measured evidence. See the [archive index](../../../../README.md) for maintained replacements.
+
 - Agent ID: `analysis`
-- Reference image: `../00_references/generated_full_screens/07_analysis_agent_report.png`
+- Reference image: [archived screen mockup](../../00_references/generated_full_screens/07_analysis_agent_report.png)
 
 ## Sections
 - `preprocessing_status`
