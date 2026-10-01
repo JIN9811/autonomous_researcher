@@ -207,6 +207,47 @@ def test_pinn_storage_preserves_explicit_paths_and_uses_typed_default(split_brid
     assert not (paths.runtime_root / "artifacts").exists()
 
 
+@pytest.mark.parametrize("devices_config", [
+    {"devices": {"pinn": None}},
+    {"devices": {"pinn": "unconfigured"}},
+    {"devices": {"pinn": []}},
+    {"devices": {"pinn": ["ignored"]}},
+    {"devices": {"pinn": False}},
+    {"pinn": 42},
+    {"devices": None, "pinn": {"enabled": False, "active_model_id": "must-be-ignored"}},
+    {"devices": "ignored", "pinn": {"runtime_training_enabled": True}},
+    {"devices": [], "pinn": {"mode": "must-be-ignored"}},
+    {"devices": 42},
+    None,
+    "ignored",
+    ["ignored"],
+])
+def test_pinn_bootstrap_tolerates_non_object_optional_sections(split_bridge_runtime, devices_config):
+    from app import bootstrap
+    paths, configs = split_bridge_runtime
+    configs["devices"] = deepcopy(devices_config)
+    before = deepcopy(configs)
+    controller = bootstrap.load_runtime(paths=paths)
+    config = controller._deps.agent_context.tools.resource("pinn_bridge").config
+    assert (config.enabled, config.mode, config.active_model_id, config.runtime_training_enabled) == (True, "test", "", False)
+    assert config.artifact_dir == paths.artifact_root / "pinn"
+    assert config.artifact_dir.is_dir()
+    assert configs == before
+
+
+def test_pinn_bootstrap_preserves_valid_nondefault_options(split_bridge_runtime):
+    from app import bootstrap
+    paths, configs = split_bridge_runtime
+    configs["devices"] = {"pinn": {"enabled": False, "mode": "live", "active_model_id": "configured-model",
+                                   "runtime_training_enabled": True}}
+    before = deepcopy(configs)
+    controller = bootstrap.load_runtime(paths=paths)
+    config = controller._deps.agent_context.tools.resource("pinn_bridge").config
+    assert (config.enabled, config.mode, config.active_model_id, config.runtime_training_enabled) == (False, "live", "configured-model", True)
+    assert config.artifact_dir == paths.artifact_root / "pinn"
+    assert configs == before
+
+
 def test_changed_mixed_bridge_arguments_keep_legacy_storage_base(split_bridge_runtime, monkeypatch):
     from app import bootstrap
     from mcp_tools import printer_tools

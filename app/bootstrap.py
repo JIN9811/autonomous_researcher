@@ -324,10 +324,12 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     lerobot_bridge.config.artifact_run_root = paths.run_root
     # PINN's sole path is storage: supply the typed default without rewriting
     # any explicitly configured legacy relative or absolute artifact setting.
-    pinn_config = deepcopy(cfg.get("devices", {}))
-    pinn_devices = pinn_config.get("devices", pinn_config)
-    pinn_devices.setdefault("pinn", {}).setdefault("artifact_dir", str(paths.artifact_root / "pinn"))
-    register_pinn_tools(tools, pinn_config, repo_root=paths.repository_root)
+    pinn_raw = cfg.get("devices", {})
+    pinn_devices = pinn_raw.get("devices", pinn_raw) if isinstance(pinn_raw, dict) else {}
+    pinn_section = pinn_devices.get("pinn") if isinstance(pinn_devices, dict) else None
+    pinn_config = deepcopy(pinn_section) if isinstance(pinn_section, dict) else {}
+    pinn_config.setdefault("artifact_dir", str(paths.artifact_root / "pinn"))
+    register_pinn_tools(tools, {"pinn": pinn_config}, repo_root=paths.repository_root)
     register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(
