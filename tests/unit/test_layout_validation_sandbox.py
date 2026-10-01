@@ -20,6 +20,15 @@ def test_os_boundary_denies_host_resources():
     assert boundary["capabilities"] == "0000000000000000"
 
 
+def test_node_uses_isolated_validation_tools_with_boundary_intact():
+    import shutil
+    from tools.repository_layout.sandbox import require_boundary
+    require_boundary()
+    assert shutil.which('node') == '/deps/validation-tools/bin/node'
+    result = subprocess.run(['node', '--version'], capture_output=True, text=True, check=True)
+    assert result.stdout.strip().startswith('v22.')
+
+
 def test_dependency_tree_rejects_executable_pth_and_editable_finders(tmp_path):
     from tools.repository_layout.sandbox import validate_dependencies
     import pytest

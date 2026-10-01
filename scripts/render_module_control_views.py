@@ -15,11 +15,12 @@ from agents.analysis.structure import analysis_implementation_structure
 from agents.bo.structure import bo_implementation_structure
 from agents.core.knowledge.structure import knowledge_implementation_structure
 from agents.core.guardian.structure import guardian_implementation_structure
+from utils.runtime_paths import current_paths, _resolve_reference
 
 
-def render(module_id: str, root: Path) -> str:
-    payload = yaml.safe_load((root / 'graphs/modules' / module_id / 'module.yaml').read_text())
-    renderer = root / 'web/static/module_control_view.js'
+def render(module_id: str, runtime_root: Path) -> str:
+    payload = yaml.safe_load(_resolve_reference(f'graphs/modules/{module_id}/module.yaml', runtime_root).read_text())
+    renderer = _resolve_reference('web/static/module_control_view.js', runtime_root)
     structures = {'design': design_implementation_structure, 'orchestrator': orchestrator_implementation_structure,
                   'specimen': specimen_implementation_structure, 'vision': vision_implementation_structure,
                   'manipulation': manipulation_implementation_structure,
@@ -37,10 +38,13 @@ def render(module_id: str, root: Path) -> str:
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
+    paths = current_paths()
+    parser.add_argument('--runtime-root', type=Path, default=paths.runtime_root)
+    parser.add_argument('--output-dir', type=Path, default=paths.repository_root / 'docs/agents/assets/figures')
     parser.add_argument('modules', nargs='*', choices=['design', 'orchestrator', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'bo', 'knowledge', 'guardian'])
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
+    args.output_dir.mkdir(parents=True, exist_ok=True)
     for module_id in args.modules or ('design', 'orchestrator', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'bo', 'knowledge', 'guardian'):
-        target = root / 'docs/agents/assets/figures' / f'{module_id}_control_areas.svg'
-        target.write_text(render(module_id, root), encoding='utf-8')
-        print(target.relative_to(root))
+        target = args.output_dir / f'{module_id}_control_areas.svg'
+        target.write_text(render(module_id, args.runtime_root), encoding='utf-8')
+        print(target)

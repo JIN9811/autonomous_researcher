@@ -36,6 +36,112 @@ from orchestrator.transitions import default_next_stage, ordered_stages
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
 
 
+def test_default_graph_and_module_roots_follow_explicit_runtime(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from utils import runtime_paths as rp
+    from agents.core.orchestrator.capabilities import OwnerCatalog
+    root = tmp_path / 'runtime'
+    shutil.copytree(Path(__file__).resolve().parents[2] / 'graphs', root / 'graphs')
+    paths = replace(rp.current_paths(), runtime_root=root)
+    monkeypatch.setattr(rp, '_current', paths)
+    graph = LangGraphRunLoop._load_config(None)
+    assert LangGraphRunLoop._resolve_module_root(None) == root / 'graphs'
+    assert OwnerCatalog(AgentRegistry(), graph).graph_root == root / 'graphs'
+
+
+def test_controller_graph_defaults_use_injected_paths_and_preserve_explicit_graph_root(tmp_path):
+    from dataclasses import replace
+    from app.controller import MainController
+    from utils import runtime_paths as rp
+    root = tmp_path / 'runtime'
+    shutil.copytree(Path(__file__).resolve().parents[2] / 'graphs', root / 'graphs')
+    config = root / 'graphs/configs/atr_closed_loop.yaml'
+    raw = yaml.safe_load(config.read_text())
+    raw['graph']['name'] = 'Injected graph'
+    config.write_text(yaml.safe_dump(raw))
+    paths = replace(rp.current_paths(), runtime_root=root)
+    controller = MainController(replace(app_main.controller._deps, paths=paths, run_root=tmp_path / 'runs',
+                                        agent_registry=AgentRegistry()))
+    assert controller._active_graph_module_root() == root / 'graphs'
+    assert controller._active_graph_config().name == 'Injected graph'
+    assert controller._planning_setup_catalog().graph_root == root / 'graphs'
+    assert controller._run_owner_catalog().graph_root == root / 'graphs'
+    controller._active_graph_config_path = tmp_path / 'custom/configs/draft.yaml'
+    assert controller._active_graph_module_root() == tmp_path / 'custom'
+
+
+@pytest.mark.parametrize('cwd', ['.', 'runtime'])
+def test_graph_config_handoff_and_controller_resolution_use_bound_repository(tmp_path, monkeypatch, cwd):
+    from dataclasses import replace
+    from app.controller import MainController
+    from utils import runtime_paths as rp
+    root = tmp_path / 'runtime'
+    root.mkdir()
+    paths = replace(rp.current_paths(), repository_root=tmp_path, runtime_root=root)
+    monkeypatch.setattr(app_main, 'RUNTIME_PATHS', paths)
+    monkeypatch.chdir(tmp_path / cwd)
+    config = root / 'graphs/configs/atr_closed_loop.yaml'
+    handoff = app_main._graph_config_runtime_path(config)
+    assert handoff == 'runtime/graphs/configs/atr_closed_loop.yaml'
+    controller = MainController(replace(app_main.controller._deps, paths=paths, run_root=tmp_path / 'runs',
+                                        agent_registry=AgentRegistry()))
+    resolve = getattr(controller, '_resolve_graph_config_path', None)
+    assert callable(resolve), 'graph handoff requires explicit repository resolution'
+    assert resolve(handoff) == config
+    assert resolve(config) == config
+    assert resolve(None) is None
+
+
+@pytest.mark.parametrize('reference', ['../outside', 'modules/../../outside', '/absolute', 'modules/link'])
+def test_graph_module_loaders_reject_escaped_sources(tmp_path, reference):
+    from types import SimpleNamespace
+    from agents.core.orchestrator.capabilities import OwnerCatalog
+    graph_root = tmp_path / 'graphs'
+    (graph_root / 'modules').mkdir(parents=True)
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'module.yaml').write_text('module:\n  id: stolen\n  handler: agent.design_agent\n')
+    (graph_root / 'modules/link').symlink_to(outside)
+    node = SimpleNamespace(stage='design', module_id=reference, handler='agent.design_agent')
+    loop = object.__new__(LangGraphRunLoop)
+    loop._module_root = graph_root
+    loop._graph_config = SimpleNamespace(nodes=[node])
+    assert loop._load_module_configs() == {}
+    assert loop._load_owner_module_configs() == {}
+    assert OwnerCatalog(AgentRegistry(), loop._graph_config, graph_root=graph_root)._module(node) == {}
+
+
+def test_relocated_graphs_preserve_semantics_modules_and_pinned_owner_catalog(tmp_path):
+    from agents.core.orchestrator.capabilities import OwnerCatalog
+    source = Path(__file__).resolve().parents[2] / 'graphs'
+    relocated = tmp_path / 'runtime/graphs'
+    shutil.copytree(source, relocated)
+    expected_ids = {'design', 'orchestrator', 'specimen', 'vision', 'manipulation',
+                    'equipment', 'analysis', 'bo', 'knowledge', 'guardian'}
+    assert {p.parent.name for p in relocated.glob('modules/*/module.yaml')} == expected_ids
+    assert {load_graph_config(p).id for p in relocated.glob('configs/*.yaml')} == {
+        'atr_closed_loop', 'utm_test_flow', 'printer_pipeline', 'lerobot_pick_place'}
+    for config in source.glob('configs/*.yaml'):
+        old = load_graph_config(config)
+        new = load_graph_config(relocated / 'configs' / config.name)
+        assert old.model_dump() == new.model_dump()
+        before = OwnerCatalog(AgentRegistry(), old, graph_root=source).snapshot()
+        after = OwnerCatalog(AgentRegistry(), new, graph_root=relocated).snapshot()
+        assert before.bindings() == after.bindings()
+        loop = object.__new__(LangGraphRunLoop)
+        loop._graph_config = new
+        loop._module_root = source
+        modules = loop._load_module_configs()
+        owners = loop._load_owner_module_configs()
+        loop._module_root = relocated
+        assert loop._load_module_configs() == modules
+        assert loop._load_owner_module_configs() == owners
+        assert all(module.get('id') in expected_ids for module in owners.values())
+    pinned = after.bindings()
+    (relocated / 'modules/design/module.yaml').write_text('module: {}')
+    assert after.bindings() == pinned
+
+
 def _runtime_bo_visualization() -> dict[str, object]:
     return build_bo_visualization(
         run_id="run-runtime-bo-artifacts",

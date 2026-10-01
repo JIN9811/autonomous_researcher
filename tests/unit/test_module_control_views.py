@@ -12,6 +12,22 @@ from test_planning_design_report_js import _extract_function
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_renderer_cli_separates_runtime_sources_and_document_destination(tmp_path):
+    import shutil
+    import sys
+    from scripts.render_module_control_views import render
+    runtime = tmp_path / 'runtime'
+    shutil.copytree(ROOT / 'graphs/modules/design', runtime / 'graphs/modules/design')
+    shutil.copytree(ROOT / 'web/static', runtime / 'web/static')
+    output = tmp_path / 'documents/figures'
+    result = subprocess.run([sys.executable, '-m', 'scripts.render_module_control_views',
+                             '--runtime-root', str(runtime), '--output-dir', str(output), 'design'],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (output / 'design_control_areas.svg').read_text() == render('design', runtime_root=runtime)
+    assert not (runtime / 'docs').exists()
+
+
 @pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'equipment', 'analysis'])
 def test_control_layout_preserves_executable_nodes_edges_and_saved_positions(module_id):
     module = yaml.safe_load((ROOT / f'graphs/modules/{module_id}/module.yaml').read_text())['module']

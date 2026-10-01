@@ -2,7 +2,12 @@
 
 
 def implementation_detail(nodes, edges):
-    """Build inspectable source references without importing their implementation."""
+    """Build runtime-relative source references, without opening or importing them.
+
+    Source inspection must use resolve_runtime_reference with explicit paths;
+    owner documentation instead uses resolve_document_reference. Neither these
+    metadata values nor detached package drafts grant execution/open authority.
+    """
     return {
         "nodes": [dict(id=id_, label=label, area=area,
                        source=dict(path=path, symbol=symbol))

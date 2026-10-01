@@ -5,6 +5,35 @@ from pathlib import Path
 
 import pytest
 
+
+def test_seven_installed_package_payloads_are_identical_after_source_relocation(tmp_path, monkeypatch):
+    import shutil
+    from packages import service as package_service
+    descriptions = [importlib.import_module(f'agents.{name}.module').MODULE.describe()
+                    for name in ('design', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'bo')]
+    original = package_service.installed_agent_packages(descriptions)
+    relocated = tmp_path / 'runtime/packages'
+    shutil.copytree(Path(__file__).resolve().parents[2] / 'packages', relocated)
+    monkeypatch.setattr(package_service, 'files', lambda package: relocated)
+    moved = package_service.installed_agent_packages(descriptions)
+    assert moved == original
+    assert len(moved) == 7
+    for package in moved:
+        assert package['version'] == '1.0.0'
+        assert package['module_reference'] == f"graphs/modules/{package['id']}/module.yaml"
+
+
+def test_detached_package_import_never_opens_reference_or_activates(monkeypatch):
+    svc = service()
+    exported = svc.export_experimental(payload())['package']
+    monkeypatch.setattr(Path, 'read_text', lambda *args, **kwargs: pytest.fail('draft cannot open source'))
+    monkeypatch.setattr(Path, 'read_bytes', lambda *args, **kwargs: pytest.fail('draft cannot open source'))
+    imported = svc.import_experimental(exported)
+    assert imported['ok'] and not imported['persisted'] and not imported['activated']
+    exported['graph']['nodes'][0]['module_id'] = '../private/source'
+    assert svc.import_experimental(exported)['draft'] is None
+
+
 def service(**overrides):
     from agents.design.module import MODULE as design
     from agents.specimen.module import MODULE as specimen

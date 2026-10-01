@@ -45,6 +45,7 @@ import yaml
 from agents.base_agent import AgentContext, AgentResult
 from agents.registry import AgentRegistry
 from agents.core.orchestrator.capabilities import OwnerCatalog
+from utils.runtime_paths import current_paths, _resolve_reference
 from orchestrator.handoff_boundary import review_handoff, authorization_scope, incoming_authorization_matches
 from orchestrator.orchestrator_checkpoint import handoff_checkpoint
 from backends.llm_backend import LLMImageInput
@@ -803,15 +804,15 @@ class LangGraphRunLoop:
     def _load_config(graph_config_path: str | Path | None) -> GraphConfig:
         """Load the configured executable graph."""
         if graph_config_path is None:
-            graph_config_path = Path(__file__).resolve().parent.parent / "graphs" / "configs" / "atr_closed_loop.yaml"
+            graph_config_path = current_paths().runtime_root / "graphs/configs/atr_closed_loop.yaml"
         return load_graph_config(graph_config_path)
 
     @staticmethod
     def _resolve_module_root(module_root: str | Path | None) -> Path:
         """Return the graph root containing module paths such as modules/design."""
         if module_root is None:
-            return Path(__file__).resolve().parent.parent / "graphs"
-        return Path(module_root)
+            return current_paths().runtime_root / "graphs"
+        return Path(module_root).resolve()
 
     def _load_module_configs(self) -> dict[str, dict[str, Any]]:
         """Load editable module configs referenced by graph nodes."""
@@ -819,7 +820,10 @@ class LangGraphRunLoop:
         for node in self._graph_config.nodes:
             if not node.stage or not node.module_id:
                 continue
-            module_path = self._module_root / node.module_id / "module.yaml"
+            try:
+                module_path = _resolve_reference(f"{node.module_id}/module.yaml", self._module_root)
+            except ValueError:
+                continue
             if not module_path.exists():
                 continue
             raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
@@ -834,7 +838,10 @@ class LangGraphRunLoop:
         for node in self._graph_config.nodes:
             if not node.module_id:
                 continue
-            module_path = self._module_root / node.module_id / "module.yaml"
+            try:
+                module_path = _resolve_reference(f"{node.module_id}/module.yaml", self._module_root)
+            except ValueError:
+                continue
             if not module_path.is_file():
                 continue
             raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}

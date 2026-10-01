@@ -4000,7 +4000,7 @@ def _graph_config_path(graph_id: str) -> Path:
 def _graph_config_runtime_path(path: Path) -> str:
     """Return a stable graph config path for runtime handoff payloads."""
     try:
-        return path.resolve().relative_to(resolve_path(".").resolve()).as_posix()
+        return path.resolve().relative_to(RUNTIME_PATHS.repository_root).as_posix()
     except ValueError:
         return str(path)
 

@@ -93,7 +93,7 @@ from reporting.bo_visualization_artifacts import write_bo_visualization_artifact
 from reporting.lhs_design_visualization_artifacts import write_lhs_design_visualization_artifacts
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
-from utils.runtime_paths import RuntimePaths, current_paths
+from utils.runtime_paths import RuntimePaths, current_paths, _resolve_reference
 from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
 from utils.test_mode_execution_profiles import TestModeExecutionProfileStore
 from utils.operator_teleop_handoff import (
@@ -177,6 +177,7 @@ class MainController:
 
     def __init__(self, deps: ControllerDeps) -> None:
         self._deps = deps
+        self._paths = deps.paths or current_paths()
         self._test_mode_execution_profiles_path = (deps.paths or current_paths()).memory_root / "test_mode_execution_profiles.json"
         self._operator_teleop_handoffs = OperatorTeleopHandoffRegistry()
         self._trace = RunTrace(max_events=int(deps.system_config.get("event_buffer_size", 300)))
@@ -1937,10 +1938,17 @@ class MainController:
             route.append(step)
         return route
 
+    def _resolve_graph_config_path(self, value: str | Path | None) -> Path | None:
+        """Resolve serialized graph handoffs once, independently of process CWD."""
+        if not value:
+            return None
+        path = Path(value)
+        return path if path.is_absolute() else (self._paths.repository_root / path).resolve()
+
     def _active_graph_module_root(self) -> Path:
         """Resolve module root for the active graph config path."""
         if self._active_graph_config_path is None:
-            return Path(__file__).resolve().parent.parent / "graphs"
+            return self._paths.runtime_root / "graphs"
         graph_dir = Path(self._active_graph_config_path).resolve().parent
         return graph_dir.parent if graph_dir.name == "configs" else graph_dir
 
@@ -1949,7 +1957,10 @@ class MainController:
         module_id = str(getattr(node, "module_id", "") or "").strip()
         if not module_id:
             return []
-        module_path = self._active_graph_module_root() / module_id / "module.yaml"
+        try:
+            module_path = _resolve_reference(f"{module_id}/module.yaml", self._active_graph_module_root())
+        except ValueError:
+            return []
         if not module_path.exists():
             return []
         try:
@@ -2311,7 +2322,7 @@ class MainController:
         display_scope = _DISPLAY_OWNER_CATALOG.get()
         if display_scope is not None and display_scope[0] is self:
             return display_scope[1]
-        graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
+        graph = load_graph_config(self._active_graph_config_path or self._paths.runtime_root / "graphs/configs/atr_closed_loop.yaml")
         # Freeze only this resolution so describe/readback can share bindings.
         # The next call (including after a model await) reads current graph files.
         return OwnerCatalog(self._deps.agent_registry, graph,
@@ -2455,7 +2466,7 @@ class MainController:
     def _run_owner_catalog(self) -> OwnerCatalog:
         """Pin graph-linked owners for this execution's existing runtime paths."""
         if getattr(self, "_owner_catalog_run_id", None) != self._state.run_id:
-            graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
+            graph = load_graph_config(self._active_graph_config_path or self._paths.runtime_root / "graphs/configs/atr_closed_loop.yaml")
             self._execution_owner_catalog = OwnerCatalog(
                 self._deps.agent_registry,
                 graph,
@@ -2467,7 +2478,10 @@ class MainController:
             for binding in self._execution_owner_catalog.describe(self._state, self._deps.agent_context):
                 if not binding.get("module_id"):
                     continue
-                path = self._execution_owner_catalog.graph_root / binding["module_id"] / "module.yaml"
+                try:
+                    path = _resolve_reference(f"{binding['module_id']}/module.yaml", self._execution_owner_catalog.graph_root)
+                except ValueError:
+                    continue
                 if path.is_file():
                     module = load_module_config(path).model_dump(mode="json", exclude_none=True, by_alias=True)
                     module_id = str(module.get("id") or Path(binding["module_id"]).name)
@@ -2501,7 +2515,7 @@ class MainController:
             max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
             interval_seconds=interval_seconds,
             on_event=on_event,
-            graph_config_path=self._active_graph_config_path,
+            graph_config_path=self._active_graph_config_path or self._paths.runtime_root / "graphs/configs/atr_closed_loop.yaml",
             module_root=self._active_graph_module_root(),
             run_orchestrator_before_design=run_orchestrator_before_design,
         )
@@ -4601,7 +4615,7 @@ class MainController:
             if setup_rejection is not None:
                 return setup_rejection
         self._active_graph_id = graph_id or "atr_closed_loop"
-        self._active_graph_config_path = Path(graph_config_path) if graph_config_path else None
+        self._active_graph_config_path = self._resolve_graph_config_path(graph_config_path)
         self._trace = RunTrace(max_events=int(self._deps.system_config.get("event_buffer_size", 300)))
         self._logger_bundle = self._new_logger_bundle(run_purpose(mode.value))
         self._state = self._new_state(mode=mode)
@@ -9833,7 +9847,7 @@ class MainController:
 
     def _active_graph_config(self):
         """Load the active runtime graph config used by Live GUI planning."""
-        path = self._active_graph_config_path or (Path(__file__).resolve().parent.parent / "graphs" / "configs" / "atr_closed_loop.yaml")
+        path = self._active_graph_config_path or self._paths.runtime_root / "graphs/configs/atr_closed_loop.yaml"
         try:
             return load_graph_config(path)
         except Exception:

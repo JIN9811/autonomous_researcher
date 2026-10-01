@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 
 import yaml
+from utils.runtime_paths import current_paths, _resolve_reference
 
 
 def availability_view(report: dict, now: float) -> dict:
@@ -34,14 +35,15 @@ class OwnerCatalog:
     def __init__(self, registry, graph_config, *, graph_root=None):
         self.registry = registry
         self.graph_config = graph_config
-        self.graph_root = Path(graph_root or Path(__file__).resolve().parents[3] / "graphs").resolve()
+        self.graph_root = Path(graph_root if graph_root is not None else current_paths().runtime_root / "graphs").resolve()
         self._pinned_bindings = None
 
     def _module(self, node):
         if not node.module_id:
             return {}
-        path = (self.graph_root / node.module_id / "module.yaml").resolve()
-        if not path.is_relative_to(self.graph_root):
+        try:
+            path = _resolve_reference(f"{node.module_id}/module.yaml", self.graph_root)
+        except ValueError:
             return {}
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 _SOURCE_ROOTS = ("repository_root", "runtime_root", "system_root", "workspace_root")
@@ -137,6 +137,30 @@ def resolve_repository_path(value: str | Path, *, paths: RuntimePaths | None = N
 
 def resolve_runtime_path(value: str | Path, *, paths: RuntimePaths | None = None) -> Path:
     return _resolve(value, (paths or current_paths()).runtime_root)
+
+
+def _resolve_reference(value: str, root: Path) -> Path:
+    """Resolve a canonical code-owned reference, never incoming open authority."""
+    if (not isinstance(value, str) or not value or '\\' in value or ':' in value
+            or '\x00' in value or value.startswith('/')
+            or any(part in {'', '.', '..'} for part in value.split('/'))
+            or PurePosixPath(value).as_posix() != value):
+        raise ValueError('Reference must be a canonical relative path')
+    root = root.resolve()
+    target = (root / value).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError('Reference escapes its source root')
+    return target
+
+
+def resolve_runtime_reference(value: str, *, paths: RuntimePaths) -> Path:
+    """Resolve installed implementation/config/frontend metadata under runtime."""
+    return _resolve_reference(value, paths.runtime_root)
+
+
+def resolve_document_reference(value: str, *, paths: RuntimePaths) -> Path:
+    """Resolve installed documentation metadata under the outer repository."""
+    return _resolve_reference(value, paths.repository_root)
 
 
 def resolve_system_path(value: str | Path, *, paths: RuntimePaths | None = None) -> Path:

@@ -62,7 +62,7 @@ def sandbox_command(snapshot: Path, dependencies: Path, argv: list[str], *, cwd:
     if command[0] in {"python", "python3"}:
         command = ["/usr/bin/python3", "-S", *command[1:]]
     host_ns = {name: os.readlink(f"/proc/self/ns/{name}") for name in ("pid", "net", "mnt", "ipc", "user")}
-    env = {"PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "XDG_CACHE_HOME": "/tmp/cache",
+    env = {"PATH": "/deps/validation-tools/bin:/usr/bin:/bin", "HOME": "/tmp/home", "XDG_CACHE_HOME": "/tmp/cache",
            "TMPDIR": "/tmp", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1",
            "PYTHONPATH": f"{cwd}:/deps/{site.relative_to(dependencies)}", "LANG": "C.UTF-8",
            "ATR_SANDBOX_HOST_NAMESPACES": json.dumps(host_ns),
