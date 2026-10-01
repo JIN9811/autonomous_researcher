@@ -246,7 +246,9 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     guide_path = (resolve_repository_path(system_cfg["guide_path"], paths=paths)
                   if system_cfg.get("guide_path")
                   else resolve_system_path("project/Project_guide.txt", paths=paths))
-    local_index = LocalRAGIndex.from_file(guide_path)
+    guide_source = (str(guide_path) if system_cfg.get("guide_path")
+                    else str(paths.repository_root / "docs/project/Project_guide.txt"))
+    local_index = LocalRAGIndex.from_file(guide_path, source_label=guide_source)
     web_retriever = WebRetriever(
         tavily_api_key=os.getenv("TAVILY_API_KEY"),
         serper_api_key=os.getenv("SERPER_API_KEY"),
@@ -305,7 +307,8 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     tools = ToolRegistry()
     from knowledge.source_runtime import library_for
     from mcp_tools.source_tools import register_source_tools
-    register_source_tools(tools, lambda: library_for(paths.repository_root))
+    register_source_tools(tools, lambda: library_for(
+        library_root=paths.memory_root / "knowledge/source_library", inbox_root=paths.source_inbox_root))
     register_mock_tools(tools)
     # These legacy APIs mix source and storage paths under one repo_root.
     # Keep its repository-relative contract until those consumers are split.
@@ -350,7 +353,8 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
         runtime_profiles=runtime_profiles,
         llm_lease=LLMLeaseCoordinator(),
         artifact_run_root=str(paths.run_root),
-        knowledge_service=KnowledgeContextService(paths.repository_root, data_root=paths.memory_root / "knowledge"),
+        knowledge_service=KnowledgeContextService(paths.repository_root, data_root=paths.memory_root / "knowledge",
+            wiki_corpus_root=paths.system_root / "knowledge/wiki", wiki_source_root=paths.repository_root),
         paths=paths,
     )
 

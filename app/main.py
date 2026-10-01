@@ -4052,7 +4052,9 @@ def _knowledge_service() -> KnowledgeService:
 
 def _manual_knowledge_service() -> ManualKnowledgeService:
     """Return source-separated, citation-preserving manual retrieval."""
-    return ManualKnowledgeService(project_root=resolve_path("."))
+    return ManualKnowledgeService(project_root=RUNTIME_PATHS.repository_root,
+        manual_data_root=RUNTIME_PATHS.memory_root / "knowledge/manual_rag",
+        registry_path=RUNTIME_PATHS.system_root / "knowledge/manuals/registry.yaml")
 
 
 def _manual_knowledge_context(
@@ -18984,7 +18986,9 @@ _SOURCE_INGESTION_SERVICE = None
 def _source_ingestion_service():
     global _SOURCE_INGESTION_SERVICE
     if _SOURCE_INGESTION_SERVICE is None:
-        _SOURCE_INGESTION_SERVICE = SourceIngestionService(_source_library_for(resolve_path(".")),
+        _SOURCE_INGESTION_SERVICE = SourceIngestionService(_source_library_for(
+            library_root=RUNTIME_PATHS.memory_root / "knowledge/source_library",
+            inbox_root=RUNTIME_PATHS.source_inbox_root),
             lambda: controller._deps.agent_context)
     return _SOURCE_INGESTION_SERVICE
 
@@ -19007,7 +19011,10 @@ def _knowledge_context_service() -> KnowledgeContextService:
     if isinstance(shared, KnowledgeContextService):
         return shared
     if _KNOWLEDGE_CONTEXT_SERVICE is None:
-        _KNOWLEDGE_CONTEXT_SERVICE = KnowledgeContextService(resolve_path("."), data_root=KNOWLEDGE_MEMORY_ROOT)
+        _KNOWLEDGE_CONTEXT_SERVICE = KnowledgeContextService(RUNTIME_PATHS.repository_root,
+            data_root=RUNTIME_PATHS.memory_root / "knowledge",
+            wiki_corpus_root=RUNTIME_PATHS.system_root / "knowledge/wiki",
+            wiki_source_root=RUNTIME_PATHS.repository_root)
     return _KNOWLEDGE_CONTEXT_SERVICE
 
 

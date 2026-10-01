@@ -19,12 +19,21 @@ _KOREAN_ALIAS_PARTICLES = ("으로부터", "에게서", "에서는", "으로", "
 class WikiCatalog:
     """Small, deterministic public corpus; it never scans outside wiki pages."""
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = Path(project_root).resolve()
-        preferred = self.project_root / "docs" / "knowledge" / "wiki"
-        bundled_project = Path(__file__).resolve().parents[1]
-        self.root = preferred if preferred.exists() else bundled_project / "docs" / "knowledge" / "wiki"
-        self.source_root = self.project_root if preferred.exists() else bundled_project
+    def __init__(self, project_root: Path | None = None, *, corpus_root: Path | None = None,
+                 source_root: Path | None = None) -> None:
+        legacy_root = Path(project_root).resolve() if project_root is not None else None
+        if legacy_root is not None:
+            if source_root is not None and Path(source_root).resolve() != legacy_root:
+                raise ValueError("project_root conflicts with Wiki source_root")
+            if corpus_root is not None and Path(corpus_root).resolve() != legacy_root / "docs/knowledge/wiki":
+                raise ValueError("project_root conflicts with Wiki corpus_root")
+            corpus_root = legacy_root / "docs/knowledge/wiki"
+            source_root = legacy_root
+        if corpus_root is None or source_root is None:
+            raise ValueError("Select both Wiki corpus_root and source_root, or an explicit legacy project_root")
+        self.root = Path(corpus_root).resolve()
+        self.source_root = Path(source_root).resolve()
+        self.project_root = self.source_root  # Explicit old-call compatibility.
 
     def query(self, query: str, *, filters: dict[str, Any] | None = None, cursor: str = "", limit: int = 25) -> dict[str, Any]:
         clean_limit = self._limit(limit)

@@ -11,8 +11,10 @@ import ast
 import hashlib
 import html
 import json
+import os
 import re
 from collections import Counter
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,12 @@ EXCLUDED_PARTS = {
     "dist",
     "build",
     ".mypy_cache",
+    "workspace",
+    "private",
+    "outputs",
+    "user_files",
+    "logs",
+    "source_inbox",
 }
 
 SECRET_NAME_PATTERNS = (
@@ -90,22 +98,52 @@ def scan_project_graph(
     *,
     out_dir: Path | None = None,
     source_paths: list[str] | None = None,
+    runtime_root: Path | None = None,
+    corpus_paths: list[str] | None = None,
+    reference_map: Mapping[str, str] | None = None,
     max_file_bytes: int = 256_000,
     run_external_graphify: bool = False,
 ) -> dict[str, Any]:
     """Build project-level graph artifacts under memory/knowledge/graphify."""
     project_root = project_root.resolve()
+    runtime_root = Path(runtime_root).resolve() if runtime_root is not None else project_root
+    if not runtime_root.is_relative_to(project_root):
+        raise ValueError("Graph runtime_root must be inside the repository")
+    inverse = _identity_map(reference_map or {})
+    if source_paths is not None and corpus_paths is not None and source_paths != corpus_paths:
+        raise ValueError("source_paths conflicts with corpus_paths")
+    selected_sources = corpus_paths if corpus_paths is not None else source_paths
+    if selected_sources is None:
+        if runtime_root != project_root:
+            raise ValueError("A split runtime requires an explicit technical corpus allowlist")
+        selected_sources = list(DEFAULT_SCAN_PATHS)
+    for source in selected_sources:
+        _canonical_path(source)
+        if source in {"docs", "system", "runtime"} or project_root / source == runtime_root:
+            raise ValueError("Graph corpus must select technical subtrees, not a source root")
+    files = _collect_files(project_root, selected_sources, max_file_bytes=max_file_bytes)
+    # Imports are reference metadata, not extra content-ingestion authority.
+    reference_paths: set[str] = set()
+    for source in files:
+        if Path(source).suffix == '.py':
+            for imported in _python_imports(_safe_read(project_root / source, max_file_bytes=max_file_bytes)):
+                target = _resolve_python_import(runtime_root, imported, repository_root=project_root)
+                if target:
+                    reference_paths.add(target.removeprefix('file:'))
     out_dir = (out_dir or project_root / "memory" / "knowledge" / "graphify").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    selected_sources = source_paths or list(DEFAULT_SCAN_PATHS)
 
-    external = _run_external_graphify(project_root, out_dir, selected_sources) if run_external_graphify else {"ok": False, "skipped": True, "reason": "external graphify disabled"}
+    # Both engines receive the same bounded, non-symlink public file set.
+    external = _run_external_graphify(project_root, out_dir, files) if run_external_graphify else {"ok": False, "skipped": True, "reason": "external graphify disabled"}
     if external.get("ok") and Path(str(external.get("graph_json", ""))).exists():
         graph = load_graphify_graph(Path(str(external["graph_json"])))
         graph["metadata"] = {**graph.get("metadata", {}), "external_graphify": external}
     else:
-        graph = build_fallback_project_graph(project_root, selected_sources, max_file_bytes=max_file_bytes)
+        graph = build_fallback_project_graph(project_root, files, max_file_bytes=max_file_bytes,
+                                             runtime_root=runtime_root, reference_map=reference_map)
         graph["metadata"] = {**graph.get("metadata", {}), "external_graphify": external}
+    graph = _reconcile_identities(graph, project_root, inverse, set(files) | reference_paths)
+    graph['metadata']['reference_paths'] = sorted(reference_paths)
 
     graph_path = out_dir / "project_graph.json"
     report_path = out_dir / "GRAPH_REPORT.md"
@@ -122,6 +160,7 @@ def scan_project_graph(
         "schema": "atr_graphify_import_manifest.v1",
         "created_at": _now(),
         "project_root": project_root.as_posix(),
+        "runtime_root": runtime_root.as_posix(),
         "source_paths": selected_sources,
         "external_graphify": external,
         "outputs": {
@@ -142,8 +181,12 @@ def scan_project_graph(
     return {"ok": True, "tool": "knowledge.graphify.scan", **manifest}
 
 
-def build_fallback_project_graph(project_root: Path, source_paths: list[str], *, max_file_bytes: int) -> dict[str, Any]:
+def build_fallback_project_graph(project_root: Path, source_paths: list[str], *, max_file_bytes: int,
+                                 runtime_root: Path | None = None,
+                                 reference_map: Mapping[str, str] | None = None) -> dict[str, Any]:
     files = _collect_files(project_root, source_paths, max_file_bytes=max_file_bytes)
+    runtime_root = runtime_root or project_root
+    inverse = _identity_map(reference_map or {})
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[str, dict[str, Any]] = {}
 
@@ -160,20 +203,21 @@ def build_fallback_project_graph(project_root: Path, source_paths: list[str], *,
         nodes[node_id] = {"id": node_id, "kind": "Agent", "label": agent_id, "agent_id": agent_id, "properties": {"agent_id": agent_id}}
 
     for rel_path in sorted(files):
+        logical_path = inverse.get(rel_path, rel_path)
         abs_path = project_root / rel_path
         text = _safe_read(abs_path, max_file_bytes=max_file_bytes)
         file_node = _file_node(rel_path, text)
         nodes[file_node["id"]] = file_node
         edges[_edge_id(root_id, file_node["id"], "CONTAINS")] = _edge(root_id, file_node["id"], "CONTAINS")
 
-        agent_id = _agent_for_path(rel_path)
+        agent_id = _agent_for_path(logical_path)
         if agent_id:
             agent_node = f"agent:{agent_id}"
-            edge_type = "IMPLEMENTS" if rel_path.startswith("agents/") or rel_path.startswith("graphs/modules/") else "DOCUMENTS"
+            edge_type = "IMPLEMENTS" if logical_path.startswith(("agents/", "graphs/modules/")) else "DOCUMENTS"
             edges[_edge_id(file_node["id"], agent_node, edge_type)] = _edge(file_node["id"], agent_node, edge_type)
 
-        if rel_path.startswith("graphs/modules/") and rel_path.endswith("module.yaml"):
-            module_id = rel_path.split("/")[2]
+        if logical_path.startswith("graphs/modules/") and logical_path.endswith("module.yaml"):
+            module_id = logical_path.split("/")[2]
             module_node = f"module:{module_id}"
             nodes[module_node] = {"id": module_node, "kind": "Module", "label": module_id, "agent_id": module_id, "properties": {"module_id": module_id, "path": rel_path}}
             edges[_edge_id(file_node["id"], module_node, "DECLARES")] = _edge(file_node["id"], module_node, "DECLARES")
@@ -181,7 +225,7 @@ def build_fallback_project_graph(project_root: Path, source_paths: list[str], *,
 
         if abs_path.suffix == ".py":
             for imported in _python_imports(text):
-                dep_id = _resolve_python_import(project_root, imported)
+                dep_id = _resolve_python_import(runtime_root, imported, repository_root=project_root)
                 if dep_id:
                     edges[_edge_id(file_node["id"], dep_id, "IMPORTS")] = _edge(file_node["id"], dep_id, "IMPORTS", properties={"import": imported})
             for route in _fastapi_routes(text):
@@ -189,7 +233,7 @@ def build_fallback_project_graph(project_root: Path, source_paths: list[str], *,
                 nodes[route_id] = {"id": route_id, "kind": "RuntimeAPI", "label": f"{route['method']} {route['path']}", "properties": route}
                 edges[_edge_id(file_node["id"], route_id, "IMPLEMENTS")] = _edge(file_node["id"], route_id, "IMPLEMENTS")
 
-        for tool_name in _tool_defs(text, rel_path):
+        for tool_name in _tool_defs(text, logical_path):
             tool_id = f"tool:{tool_name}"
             nodes[tool_id] = {"id": tool_id, "kind": "Tool", "label": tool_name, "properties": {"tool_id": tool_name}}
             edges[_edge_id(file_node["id"], tool_id, "IMPLEMENTS")] = _edge(file_node["id"], tool_id, "IMPLEMENTS")
@@ -348,18 +392,100 @@ document.getElementById('edges').innerHTML = graph.edges.map(e => `<div class=\"
 """
 
 
+def _canonical_path(value: str) -> str:
+    if (not isinstance(value, str) or not value or value.startswith('/') or '\\' in value
+            or ':' in value or '\x00' in value or any(part in {'', '.', '..'} for part in value.split('/'))):
+        raise ValueError("Graph references must be canonical repository-relative paths")
+    return value
+
+
+def _identity_map(reference_map: Mapping[str, str]) -> dict[str, str]:
+    """Invert the caller's frozen source -> destination map without guessing."""
+    inverse: dict[str, str] = {}
+    for source, destination in reference_map.items():
+        _canonical_path(source)
+        _canonical_path(destination)
+        if destination in inverse and inverse[destination] != source:
+            raise ValueError("Ambiguous graph identity destination")
+        if destination != source and destination in reference_map:
+            raise ValueError("Graph identity mapping overlaps another source")
+        inverse[destination] = source
+    return inverse
+
+
+def _reconcile_identities(graph: dict[str, Any], project_root: Path, inverse: dict[str, str],
+                          files: set[str]) -> dict[str, Any]:
+    """Keep historical path-derived IDs and all endpoints, recording current paths separately."""
+    known_paths = files | set(inverse) | set(inverse.values())
+    ordered_paths = sorted(known_paths, key=len, reverse=True)
+
+    def identify(node_id: str) -> tuple[str, str]:
+        prefix, separator, value = node_id.partition(':')
+        if prefix not in {'file', 'graphify'} or not separator:
+            return node_id, ''
+        absolute_prefix = project_root.as_posix() + '/' if value.startswith(project_root.as_posix() + '/') else ''
+        if absolute_prefix:
+            value = value[len(absolute_prefix):]
+        if value in known_paths:
+            return prefix + ':' + absolute_prefix + inverse.get(value, value), value
+        # Graphify may use a file path plus symbol identity rather than a file node.
+        for path in ordered_paths:
+            if value.startswith(path + ':'):
+                return prefix + ':' + absolute_prefix + inverse.get(path, path) + value[len(path):], path
+        if prefix == 'file':
+            raise ValueError("Graph file identity is outside the explicit corpus")
+        return node_id, ''
+
+    nodes, aliases, seen = [], {}, set()
+    for node in graph.get('nodes', []):
+        old_id = str(node['id'])
+        canonical, physical = identify(old_id)
+        if canonical in seen:
+            raise ValueError("Colliding graph node identities after relocation")
+        seen.add(canonical)
+        aliases[old_id] = canonical
+        props = dict(node.get('properties') or {})
+        if physical:
+            props['path'] = physical
+            props['identity_path'] = inverse.get(physical, physical)
+        nodes.append({**node, 'id': canonical, 'properties': props})
+    edges = []
+    for edge in graph.get('edges', []):
+        source = aliases.get(edge['source']) or identify(edge['source'])[0]
+        target = aliases.get(edge['target']) or identify(edge['target'])[0]
+        edge_id = edge['id']
+        if edge_id == _edge_id(edge['source'], edge['target'], edge['type']):
+            edge_id = _edge_id(source, target, edge['type'])
+        edges.append({**edge, 'id': edge_id, 'source': source, 'target': target})
+    return {**graph, 'nodes': nodes, 'edges': edges}
+
+
 def _collect_files(project_root: Path, source_paths: list[str], *, max_file_bytes: int) -> list[str]:
     found: list[str] = []
     for source in source_paths:
-        path = (project_root / source).resolve()
+        path = project_root / _canonical_path(source)
+        if _skip_path(path, source):
+            continue
+        if any(item.is_symlink() for item in (path, *path.parents) if item.is_relative_to(project_root)):
+            continue
+        path = path.resolve()
         if not _is_relative_to(path, project_root) or not path.exists():
             continue
         if path.is_file():
             candidates = [path]
         else:
-            candidates = [item for item in path.rglob("*") if item.is_file()]
+            candidates = []
+            for directory, subdirs, names in os.walk(path, followlinks=False):
+                base = Path(directory)
+                subdirs[:] = [name for name in subdirs
+                              if not (base / name).is_symlink()
+                              and not _skip_path(base / name, (base / name).relative_to(project_root).as_posix())]
+                candidates.extend(base / name for name in names if (base / name).is_file())
         for item in candidates:
             rel = item.relative_to(project_root).as_posix()
+            if (any(part.is_symlink() for part in (item, *item.parents) if part.is_relative_to(project_root))
+                    or not item.resolve().is_relative_to(project_root)):
+                continue
             if _skip_path(item, rel):
                 continue
             if item.suffix.lower() not in TEXT_EXTENSIONS:
@@ -427,13 +553,19 @@ def _python_imports(text: str) -> list[str]:
     return sorted(imports)
 
 
-def _resolve_python_import(project_root: Path, imported: str) -> str:
-    if not imported or imported.startswith("."):
+def _resolve_python_import(project_root: Path, imported: str, *, repository_root: Path | None = None) -> str:
+    """Resolve exact safe runtime references without opening target content."""
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', imported):
         return ""
     candidates = [project_root / f"{imported}.py", project_root / imported / "__init__.py"]
+    repository_root = repository_root or project_root
     for candidate in candidates:
-        if candidate.exists() and _is_relative_to(candidate.resolve(), project_root):
-            return f"file:{candidate.relative_to(project_root).as_posix()}"
+        rel = candidate.relative_to(repository_root).as_posix()
+        if (_skip_path(candidate, rel)
+                or any(part.is_symlink() for part in (candidate, *candidate.parents) if part.is_relative_to(project_root))):
+            continue
+        if candidate.is_file() and candidate.resolve().is_relative_to(project_root):
+            return f"file:{rel}"
     return ""
 
 
@@ -465,7 +597,7 @@ def _concepts(text: str, rel_path: str) -> list[str]:
 def _normalize_project_node(item: dict[str, Any]) -> dict[str, Any]:
     raw_id = item.get("id") or item.get("node_id") or item.get("path") or item.get("name") or item.get("label")
     node_id = str(raw_id or hashlib.sha256(json.dumps(item, sort_keys=True, default=str).encode()).hexdigest()[:16])
-    if not node_id.startswith(("file:", "agent:", "module:", "api:", "tool:", "concept:", "project:")):
+    if not node_id.startswith(("file:", "agent:", "module:", "api:", "tool:", "concept:", "project:", "graphify:")):
         node_id = f"graphify:{node_id}"
     kind = str(item.get("kind") or item.get("type") or item.get("label_type") or "GraphifyNode")
     label = str(item.get("label") or item.get("name") or raw_id or node_id)
@@ -548,7 +680,7 @@ def _run_external_graphify(project_root: Path, out_dir: Path, source_paths: list
     graph_report = raw_dir / "GRAPH_REPORT.md"
     graph_html = raw_dir / "graph.html"
     try:
-        from graphify.extract import collect_files, extract
+        from graphify.extract import extract
         from graphify.build import build_from_json
         from graphify.cluster import cluster, score_all
         from graphify.analyze import god_nodes, surprising_connections, suggest_questions
@@ -558,20 +690,10 @@ def _run_external_graphify(project_root: Path, out_dir: Path, source_paths: list
         return {"ok": False, "skipped": True, "reason": "graphify Python API unavailable", "started_at": started, "error": str(exc)}
 
     try:
-        paths: list[Path] = []
-        for source in source_paths:
-            src = (project_root / source).resolve()
-            if not src.exists() or not _is_relative_to(src, project_root):
-                continue
-            for candidate in collect_files(src, root=project_root):
-                try:
-                    rel = candidate.resolve().relative_to(project_root).as_posix()
-                except ValueError:
-                    continue
-                if _skip_path(candidate, rel):
-                    continue
-                paths.append(candidate.resolve())
-        paths = sorted(set(paths))
+        # The scan entry point supplies concrete, bounded files, never subtrees
+        # for the optional extractor to rediscover beyond the approved corpus.
+        paths = [project_root / source for source in source_paths
+                 if Path(source).suffix.lower() in CODE_EXTENSIONS]
         if not paths:
             return {"ok": False, "started_at": started, "reason": "graphify found no supported code files", "source_paths": source_paths}
 

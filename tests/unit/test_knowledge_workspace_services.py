@@ -48,7 +48,8 @@ def test_memory_rejects_synthetic_credentials_without_receipt_or_storage(service
 def service(tmp_path: Path):
     from knowledge.context_service import KnowledgeContextService
 
-    return KnowledgeContextService(tmp_path)
+    root = Path(__file__).resolve().parents[2]
+    return KnowledgeContextService(tmp_path, wiki_corpus_root=root / "docs/knowledge/wiki", wiki_source_root=root)
 
 
 @pytest.fixture

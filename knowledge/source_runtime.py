@@ -9,8 +9,6 @@ import math
 from pathlib import Path
 from uuid import uuid4
 
-PROJECT = Path(__file__).resolve().parents[1]
-
 
 def curation_context(ctx):
     """Freeze the existing first-choice route; background intake cannot boot fallbacks."""
@@ -32,11 +30,20 @@ def curation_context(ctx):
 
 
 @lru_cache(maxsize=8)
-def library_for(project_root: Path = PROJECT):
+def library_for(project_root: Path | None = None, *, library_root: Path | None = None,
+                inbox_root: Path | None = None):
+    """Construct a service only when requested, using explicitly bound stores."""
     from knowledge.source_library import SourceLibrary
-    project_root = Path(project_root).resolve()
-    return SourceLibrary(project_root / "memory/knowledge/source_library",
-                         project_root / "docs/knowledge/manuals/sources")
+    from utils.runtime_paths import current_paths
+    if project_root is not None:
+        project_root = Path(project_root).resolve()
+        library_root = library_root if library_root is not None else project_root / "memory/knowledge/source_library"
+        inbox_root = inbox_root if inbox_root is not None else project_root / "docs/knowledge/manuals/sources"
+    elif library_root is None or inbox_root is None:
+        paths = current_paths()
+        library_root = library_root if library_root is not None else paths.memory_root / "knowledge/source_library"
+        inbox_root = inbox_root if inbox_root is not None else paths.source_inbox_root
+    return SourceLibrary(Path(library_root), Path(inbox_root))
 
 
 class SourceIngestionService:

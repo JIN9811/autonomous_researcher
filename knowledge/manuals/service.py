@@ -34,11 +34,16 @@ class ManualKnowledgeService:
         *,
         project_root: Path,
         runtime_root: Path | None = None,
+        manual_data_root: Path | None = None,
         registry_path: Path | None = None,
         graph_backend: KnowledgeGraphBackend | None = None,
     ) -> None:
         self.project_root = project_root.resolve()
-        self.runtime_root = (runtime_root or self.project_root / "memory" / "knowledge" / "manual_rag").resolve()
+        if runtime_root is not None and manual_data_root is not None and Path(runtime_root).resolve() != Path(manual_data_root).resolve():
+            raise ValueError("runtime_root conflicts with manual_data_root")
+        self.manual_data_root = Path(manual_data_root or runtime_root or self.project_root / "memory/knowledge/manual_rag").resolve()
+        # Deprecated writable-data alias, never an implementation/import root.
+        self.runtime_root = self.manual_data_root
         self.registry_path = (registry_path or self.project_root / "docs" / "knowledge" / "manuals" / "registry.yaml").resolve()
         # Accept the old constructor argument, but never connect/use/close it.
         # Corpus retrieval and page citations do not require a graph projection.

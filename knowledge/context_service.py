@@ -26,10 +26,12 @@ class KnowledgePrincipal:
 
 
 class KnowledgeContextService:
-    def __init__(self, project_root: Path | str, data_root: Path | str | None = None) -> None:
+    def __init__(self, project_root: Path | str, data_root: Path | str | None = None, *,
+                 wiki_corpus_root: Path | None = None, wiki_source_root: Path | None = None) -> None:
         self.project_root = Path(project_root).resolve()
         self.data_root = Path(data_root).resolve() if data_root else self.project_root / "memory" / "knowledge"
-        self.wiki = WikiCatalog(self.project_root)
+        self.wiki = (WikiCatalog(self.project_root) if wiki_corpus_root is None and wiki_source_root is None
+                     else WikiCatalog(corpus_root=wiki_corpus_root, source_root=wiki_source_root))
         private_root = self.data_root / "private"
         self.memory = PrivateMemory(private_root)
         self.delivery = DeliveryLedger(private_root)

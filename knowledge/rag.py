@@ -58,7 +58,8 @@ class LocalRAGIndex:
         self._chunks = chunks
 
     @classmethod
-    def from_file(cls, path: Path, chunk_size: int = 900, overlap: int = 120) -> "LocalRAGIndex":
+    def from_file(cls, path: Path, chunk_size: int = 900, overlap: int = 120, *,
+                  source_label: str | None = None) -> "LocalRAGIndex":
         text = path.read_text(encoding="utf-8")
         chunks: list[RAGChunk] = []
         i = 0
@@ -71,7 +72,7 @@ class LocalRAGIndex:
                     RAGChunk(
                         chunk_id=f"local-{i}",
                         text=snippet,
-                        source=str(path),
+                        source=str(path) if source_label is None else source_label,
                         embedding=simple_embed(snippet),
                         keywords=_tokenize(snippet),
                     )
@@ -80,7 +81,10 @@ class LocalRAGIndex:
             if end == len(text):
                 break
             cursor = max(end - overlap, cursor + 1)
-        return cls(chunks)
+        index = cls(chunks)
+        # Physical provenance is not prompt content and does not change citations.
+        index.source_path = path.resolve()
+        return index
 
     def search(self, query: str, top_k: int = 4) -> list[RAGChunk]:
         """Return top-k chunks by blended lexical and embedding score."""

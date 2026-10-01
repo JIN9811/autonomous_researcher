@@ -53,11 +53,19 @@ def _store(root: str):
 
 def store_for(ctx=None, *, project_root: Path | None = None, memory_root: Path | None = None):
     """Honor isolated artifact roots in tests/direct calls; ontology stays code-owned."""
+    paths = getattr(ctx, "paths", None)
+    if memory_root is None and project_root is None and paths is not None:
+        memory_root = paths.memory_root / "knowledge"
     if memory_root is None:
         if project_root is None:
             run_root = getattr(ctx, "artifact_run_root", None)
-            project_root = Path(run_root).resolve().parent if run_root else _PROJECT
-        memory_root = Path(project_root) / "memory" / "knowledge"
+            if run_root:
+                project_root = Path(run_root).resolve().parent
+            else:
+                from utils.runtime_paths import current_paths
+                memory_root = current_paths().memory_root / "knowledge"
+        if memory_root is None:
+            memory_root = Path(project_root) / "memory" / "knowledge"
     return _store(str((Path(memory_root) / "markdown").resolve()))
 
 
