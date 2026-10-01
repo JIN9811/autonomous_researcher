@@ -742,7 +742,7 @@ async def keep_startup_side_effect_free() -> None:
 @app.on_event("startup")
 async def start_cpu_compute_pool() -> None:
     from utils.compute_pool import configure_compute_pool
-    configure_compute_pool(int(os.environ.get('ATR_CPU_WORKERS', '3')))
+    configure_compute_pool(int(os.environ.get('ATR_CPU_WORKERS', '3')), paths=RUNTIME_PATHS)
 
 
 @app.on_event("shutdown")
@@ -1951,7 +1951,7 @@ def _equipment_bridge() -> WindowsPyAutoGUIBridge:
 def _local_pyautogui_bridge_supervisor() -> LocalPyAutoGUIBridgeSupervisor:
     global _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR
     if _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR is None:
-        _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR = LocalPyAutoGUIBridgeSupervisor(resolve_path("."))
+        _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR = LocalPyAutoGUIBridgeSupervisor(RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
     return _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR
 
 
@@ -13813,7 +13813,7 @@ def _local_monitor_client(request: Request) -> bool:
 
 def _capture_bambu_video_frame_bytes(manager: PrinterDeviceBridgeManager) -> bytes:
     try:
-        worker = existing_monitor_process("video")
+        worker = existing_monitor_process("video", paths=RUNTIME_PATHS)
         if worker is not None and worker.config == _bambu_video_config(manager):
             # GUI/evidence snapshots share the already-open worker decoder.
             # Otherwise the printer would get a second concurrent RTSPS reader.
@@ -13850,7 +13850,7 @@ async def get_printer_video_stream(request: Request) -> StreamingResponse:
     if _local_monitor_client(request):
         from fastapi.responses import RedirectResponse
         config = await asyncio.to_thread(_bambu_video_config, manager)
-        worker = await asyncio.to_thread(monitor_process, "video", config)
+        worker = await asyncio.to_thread(monitor_process, "video", config, paths=RUNTIME_PATHS)
         return RedirectResponse(worker.url("stream.mjpeg"), status_code=307,
                                 headers={"Cache-Control": "no-store"})
     video = await asyncio.to_thread(_shared_bambu_video, manager)
@@ -16788,7 +16788,7 @@ async def get_robot_monitor_worker(request: Request) -> dict:
         return {"ok": True, "isolated": False}
     port = request.url.port or 80
     config = {"origins": [f"http://{host}:{port}" for host in ("127.0.0.1", "localhost", "[::1]")]}
-    worker = await asyncio.to_thread(monitor_process, "robot", config)
+    worker = await asyncio.to_thread(monitor_process, "robot", config, paths=RUNTIME_PATHS)
     await asyncio.to_thread(worker.update, _robot_monitor_context())
     if _ROBOT_MONITOR_OWNER is not worker or _ROBOT_MONITOR_PUBLISHER is None or _ROBOT_MONITOR_PUBLISHER.done():
         if _ROBOT_MONITOR_PUBLISHER is not None:

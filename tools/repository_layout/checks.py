@@ -129,6 +129,7 @@ CHECKS: dict[str, list[list[str]]] = {
             "-p",
             "pytest_asyncio.plugin",
             "tests/unit/test_runtime_worker_origins.py",
+            "tests/unit/test_runtime_launchers.py",
             "tests/unit/test_compute_pool.py",
             "tests/unit/test_monitor_process.py",
             "tests/unit/test_safe_hot_reload.py",

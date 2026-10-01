@@ -60,7 +60,11 @@ def sandbox_command(snapshot: Path, dependencies: Path, argv: list[str], *, cwd:
     # Python -S prevents *all* site hooks (including system .pth) from executing.
     command = list(argv)
     if command[0] in {"python", "python3"}:
-        command = ["/usr/bin/python3", "-S", *command[1:]]
+        # Keep sys.executable coherent with filtered fresh children, which must
+        # resolve dependencies without inheriting this parent's PYTHONPATH.
+        if not (dependencies / 'bin/python3').is_file():
+            raise ValueError('Isolated dependency interpreter bin/python3 is required')
+        command = ["/deps/bin/python3", "-S", *command[1:]]
     host_ns = {name: os.readlink(f"/proc/self/ns/{name}") for name in ("pid", "net", "mnt", "ipc", "user")}
     env = {"PATH": "/deps/validation-tools/bin:/usr/bin:/bin", "HOME": "/tmp/home", "XDG_CACHE_HOME": "/tmp/cache",
            "TMPDIR": "/tmp", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1",

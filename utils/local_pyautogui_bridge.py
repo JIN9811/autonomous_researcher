@@ -13,6 +13,9 @@ from typing import Any
 
 import httpx
 
+from utils.runtime_paths import RuntimePaths
+from utils.runtime_process import process_environment
+
 
 class LocalPyAutoGUIBridgeSupervisor:
     """Start and stop only the localhost bridge process owned by ATR."""
@@ -21,18 +24,31 @@ class LocalPyAutoGUIBridgeSupervisor:
     host = "127.0.0.1"
     port = 8767
 
-    def __init__(self, repo_root: Path, *, python_executable: Path | None = None) -> None:
+    def __init__(self, repo_root: Path, *, python_executable: Path | None = None,
+                 paths: RuntimePaths | None = None) -> None:
         self.repo_root = Path(repo_root).resolve()
+        if paths is not None and paths.repository_root != self.repo_root:
+            raise ValueError('repo_root contradicts paths.repository_root')
+        self.paths = paths
+        self.source_root = paths.runtime_root if paths is not None else self.repo_root
         venv_python = self.repo_root / ".venv" / "bin" / "python"
         self.python_executable = Path(python_executable or (venv_python if venv_python.exists() else sys.executable))
-        self.server_path = self.repo_root / "Pyautogui_server_for_window" / "bridge" / "windows_pyautogui_bridge_server.py"
-        self.runtime_root = self.repo_root / "runs" / "local_pyautogui_bridge"
-        self.artifact_root = self.runtime_root / "artifacts"
-        self.locator_root = self.repo_root / "memory" / "local_pyautogui_locators"
-        self.program_root = self.repo_root / "memory" / "local_pyautogui_programs"
-        self.token_path = self.repo_root / "memory" / "local_pyautogui_bridge.token"
+        self.package_root = self.source_root / 'Pyautogui_server_for_window'
+        self.server_path = self.package_root / "bridge" / "windows_pyautogui_bridge_server.py"
+        memory_root = paths.memory_root if paths is not None else self.repo_root / 'memory'
+        self.runtime_root = (paths.run_root if paths is not None else self.repo_root / 'runs') / 'local_pyautogui_bridge'
+        self.artifact_root = (paths.artifact_root / 'local_pyautogui_bridge/artifacts'
+                              if paths is not None else self.runtime_root / 'artifacts')
+        self.locator_root = memory_root / "local_pyautogui_locators"
+        self.program_root = memory_root / "local_pyautogui_programs"
+        self.token_path = memory_root / "local_pyautogui_bridge.token"
         self.pid_path = self.runtime_root / "local_bridge.pid"
-        self.log_path = self.runtime_root / "local_bridge.log"
+        self.log_path = (paths.log_root / 'local_pyautogui_bridge/local_bridge.log'
+                         if paths is not None else self.runtime_root / 'local_bridge.log')
+        self.utm_export_root = (paths.output_root / 'local_pyautogui_bridge/utm_exports'
+                                if paths is not None else self.runtime_root / 'utm_exports')
+        self.recording_root = (paths.user_file_root / 'local_pyautogui_bridge/recordings'
+                               if paths is not None else self.runtime_root / 'recordings')
         self.bridge_url = f"http://{self.host}:{self.port}"
         self._process: subprocess.Popen[bytes] | None = None
 
@@ -65,9 +81,13 @@ class LocalPyAutoGUIBridgeSupervisor:
             "--reference-dir",
             str(self.locator_root),
             "--utm-export-dir",
-            str(self.runtime_root / "utm_exports"),
+            str(self.utm_export_root),
             "--program-dir",
             str(self.program_root),
+            "--recording-dir",
+            str(self.recording_root),
+            "--demo-dir",
+            str(self.package_root / 'demo'),
         ]
 
     def status(self) -> dict[str, Any]:
@@ -98,14 +118,27 @@ class LocalPyAutoGUIBridgeSupervisor:
         if current.get("running"):
             return {**current, "idempotent": True}
         self.ensure_token()
-        for path in (self.runtime_root, self.artifact_root, self.locator_root, self.program_root):
+        for path in (self.runtime_root, self.artifact_root, self.locator_root, self.program_root,
+                     self.log_path.parent, self.utm_export_root, self.recording_root):
             path.mkdir(parents=True, exist_ok=True)
         log_handle = self.log_path.open("ab", buffering=0)
+        # The standalone bridge reads globals before parsing CLI arguments.
+        # Supply the same explicit locations at both boundaries.
+        env = process_environment(desktop=True)
+        env.update({
+            'ATR_WINDOWS_BRIDGE_PACKAGE_ROOT': str(self.package_root),
+            'WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT': str(self.artifact_root),
+            'WINDOWS_PYAUTOGUI_LOCATOR_ROOT': str(self.locator_root),
+            'WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR': str(self.utm_export_root),
+            'WINDOWS_PYAUTOGUI_PROGRAM_DIR': str(self.program_root),
+            'WINDOWS_PYAUTOGUI_RECORDING_DIR': str(self.recording_root),
+            'WINDOWS_PYAUTOGUI_DEMO_DIR': str(self.package_root / 'demo'),
+        })
         try:
             process = subprocess.Popen(
                 self.build_command(),
-                cwd=str(self.repo_root),
-                env=dict(os.environ),
+                cwd=str(self.source_root),
+                env=env,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,

@@ -4,8 +4,71 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import pytest
 
 from utils.local_pyautogui_bridge import LocalPyAutoGUIBridgeSupervisor
+
+
+def test_injected_bridge_separates_source_state_and_desktop_environment(tmp_path, monkeypatch):
+    from tests.unit.test_runtime_worker_origins import bound_layout
+    paths, _, _ = bound_layout(tmp_path)
+    python = paths.repository_root / '.venv/bin/python'
+    python.parent.mkdir(parents=True)
+    python.touch()
+    supervisor = LocalPyAutoGUIBridgeSupervisor(paths.repository_root, paths=paths)
+    command = supervisor.build_command()
+    assert command[0] == str(python)
+    assert command[1] == str(paths.runtime_root / 'Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py')
+    for option, target in {
+        '--token-file': paths.memory_root / 'local_pyautogui_bridge.token',
+        '--reference-dir': paths.memory_root / 'local_pyautogui_locators',
+        '--program-dir': paths.memory_root / 'local_pyautogui_programs',
+        '--artifact-dir': paths.artifact_root / 'local_pyautogui_bridge/artifacts',
+        '--utm-export-dir': paths.output_root / 'local_pyautogui_bridge/utm_exports',
+        '--recording-dir': paths.user_file_root / 'local_pyautogui_bridge/recordings',
+        '--demo-dir': paths.runtime_root / 'Pyautogui_server_for_window/demo',
+    }.items():
+        assert command[command.index(option) + 1] == str(target)
+    assert supervisor.pid_path == paths.run_root / 'local_pyautogui_bridge/local_bridge.pid'
+    assert supervisor.log_path == paths.log_root / 'local_pyautogui_bridge/local_bridge.log'
+    monkeypatch.setenv('DISPLAY', ':fixture')
+    monkeypatch.setenv('XAUTHORITY', '/tmp/fixture-authority')
+    monkeypatch.setenv('XDG_SESSION_TYPE', 'x11')
+    monkeypatch.setenv('XDG_RUNTIME_DIR', '/tmp/fixture-session')
+    monkeypatch.setenv('WAYLAND_DISPLAY', 'fixture-wayland')
+    monkeypatch.setenv('DBUS_SESSION_BUS_ADDRESS', 'not-required')
+    monkeypatch.setenv('UNRELATED_SECRET', 'not-for-bridge')
+    monkeypatch.setenv('PYTHONPATH', '/original/source')
+    monkeypatch.setenv('ATR_WINDOWS_BRIDGE_PACKAGE_ROOT', '/original/package')
+    monkeypatch.setenv('WINDOWS_PYAUTOGUI_RECORDING_DIR', '/original/recordings')
+    launched = []
+    def launch(argv, **kwargs):
+        launched.append((argv, kwargs))
+        return SimpleNamespace(pid=123, poll=lambda: None)
+    monkeypatch.setattr('utils.local_pyautogui_bridge.subprocess.Popen', launch)
+    monkeypatch.setattr(supervisor, 'status', lambda: {'running': False})
+    monkeypatch.setattr(supervisor, '_health', lambda: {'ok': True})
+    assert supervisor.start()['status'] == 'running'
+    argv, options = launched[0]
+    assert options['cwd'] == str(paths.runtime_root)
+    assert options['env']['DISPLAY'] == ':fixture'
+    assert options['env']['XAUTHORITY'] == '/tmp/fixture-authority'
+    assert options['env']['XDG_SESSION_TYPE'] == 'x11'
+    assert options['env']['XDG_RUNTIME_DIR'] == '/tmp/fixture-session'
+    assert options['env']['WAYLAND_DISPLAY'] == 'fixture-wayland'
+    assert options['env']['ATR_WINDOWS_BRIDGE_PACKAGE_ROOT'] == str(paths.runtime_root / 'Pyautogui_server_for_window')
+    assert options['env']['WINDOWS_PYAUTOGUI_RECORDING_DIR'] == str(paths.user_file_root / 'local_pyautogui_bridge/recordings')
+    assert options['env']['WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT'] == str(paths.artifact_root / 'local_pyautogui_bridge/artifacts')
+    assert not {'PYTHONPATH', 'UNRELATED_SECRET', 'DBUS_SESSION_BUS_ADDRESS'} & options['env'].keys()
+    assert not (paths.runtime_root / 'runs').exists()
+
+
+def test_bridge_rejects_contradictory_repository_before_store_access(tmp_path):
+    from tests.unit.test_runtime_worker_origins import bound_layout
+    paths, _, _ = bound_layout(tmp_path)
+    with pytest.raises(ValueError, match='repository_root'):
+        LocalPyAutoGUIBridgeSupervisor(tmp_path / 'wrong', paths=paths)
+    assert not paths.memory_root.exists()
 
 
 def test_local_bridge_token_is_private_and_reused(tmp_path: Path) -> None:

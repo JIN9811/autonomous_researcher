@@ -9,6 +9,16 @@ import inspect
 from pathlib import Path
 import types
 
+from utils.runtime_paths import current_paths
+
+
+def runtime_source_root(controller):
+    """A changed source binding requires a stopped restart, never hot reload."""
+    paths = getattr(getattr(controller, '_deps', None), 'paths', None) or current_paths()
+    if paths.runtime_root != Path(__file__).resolve().parents[1]:
+        raise ValueError('Structural source relocation requires a restart')
+    return paths.runtime_root
+
 
 MODULES = ("utils.equipment_vision_tasks", "agents.equipment.recovery", "agents.equipment.workflow",
            "utils.utm_specimen_presence", "utils.utm_clear_cycle", "agents.vision.decision", "app.run_recovery")
@@ -96,6 +106,7 @@ async def reload_equipment_support(controller):
     import subprocess
     import sys
     from orchestrator.state import Stage
+    runtime_source_root(controller)
     # Bounded code-only migration for servers started before final BO reporting.
     from app.bo_final_hotfix import needs_patch, apply_hotfix
     if needs_patch():
@@ -131,7 +142,7 @@ async def reload_equipment_support(controller):
         return await reload_selection_review(controller)
     assert_idle(controller)
     sources = supported_sources()
-    root = Path(__file__).resolve().parents[1]
+    root = runtime_source_root(controller)
     checked_sources = {**sources, "app.controller:cycle_driver": root / "app/controller.py"}
     digests = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in checked_sources.items()}
     driver, candidate = stage_cycle_driver(checked_sources["app.controller:cycle_driver"])
@@ -213,7 +224,7 @@ async def reload_vision_ros_support(controller):
     import subprocess
     import sys
     assert_vision_ros_patch_boundary(controller)
-    root = Path(__file__).resolve().parents[1]
+    root = runtime_source_root(controller)
     targets = {
         "device_bridges.camera_vision.tools": ("_reload_vision_cycle", "_restart_vision_runtime", "_reload_for_capture"),
         "agents.vision.decision": ("select_vision_tool",),
@@ -317,7 +328,7 @@ async def reload_vision_review(controller):
     import sys
     from app.vision_review_recovery import validate_boundary
     boundary = validate_boundary(controller)
-    root = Path(__file__).resolve().parents[1]
+    root = runtime_source_root(controller)
     names = ('agents.core.knowledge.context', 'agents.vision.decision', 'app.vision_review_recovery')
     sources = {name: Path(importlib.import_module(name).__file__) for name in names}
     checked_sources = {**sources, 'controller_resume': root / 'app/controller.py'}
@@ -392,7 +403,7 @@ async def reload_printer_wait_support(controller):
     import subprocess
     import sys
     assert_printer_wait_inactive(controller)
-    root = Path(__file__).resolve().parents[1]
+    root = runtime_source_root(controller)
     paths = {"app.controller:printer_wait_timing": root / "app/controller.py",
              "utils.printer_wait_timing": root / "utils/printer_wait_timing.py"}
     digests = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}
@@ -423,7 +434,7 @@ async def reload_selection_review(controller):
     from orchestrator.state import Stage
     record, corrected = selection_recovery_inputs(controller)
     source_id = record["execution_id"]
-    root = Path(__file__).resolve().parents[1]
+    root = runtime_source_root(controller)
     names = ("agents.equipment.decision", "agents.equipment.workflow",
              "utils.manipulation_execution", "utils.manipulation_runtime_view")
     sources = {name: Path(importlib.import_module(name).__file__) for name in names}

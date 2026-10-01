@@ -27,6 +27,7 @@ import asyncio
 
 from app.bootstrap import load_runtime
 from orchestrator.state import Mode
+from utils.runtime_paths import current_paths, finalize_paths
 
 
 async def _async_main() -> None:
@@ -38,7 +39,8 @@ async def _async_main() -> None:
     parser.add_argument("--wait-seconds", type=float, default=8.0)
     args = parser.parse_args()
 
-    controller = load_runtime()
+    paths = finalize_paths(current_paths())
+    controller = load_runtime(paths=paths)
     result = await controller.start(
         mode=Mode(args.mode),
         goal=args.goal,

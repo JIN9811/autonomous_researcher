@@ -27,7 +27,8 @@ from dotenv import load_dotenv
 import uvicorn
 
 from utils.config_loader import load_all_configs
-from utils.paths import resolve_path
+from utils.runtime_paths import current_paths, finalize_paths
+from utils.runtime_process import path_metadata
 
 
 def _str_to_bool(value: str, default: bool) -> bool:
@@ -37,8 +38,10 @@ def _str_to_bool(value: str, default: bool) -> bool:
 
 
 def main() -> None:
-    load_dotenv(resolve_path(".env"), override=False)
-    cfg = load_all_configs(resolve_path("configs"))
+    paths = finalize_paths(current_paths())
+    metadata = path_metadata(paths)
+    load_dotenv(paths.repository_root / '.env', override=False)
+    cfg = load_all_configs(paths.runtime_root / 'configs')
     system_cfg = cfg.get("system", {})
     server_cfg = system_cfg.get("server", {})
     runtime_env = system_cfg.get("runtime_env", {})
@@ -55,6 +58,10 @@ def main() -> None:
         # Uvicorn does not support reload with multi-workers.
         workers = 1
 
+    os.environ.update(metadata)
+    if 'ATR_PATH_BINDINGS' not in metadata:
+        os.environ.pop('ATR_PATH_BINDINGS', None)
+    os.chdir(paths.runtime_root)
     uvicorn.run(
         "app.main:app",
         host=host,

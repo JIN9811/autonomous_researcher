@@ -16,6 +16,8 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
+from utils.runtime_paths import current_paths, finalize_paths
+
 
 def create_monitor_app(kind, config, token, latest):
     vision_sources = {}
@@ -231,6 +233,7 @@ def create_monitor_app(kind, config, token, latest):
 
 
 def main():
+    finalize_paths(current_paths())
     first = json.loads(sys.stdin.readline())
     latest = [{}, 0.0]
     app = create_monitor_app(first["kind"], first["config"], first["token"], latest)

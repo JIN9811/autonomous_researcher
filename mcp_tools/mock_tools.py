@@ -32,6 +32,7 @@ from typing import Any
 from mcp_tools.tpms_geometry import generate_gyroid_stl_text, normalize_geometry_type, write_smooth_gyroid_stl
 from mcp_tools.tool_registry import ToolRegistry
 from mcp_tools.utm_tools import run_utm_protocol
+from utils.runtime_paths import current_paths
 
 _rng = Random(42)
 
@@ -683,7 +684,7 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         skin_thickness_mm = 0.8
     if not cap:
         skin_thickness_mm = 0.0
-    output_dir = Path(str(payload.get("output_dir") or Path("runs") / run_id / "specimens" / specimen_id))
+    output_dir = Path(str(payload.get("output_dir") or current_paths().run_root / run_id / "specimens" / specimen_id))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     stl_path = output_dir / "specimen.stl"
@@ -976,7 +977,7 @@ def _create_specimen_handoff(payload: dict[str, Any]) -> dict[str, Any]:
     geometry_result = geometry_result if isinstance(geometry_result, dict) else {}
     stl_path = str(geometry_result.get("stl_path", ""))
     preview_image_path = str(geometry_result.get("preview_image_path", ""))
-    handoff_path = Path(stl_path).parent / "handoff_package.json" if stl_path else Path("runs") / run_id / "specimens" / specimen_id / "handoff_package.json"
+    handoff_path = Path(stl_path).parent / "handoff_package.json" if stl_path else current_paths().run_root / run_id / "specimens" / specimen_id / "handoff_package.json"
     handoff_path.parent.mkdir(parents=True, exist_ok=True)
     handoff_package = {
         "run_id": run_id,

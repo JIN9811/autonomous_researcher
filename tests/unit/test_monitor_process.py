@@ -158,7 +158,10 @@ async def test_local_video_redirect_bypasses_control_stream(monkeypatch):
     from types import SimpleNamespace
     monkeypatch.setattr(main, "_printer_bridge_manager", lambda: object())
     monkeypatch.setattr(main, "_bambu_video_config", lambda manager: {})
-    monkeypatch.setattr(main, "monitor_process", lambda *args: SimpleNamespace(url=lambda path: "http://127.0.0.1:1234/key/" + path))
+    def monitor(kind, config, *, paths):
+        assert kind == 'video' and paths is main.RUNTIME_PATHS
+        return SimpleNamespace(url=lambda path: "http://127.0.0.1:1234/key/" + path)
+    monkeypatch.setattr(main, "monitor_process", monitor)
     monkeypatch.setattr(main, "_shared_bambu_video", lambda *args: pytest.fail("Decoder started in control process"))
     req = Request({"type": "http", "method": "GET", "path": "/api/printer/video-stream.mjpeg", "scheme": "http",
                    "headers": [(b"host", b"127.0.0.1:7860")], "client": ("127.0.0.1", 50), "server": ("127.0.0.1", 7860), "query_string": b""})

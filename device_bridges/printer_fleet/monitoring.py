@@ -316,8 +316,9 @@ def _video_diagnostic(reason, detail):
     logger = logging.getLogger("atr.printer_video")
     try:
         if not logger.handlers:
+            from utils.runtime_paths import current_paths
             path = Path(os.environ.get("ATR_VIDEO_LOG_PATH") or
-                        Path(__file__).resolve().parents[2] / "runs/monitoring/printer_video.log")
+                        current_paths().run_root / "monitoring/printer_video.log")
             path.parent.mkdir(parents=True, exist_ok=True)
             handler = RotatingFileHandler(path, maxBytes=1024 * 1024, backupCount=2)
             handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))

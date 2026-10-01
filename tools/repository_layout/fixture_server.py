@@ -117,7 +117,9 @@ def fixture_application(lifespan_mode: str):
         stack.enter_context(patch.object(plc_bridge_service, "PLCBridgeService", FixturePLC))
         stack.enter_context(patch.object(artifact_preservation, "PreservationService", FixtureRecorder))
         stack.enter_context(patch.object(run_review, "RunReviewRecorder", FixtureRecorder))
-        stack.enter_context(patch.object(compute_pool, "configure_compute_pool", lambda *a: None))
+        def fixture_compute(workers=3, *, paths=None):
+            assert paths is fixture_paths
+        stack.enter_context(patch.object(compute_pool, "configure_compute_pool", fixture_compute))
         stack.enter_context(patch.object(compute_pool, "close_compute_pool", lambda: None))
         from knowledge.source_runtime import SourceIngestionService
         async def no_background(self): pass

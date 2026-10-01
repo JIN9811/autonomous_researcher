@@ -7,24 +7,26 @@ from __future__ import annotations
 
 import atexit
 import json
-import os
-from pathlib import Path
 import secrets
 import selectors
 import subprocess
 import sys
 import threading
 
+from utils.runtime_paths import RuntimePaths, current_paths
+from utils.runtime_process import path_metadata, process_environment
+
 
 class MonitorProcess:
-    def __init__(self, kind: str, config: dict):
+    def __init__(self, kind: str, config: dict, *, paths: RuntimePaths | None = None):
+        self.paths = paths or current_paths()
+        env = {**process_environment(), **path_metadata(self.paths)}
         self.kind, self.config = kind, config
         self.lock = threading.Lock()
         self.token = secrets.token_urlsafe(32)
-        env = {**os.environ, "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
         self.process = subprocess.Popen(
             [sys.executable, "-m", "utils.monitor_worker"],
-            cwd=Path(__file__).resolve().parents[1], env=env,
+            cwd=self.paths.runtime_root, env=env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1, start_new_session=True,
         )
@@ -88,22 +90,24 @@ _workers: dict[str, MonitorProcess] = {}
 _lock = threading.Lock()
 
 
-def monitor_process(kind: str, config: dict) -> MonitorProcess:
+def monitor_process(kind: str, config: dict, *, paths: RuntimePaths | None = None) -> MonitorProcess:
     if kind not in {"video", "robot"}:
         raise ValueError("Unknown monitoring domain")
+    paths = paths or current_paths()
     with _lock:
         worker = _workers.get(kind)
-        if kind == "video" and worker and worker.process.poll() is None:
+        same_binding = worker is not None and worker.paths == paths
+        if kind == "video" and same_binding and worker.process.poll() is None:
             # Vision and printer share the video server, not each other's source.
             if config and worker.config != config:
                 worker.control({"operation": "printer", "config": config})
                 worker.config = config
             return worker
-        if worker and worker.process.poll() is None and worker.config == config:
+        if same_binding and worker.process.poll() is None and worker.config == config:
             return worker
         if worker:
             worker.close()
-        worker = MonitorProcess(kind, config)
+        worker = MonitorProcess(kind, config, paths=paths)
         _workers[kind] = worker
         return worker
 
@@ -115,11 +119,11 @@ def close_monitor_processes():
         _workers.clear()
 
 
-def existing_monitor_process(kind: str) -> MonitorProcess | None:
+def existing_monitor_process(kind: str, *, paths: RuntimePaths | None = None) -> MonitorProcess | None:
     """Reuse an active reader for snapshots without opening another camera feed."""
     with _lock:
         worker = _workers.get(kind)
-        return worker if worker and worker.process.poll() is None else None
+        return worker if worker and worker.paths == (paths or current_paths()) and worker.process.poll() is None else None
 
 
 atexit.register(close_monitor_processes)

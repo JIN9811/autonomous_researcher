@@ -12,13 +12,15 @@ from contextvars import ContextVar
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-from pathlib import Path
 import queue
 import selectors
 import subprocess
 import sys
 import threading
 import time
+
+from utils.runtime_paths import RuntimePaths, current_paths
+from utils.runtime_process import path_metadata, process_environment
 
 JOBS = frozenset({'geometry.generate', 'geometry.quality', 'geometry.manufacturability',
                   'analysis.read_curve', 'analysis.metrics', 'bo.propose', 'bo.render'})
@@ -31,7 +33,9 @@ class ComputeError(RuntimeError):
 
 
 class _Worker:
-    def __init__(self):
+    def __init__(self, *, paths: RuntimePaths, metadata: dict[str, str]):
+        self.paths = paths
+        self.metadata = metadata
         self.process = None
 
     def close(self):
@@ -50,12 +54,9 @@ class _Worker:
     def exchange(self, message, cancelled, deadline):
         if self.process is None or self.process.poll() is not None:
             self.close()
-            env = {key: os.environ[key] for key in ('HOME', 'PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'VIRTUAL_ENV')
-                   if key in os.environ}
-            env.update(OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1',
-                       NUMEXPR_NUM_THREADS='1', MPLBACKEND='Agg')
+            env = {**process_environment(), **self.metadata}
             self.process = subprocess.Popen([sys.executable, '-m', 'utils.compute_worker'],
-                cwd=Path(__file__).resolve().parents[1], env=env, close_fds=True,
+                cwd=self.paths.runtime_root, env=env, close_fds=True,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         process = self.process
         try:
@@ -85,10 +86,12 @@ class _Worker:
 
 
 class ComputePool:
-    def __init__(self, workers=3):
+    def __init__(self, workers=3, *, paths: RuntimePaths | None = None):
         if not 1 <= workers <= 3:
             raise ValueError('Use 1–3 compute workers alongside the single controller')
-        self.workers = [_Worker() for _ in range(workers)]
+        self.paths = paths or current_paths()
+        metadata = path_metadata(self.paths)
+        self.workers = [_Worker(paths=self.paths, metadata=metadata) for _ in range(workers)]
         self.available = queue.Queue()
         for worker in self.workers:
             self.available.put(worker)
@@ -177,12 +180,12 @@ class ComputePool:
 _pool = None
 
 
-def configure_compute_pool(workers=3):
+def configure_compute_pool(workers=3, *, paths: RuntimePaths | None = None):
     global _pool
     if _pool is not None:
         raise RuntimeError('CPU pool already configured')
     if workers:
-        _pool = ComputePool(workers)
+        _pool = ComputePool(workers, paths=paths)
 
 
 def compute_enabled():

@@ -5,9 +5,11 @@ import sys
 
 from utils.compute_jobs import execute
 from utils.compute_pool import JOBS, MAX_MESSAGE
+from utils.runtime_paths import current_paths, finalize_paths
 
 
 def main():
+    finalize_paths(current_paths())
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
         if not line:

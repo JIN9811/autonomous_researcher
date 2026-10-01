@@ -4,8 +4,22 @@ import os
 import subprocess
 import sys
 from types import ModuleType
+from pathlib import Path
 
 import pytest
+
+
+def test_parent_and_filtered_child_use_same_isolated_interpreter():
+    assert sys.flags.no_site == 1
+    assert sys.executable.startswith('/deps/bin/')
+    result = subprocess.run([sys.executable, '-c',
+        'import json,sys,numpy; print(json.dumps([sys.executable,numpy.__file__,sys.path]))'],
+        env={'HOME': '/tmp/home', 'PYTHONNOUSERSITE': '1'},
+        capture_output=True, text=True, timeout=20, check=True)
+    executable, origin, paths = json.loads(result.stdout)
+    assert executable == sys.executable
+    assert Path(origin).is_relative_to('/deps')
+    assert not any('/home/jin' in value or '/tmp/home/.local' in value for value in paths)
 
 
 def test_os_boundary_denies_host_resources():
