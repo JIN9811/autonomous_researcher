@@ -61,8 +61,9 @@ def _write_fake_stack_script(path: Path) -> None:
 def test_runtime_config_defaults_to_cloned_utm_repo() -> None:
     config = UTMRuntimeConfig.from_devices_config({}, repo_root=Path("/home/jin/autonomous_researcher"))
 
-    assert config.workspace_root == UTM_REPO
-    assert config.script_path == UTM_REPO / "scripts" / "start_utm_vision_stack.sh"
+    expected_workspace = Path.home() / "external_repos" / "UTM"
+    assert config.workspace_root == expected_workspace
+    assert config.script_path == expected_workspace / "scripts" / "start_utm_vision_stack.sh"
     assert str(config.log_dir).endswith("artifacts/utm_runtime")
     assert "/opt/ros/jazzy/setup.bash" in config.ros_setup_paths
 

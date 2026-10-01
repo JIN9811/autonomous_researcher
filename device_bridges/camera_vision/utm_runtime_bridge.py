@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import base64
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -25,6 +25,8 @@ import tempfile
 import threading
 import time
 from typing import Any, Callable, Iterator
+
+from utils.runtime_paths import RuntimePaths
 
 CommandRunner = Callable[[list[str]], tuple[int, str, str]]
 
@@ -731,21 +733,24 @@ class UTMCameraProfile:
             notes=str(data.get("notes") or source.notes),
         )
 
-    def calibration_path(self, *, repo_root: Path) -> Path:
+    def calibration_path(self, *, repo_root: Path, paths: RuntimePaths | None = None) -> Path:
+        if paths is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         if self.calibration_file:
             path = Path(self.calibration_file).expanduser()
             return path if path.is_absolute() else repo_root / path
-        return repo_root / DEFAULT_CAMERA_CALIBRATION_RELATIVE
+        return (paths.memory_root / "device_bridge/calibration/utm_camera_default_cam.yaml"
+                if paths is not None else repo_root / DEFAULT_CAMERA_CALIBRATION_RELATIVE)
 
-    def ensure_calibration_file(self, *, repo_root: Path) -> Path:
-        path = self.calibration_path(repo_root=repo_root)
+    def ensure_calibration_file(self, *, repo_root: Path, paths: RuntimePaths | None = None) -> Path:
+        path = self.calibration_path(repo_root=repo_root, paths=paths)
         if not self.calibration_file and not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(DEFAULT_CAMERA_CALIBRATION_YAML, encoding="utf-8")
         return path
 
-    def camera_info_url(self, *, repo_root: Path) -> str:
-        return f"file://{self.ensure_calibration_file(repo_root=repo_root)}"
+    def camera_info_url(self, *, repo_root: Path, paths: RuntimePaths | None = None) -> str:
+        return f"file://{self.ensure_calibration_file(repo_root=repo_root, paths=paths)}"
 
     def runtime_device_path(self) -> str:
         raw = str(self.device_path or "").strip()
@@ -764,7 +769,7 @@ class UTMCameraProfile:
         # as an integer parameter before the camera node can start.
         return f"{float(self.fps):.1f}"
 
-    def to_env(self, *, repo_root: Path) -> dict[str, str]:
+    def to_env(self, *, repo_root: Path, paths: RuntimePaths | None = None) -> dict[str, str]:
         env = {
             "UTM_CAMERA_WIDTH": str(self.width),
             "UTM_CAMERA_HEIGHT": str(self.height),
@@ -776,14 +781,14 @@ class UTMCameraProfile:
             "UTM_CAMERA_IMAGE_TOPIC": self.ros_image_topic,
             "UTM_CAMERA_RECT_TOPIC": self.ros_rect_topic,
             "UTM_CAMERA_OUTPUT_TOPIC": self.ros_output_topic,
-            "UTM_CAMERA_INFO_URL": self.camera_info_url(repo_root=repo_root),
+            "UTM_CAMERA_INFO_URL": self.camera_info_url(repo_root=repo_root, paths=paths),
         }
         runtime_device = self.runtime_device_path()
         if runtime_device:
             env["UTM_CAMERA_DEVICE"] = runtime_device
         return env
 
-    def to_dict(self, *, repo_root: Path | None = None) -> dict[str, Any]:
+    def to_dict(self, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> dict[str, Any]:
         payload = {
             "profile_id": self.profile_id,
             "label": self.label,
@@ -804,7 +809,7 @@ class UTMCameraProfile:
             "notes": self.notes,
         }
         if repo_root is not None:
-            payload["camera_info_url"] = self.camera_info_url(repo_root=repo_root)
+            payload["camera_info_url"] = self.camera_info_url(repo_root=repo_root, paths=paths)
         return payload
 
 
@@ -817,6 +822,7 @@ class UTMCameraConfig:
     active_profile_id: str
     profiles: dict[str, UTMCameraProfile]
     updated_at: str = ""
+    paths: RuntimePaths | None = field(default=None, kw_only=True)
 
     @classmethod
     def load(
@@ -824,9 +830,13 @@ class UTMCameraConfig:
         *,
         repo_root: str | Path,
         memory_path: str | Path | None = None,
+        paths: RuntimePaths | None = None,
     ) -> "UTMCameraConfig":
         root = Path(repo_root).expanduser()
-        path = Path(memory_path).expanduser() if memory_path is not None else root / DEFAULT_CAMERA_CONFIG_RELATIVE
+        if paths is not None and root.resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
+        path = Path(memory_path).expanduser() if memory_path is not None else (
+            paths.memory_root / "device_bridge/utm_camera_config.json" if paths is not None else root / DEFAULT_CAMERA_CONFIG_RELATIVE)
         default_profile = UTMCameraProfile()
         profiles = {default_profile.profile_id: default_profile}
         active_profile_id = default_profile.profile_id
@@ -858,6 +868,7 @@ class UTMCameraConfig:
             active_profile_id=active_profile_id,
             profiles=profiles,
             updated_at=updated_at,
+            paths=paths,
         )
 
     def active_profile(self) -> UTMCameraProfile:
@@ -881,7 +892,7 @@ class UTMCameraConfig:
                 profile_seed.setdefault("profile_id", requested_id)
                 payload = profile_seed
                 current = self.profiles.get(requested_id, current)
-        profile_payload = dict(current.to_dict(repo_root=self.repo_root))
+        profile_payload = dict(current.to_dict(repo_root=self.repo_root, paths=self.paths))
         profile_payload.update({
             key: value
             for key, value in payload.items()
@@ -909,9 +920,9 @@ class UTMCameraConfig:
             "schema": "atr.utm.camera.config.v1",
             "memory_path": str(self.memory_path),
             "active_profile_id": self.active_profile_id,
-            "active_profile": self.active_profile().to_dict(repo_root=self.repo_root),
+            "active_profile": self.active_profile().to_dict(repo_root=self.repo_root, paths=self.paths),
             "profiles": {
-                profile_id: profile.to_dict(repo_root=self.repo_root)
+                profile_id: profile.to_dict(repo_root=self.repo_root, paths=self.paths)
                 for profile_id, profile in sorted(self.profiles.items())
             },
             "updated_at": self.updated_at,
@@ -945,9 +956,13 @@ class UTMRuntimeConfig:
     environment: dict[str, str] = field(default_factory=dict)
     allow_virtual_bridge_in_test: bool = True
     camera_config: UTMCameraConfig | None = None
+    paths: RuntimePaths | None = field(default=None, kw_only=True)
 
     @classmethod
-    def from_devices_config(cls, devices_config: dict[str, Any], *, repo_root: Path) -> "UTMRuntimeConfig":
+    def from_devices_config(cls, devices_config: dict[str, Any], *, repo_root: Path,
+                            paths: RuntimePaths | None = None) -> "UTMRuntimeConfig":
+        if paths is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         devices = devices_config if isinstance(devices_config, dict) else {}
         while isinstance(devices.get("devices"), dict):
             devices = devices["devices"]
@@ -956,7 +971,7 @@ class UTMRuntimeConfig:
         script_path = Path(str(raw.get("script_path") or workspace_root / "scripts" / "start_utm_vision_stack.sh")).expanduser()
         if not script_path.is_absolute():
             script_path = workspace_root / script_path
-        log_dir = Path(str(raw.get("log_dir") or repo_root / "artifacts" / "utm_runtime")).expanduser()
+        log_dir = Path(str(raw.get("log_dir") or (paths.artifact_root if paths is not None else repo_root / "artifacts") / "utm_runtime")).expanduser()
         if not log_dir.is_absolute():
             log_dir = repo_root / log_dir
         ros_setup_paths = raw.get("ros_setup_paths", ["/opt/ros/jazzy/setup.bash"])
@@ -990,7 +1005,8 @@ class UTMRuntimeConfig:
             extra_setup_paths=[str(item) for item in extra_setup_paths],
             environment=environment,
             allow_virtual_bridge_in_test=bool(raw.get("allow_virtual_bridge_in_test", True)),
-            camera_config=UTMCameraConfig.load(repo_root=repo_root),
+            camera_config=UTMCameraConfig.load(repo_root=repo_root, paths=paths),
+            paths=paths,
         )
 
 
@@ -1169,7 +1185,20 @@ class UTMGraphSnapshotBuilder:
 class UTMRuntimeProcessManager:
     """Start, stop, probe, and report the UTM Vision ROS process group."""
 
-    def __init__(self, config: UTMRuntimeConfig) -> None:
+    def __init__(self, config: UTMRuntimeConfig, *, paths: RuntimePaths | None = None) -> None:
+        paths = paths if paths is not None else config.paths
+        if config.paths is not None and config.paths != paths:
+            raise ValueError("paths contradict config.paths")
+        camera = config.camera_config
+        if paths is not None and camera is not None:
+            if camera.repo_root.resolve() != paths.repository_root:
+                raise ValueError("camera repo_root contradicts paths.repository_root")
+            if camera.paths is not None and camera.paths != paths:
+                raise ValueError("camera paths contradict manager paths")
+            if camera.paths is not paths:
+                camera = replace(camera, paths=paths)
+        if config.paths is not paths or config.camera_config is not camera:
+            config = replace(config, paths=paths, camera_config=camera)
         self.config = config
         self._lock = threading.Lock()
         self._process: subprocess.Popen[bytes] | None = None
@@ -1418,7 +1447,7 @@ class UTMRuntimeProcessManager:
                 generation = self._mjpeg_generation
                 stream = self._remote_mjpeg_streams.get(stream_key)
             if stream is None or not stream.alive():
-                stream = RemoteVisionStream(**settings)
+                stream = RemoteVisionStream(paths=self.config.paths, **settings)
                 with self._lock:
                     stale = generation != self._mjpeg_generation
                     if not stale:
@@ -1608,11 +1637,11 @@ class UTMRuntimeProcessManager:
             }
 
     def camera_config(self) -> dict[str, Any]:
-        camera_config = self.config.camera_config or UTMCameraConfig.load(repo_root=Path.cwd())
+        camera_config = self.config.camera_config or UTMCameraConfig.load(repo_root=self._repo_root(), paths=self.config.paths)
         return camera_config.to_payload()
 
     def update_camera_config(self, payload: dict[str, Any]) -> dict[str, Any]:
-        camera_config = self.config.camera_config or UTMCameraConfig.load(repo_root=Path.cwd())
+        camera_config = self.config.camera_config or UTMCameraConfig.load(repo_root=self._repo_root(), paths=self.config.paths)
         return camera_config.save_update(payload if isinstance(payload, dict) else {})
 
     def discover_camera_devices(self) -> dict[str, Any]:
@@ -1643,7 +1672,7 @@ class UTMRuntimeProcessManager:
             "ok": True,
             "tool": "utm.camera.calibrate.command",
             "command": self._ros_command_preview(command),
-            "calibration_file": str(profile.calibration_path(repo_root=self._repo_root())),
+            "calibration_file": str(profile.calibration_path(repo_root=self._repo_root(), paths=self.config.paths)),
             "checkerboard_size": size,
             "checkerboard_square_m": square,
         }
@@ -1723,7 +1752,7 @@ class UTMRuntimeProcessManager:
                 "returncode": None,
                 "started_at": self._calibration_started_at,
                 "log_path": str(self._calibration_log_path or ""),
-                "calibration_file": str(profile.calibration_path(repo_root=self._repo_root())),
+                "calibration_file": str(profile.calibration_path(repo_root=self._repo_root(), paths=self.config.paths)),
             }
         returncode = process.poll()
         return {
@@ -1734,7 +1763,7 @@ class UTMRuntimeProcessManager:
             "returncode": returncode,
             "started_at": self._calibration_started_at,
             "log_path": str(self._calibration_log_path or ""),
-            "calibration_file": str(profile.calibration_path(repo_root=self._repo_root())),
+            "calibration_file": str(profile.calibration_path(repo_root=self._repo_root(), paths=self.config.paths)),
             "failure_code": "" if returncode in {None, 0} else "UTM_CAMERA_CALIBRATION_EXITED",
         }
 
@@ -1885,7 +1914,8 @@ class UTMRuntimeProcessManager:
 
     def _repo_root(self) -> Path:
         camera_config = self.config.camera_config
-        return camera_config.repo_root if camera_config is not None else Path.cwd()
+        return camera_config.repo_root if camera_config is not None else (
+            self.config.paths.repository_root if self.config.paths is not None else Path.cwd())
 
     def _active_camera_profile(self) -> UTMCameraProfile:
         camera_config = self.config.camera_config
@@ -1897,7 +1927,7 @@ class UTMRuntimeProcessManager:
         camera_config = self.config.camera_config
         if camera_config is None:
             return {}
-        return camera_config.active_profile().to_env(repo_root=camera_config.repo_root)
+        return camera_config.active_profile().to_env(repo_root=camera_config.repo_root, paths=camera_config.paths)
 
     def _apply_camera_runtime_controls(self) -> dict[str, Any]:
         """Pin UVC controls that otherwise let BRIO drop below the requested FPS."""
@@ -2226,10 +2256,12 @@ _RUNTIME_SINGLETON: UTMRuntimeProcessManager | None = None
 _RUNTIME_SINGLETON_KEY: str = ""
 
 
-def get_utm_runtime_manager(devices_config: dict[str, Any] | None = None, *, repo_root: str | Path = ".") -> UTMRuntimeProcessManager:
+def get_utm_runtime_manager(devices_config: dict[str, Any] | None = None, *, repo_root: str | Path | None = None,
+                            paths: RuntimePaths | None = None) -> UTMRuntimeProcessManager:
     """Return a process-local singleton shared by tool registry and FastAPI routes."""
     global _RUNTIME_SINGLETON, _RUNTIME_SINGLETON_KEY
-    config = UTMRuntimeConfig.from_devices_config(devices_config or {}, repo_root=Path(repo_root))
+    root = Path(repo_root) if repo_root is not None else (paths.repository_root if paths is not None else Path("."))
+    config = UTMRuntimeConfig.from_devices_config(devices_config or {}, repo_root=root, paths=paths)
     key = _stable_hash(
         {
             "workspace_root": str(config.workspace_root),
@@ -2239,9 +2271,12 @@ def get_utm_runtime_manager(devices_config: dict[str, Any] | None = None, *, rep
             "extra_setup_paths": config.extra_setup_paths,
             "environment": config.environment,
             "camera": config.camera_config.to_dict() if config.camera_config is not None else {},
+            "camera_memory_path": str(config.camera_config.memory_path.resolve()) if config.camera_config is not None else "",
+            "camera_repo_root": str(config.camera_config.repo_root.resolve()) if config.camera_config is not None else "",
+            "paths": {item.name: str(getattr(paths, item.name)) for item in fields(paths)} if paths is not None else None,
         }
     )
     if _RUNTIME_SINGLETON is None or key != _RUNTIME_SINGLETON_KEY:
-        _RUNTIME_SINGLETON = UTMRuntimeProcessManager(config)
+        _RUNTIME_SINGLETON = UTMRuntimeProcessManager(config, paths=paths)
         _RUNTIME_SINGLETON_KEY = key
     return _RUNTIME_SINGLETON

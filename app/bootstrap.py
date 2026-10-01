@@ -310,11 +310,11 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     register_source_tools(tools, lambda: library_for(
         library_root=paths.memory_root / "knowledge/source_library", inbox_root=paths.source_inbox_root))
     register_mock_tools(tools)
-    # These legacy APIs mix source and storage paths under one repo_root.
-    # Keep its repository-relative contract until those consumers are split.
-    register_utm_tools(tools, repo_root=paths.repository_root)
-    utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=paths.repository_root)
-    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=paths.repository_root)
+    # Keep repo_root as the explicit-relative compatibility base; typed omitted
+    # defaults use the same frozen source/private binding throughout each graph.
+    register_utm_tools(tools, repo_root=paths.repository_root, paths=paths)
+    utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
+    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
     register_camera_tools(
         tools,
         utm_state_observer=observe_utm_state_window,
@@ -322,7 +322,7 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
         specimen_pose_tracker=specimen_pose_tracker,
     )
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root)
-    register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root)
+    register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
     lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.repository_root)
     lerobot_bridge.config.artifact_run_root = paths.run_root
     # PINN's sole path is storage: supply the typed default without rewriting
@@ -332,7 +332,7 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     pinn_section = pinn_devices.get("pinn") if isinstance(pinn_devices, dict) else None
     pinn_config = deepcopy(pinn_section) if isinstance(pinn_section, dict) else {}
     pinn_config.setdefault("artifact_dir", str(paths.artifact_root / "pinn"))
-    register_pinn_tools(tools, {"pinn": pinn_config}, repo_root=paths.repository_root)
+    register_pinn_tools(tools, {"pinn": pinn_config}, repo_root=paths.repository_root, paths=paths)
     register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(

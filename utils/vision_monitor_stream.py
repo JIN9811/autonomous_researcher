@@ -5,11 +5,12 @@ import json
 from urllib.request import urlopen
 
 from utils.monitor_process import monitor_process
+from utils.runtime_paths import RuntimePaths
 
 
 class RemoteVisionStream:
-    def __init__(self, **config):
-        self.worker = monitor_process("video", {})
+    def __init__(self, *, paths: RuntimePaths | None = None, **config):
+        self.worker = monitor_process("video", {}, paths=paths)
         self.source_id = self.worker.control({"operation": "vision_register", "config": config})["source_id"]
 
     def alive(self):

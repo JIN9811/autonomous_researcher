@@ -26,6 +26,7 @@ from typing import Any
 
 from device_bridges.pinn_bridge import PINNBridge, PINNBridgeConfig
 from mcp_tools.tool_registry import ToolRegistry
+from utils.runtime_paths import RuntimePaths
 
 
 def register_pinn_tools(
@@ -33,9 +34,10 @@ def register_pinn_tools(
     devices_config: dict[str, Any] | None = None,
     *,
     repo_root: Path | None = None,
+    paths: RuntimePaths | None = None,
 ) -> PINNBridge:
     """Register PINN bridge tools and return the bridge instance."""
-    config = PINNBridgeConfig.from_devices_config(devices_config or {}, repo_root=repo_root)
+    config = PINNBridgeConfig.from_devices_config(devices_config or {}, repo_root=repo_root, paths=paths)
     bridge = PINNBridge(config)
 
     registry.register("pinn.health", lambda payload: bridge.health())

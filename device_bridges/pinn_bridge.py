@@ -27,6 +27,7 @@ from typing import Any
 
 from device_bridges.base_bridge import BaseBridge
 from utils.paths import resolve_path
+from utils.runtime_paths import RuntimePaths
 
 
 @dataclass(slots=True)
@@ -40,14 +41,17 @@ class PINNBridgeConfig:
     artifact_dir: Path = field(default_factory=lambda: resolve_path("artifacts/pinn"))
 
     @classmethod
-    def from_devices_config(cls, devices_config: dict[str, Any] | None = None, *, repo_root: Path | None = None) -> "PINNBridgeConfig":
+    def from_devices_config(cls, devices_config: dict[str, Any] | None = None, *, repo_root: Path | None = None,
+                            paths: RuntimePaths | None = None) -> "PINNBridgeConfig":
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         raw = devices_config or {}
         devices = raw.get("devices", raw) if isinstance(raw, dict) else {}
         config: dict[str, Any] = {}
         if isinstance(devices, dict) and isinstance(devices.get("pinn"), dict):
             config.update(devices["pinn"])
-        base_root = repo_root or resolve_path(".")
-        artifact = Path(str(config.get("artifact_dir", "artifacts/pinn"))).expanduser()
+        base_root = repo_root or (paths.repository_root if paths is not None else resolve_path("."))
+        artifact = Path(str(config.get("artifact_dir", paths.artifact_root / "pinn" if paths is not None else "artifacts/pinn"))).expanduser()
         if not artifact.is_absolute():
             artifact = base_root.joinpath(artifact).resolve()
         return cls(

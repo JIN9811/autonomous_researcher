@@ -28,6 +28,7 @@ from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
 from utils.utm_csv import probe_utm_csv
+from utils.runtime_paths import RuntimePaths
 
 
 def _safe_segment(value: Any, fallback: str) -> str:
@@ -40,7 +41,7 @@ def _probe_csv(path: Path) -> dict[str, Any]:
 
 
 def _write_test_csv(*, root: Path, run_id: str, specimen_id: str, profile: str) -> dict[str, Any]:
-    artifact_dir = root / "artifacts" / "equipment" / _safe_segment(run_id, "run-test") / "utm"
+    artifact_dir = root / "equipment" / _safe_segment(run_id, "run-test") / "utm"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filename = f"utm_direct_{_safe_segment(specimen_id, 'specimen-test')}_{stamp}.csv"
@@ -67,9 +68,12 @@ def _write_test_csv(*, root: Path, run_id: str, specimen_id: str, profile: str) 
     }
 
 
-def run_utm_protocol(payload: dict[str, Any], *, repo_root: str | Path | None = None) -> dict[str, Any]:
+def run_utm_protocol(payload: dict[str, Any], *, repo_root: str | Path | None = None,
+                     paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Run the legacy/direct UTM contract without pretending live hardware succeeded."""
-    root = Path(repo_root) if repo_root is not None else Path.cwd()
+    if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+        raise ValueError("repo_root contradicts paths.repository_root")
+    root = paths.artifact_root if paths is not None else (Path(repo_root) if repo_root is not None else Path.cwd()) / "artifacts"
     mode = str(payload.get("runtime_mode") or payload.get("mode") or "test").strip().lower()
     profile = str(payload.get("profile") or "default")
     run_id = str(payload.get("run_id") or "run-test")
@@ -186,9 +190,12 @@ def run_utm_protocol(payload: dict[str, Any], *, repo_root: str | Path | None = 
     }
 
 
-def register_utm_tools(registry: ToolRegistry, repo_root: str | Path | None = None) -> None:
+def register_utm_tools(registry: ToolRegistry, repo_root: str | Path | None = None, *,
+                       paths: RuntimePaths | None = None) -> None:
     """Register UTM macro run tool."""
+    if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+        raise ValueError("repo_root contradicts paths.repository_root")
     registry.register(
         "utm.run_protocol",
-        lambda payload: run_utm_protocol(payload, repo_root=repo_root),
+        lambda payload: run_utm_protocol(payload, repo_root=repo_root, paths=paths),
     )

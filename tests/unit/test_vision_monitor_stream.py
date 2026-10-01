@@ -105,7 +105,9 @@ def test_display_registration_does_not_change_raw_capture_or_roi(tmp_path, monke
     key, inline_settings = manager._frame_stream_settings(topic="/camera/image_raw", fps=15)
     registered = []
     class FakeRemote:
-        def __init__(self, **kwargs): registered.append(kwargs)
+        def __init__(self, *, paths=None, **kwargs):
+            assert paths is manager.config.paths
+            registered.append(kwargs)
         def url(self): return "http://127.0.0.1:1/preview"
         def alive(self): return True
         def stop(self): pass

@@ -225,9 +225,6 @@ devices:
     color_topic: /camera/d455f/color/image_raw
     depth_topic: /camera/d455f/aligned_depth_to_color/image_raw
     info_topic: /camera/d455f/color/camera_info
-    script_path: scripts/vision/run_specimen_pose_snapshot.sh
-    log_dir: artifacts/specimen_pose_tracker
-    artifact_dir: runs
     rsusb_pythonpath: /home/jin/librealsense-rsusb/build-rsusb-system/Release
     rsusb_library_path: /home/jin/librealsense-rsusb/build-rsusb-system/Release
     ros_setup_paths:
@@ -253,7 +250,6 @@ devices:
     # The RQT-like GUI graph follows this repository's launch/scripts flow.
     workspace_root: /home/jin/external_repos/UTM
     script_path: /home/jin/external_repos/UTM/scripts/start_utm_vision_stack.sh
-    log_dir: artifacts/utm_runtime
     stop_timeout_sec: 5.0
     probe_timeout_sec: 2.0
     summary_topic: /compression_tester/summary
@@ -280,9 +276,6 @@ devices:
       discovery_port: 8765
       allow_live_execute: false
       allow_screenshot: true
-      artifact_dir: artifacts/equipment
-      connection_memory_path: memory/windows_pyautogui_connection.json
-      utm_profile_memory_path: memory/equipment_utm_profile.json
       allowed_actions:
         - health
         - screenshot

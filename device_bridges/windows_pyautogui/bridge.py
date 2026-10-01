@@ -40,6 +40,7 @@ from urllib.parse import quote, urljoin, urlparse
 import httpx
 
 from device_bridges.base_bridge import BaseBridge
+from utils.runtime_paths import RuntimePaths
 from utils.windows_bridge_release import build_release_package, load_release_manifest
 from utils.utm_csv import probe_utm_csv_bytes
 
@@ -335,9 +336,12 @@ class WindowsPyAutoGUIBridgeConfig:
         cfg: dict[str, Any] | None,
         *,
         repo_root: Path | None = None,
+        paths: RuntimePaths | None = None,
     ) -> "WindowsPyAutoGUIBridgeConfig":
         """Build config from the project devices config."""
-        root = repo_root or REPO_ROOT
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
+        root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
         cfg = cfg if isinstance(cfg, dict) else {}
         devices = cfg.get("devices") if isinstance(cfg.get("devices"), dict) else cfg
         equipment = devices.get("equipment", {}) if isinstance(devices, dict) else {}
@@ -346,14 +350,14 @@ class WindowsPyAutoGUIBridgeConfig:
         bridge_raw = equipment.get("windows_pyautogui", {})
         bridge = bridge_raw if isinstance(bridge_raw, dict) else {}
 
-        artifact_dir = Path(str(bridge.get("artifact_dir", "artifacts/equipment")))
+        artifact_dir = Path(str(bridge.get("artifact_dir", paths.artifact_root / "equipment" if paths is not None else "artifacts/equipment")))
         if not artifact_dir.is_absolute():
             artifact_dir = root / artifact_dir
-        memory_path = Path(str(bridge.get("connection_memory_path", DEFAULT_CONNECTION_MEMORY)))
+        memory_path = Path(str(bridge.get("connection_memory_path", paths.memory_root / "windows_pyautogui_connection.json" if paths is not None else DEFAULT_CONNECTION_MEMORY)))
         if not memory_path.is_absolute():
             memory_path = root / memory_path
         raw_utm_profile_path = bridge.get("utm_profile_memory_path")
-        utm_profile_path = Path(str(raw_utm_profile_path)) if raw_utm_profile_path else root / "memory" / "equipment_utm_profile.json"
+        utm_profile_path = Path(str(raw_utm_profile_path)) if raw_utm_profile_path else (paths.memory_root if paths is not None else root / "memory") / "equipment_utm_profile.json"
         if not utm_profile_path.is_absolute():
             utm_profile_path = root / utm_profile_path
 

@@ -30,6 +30,7 @@ from device_bridges.windows_pyautogui.bridge import (
 )
 from mcp_tools.tool_registry import ToolRegistry
 from utils.equipment_runtime_service import EquipmentRuntimeContractError, EquipmentRuntimeService
+from utils.runtime_paths import RuntimePaths
 
 
 def register_equipment_tools(
@@ -37,11 +38,12 @@ def register_equipment_tools(
     devices_config: dict[str, Any] | None = None,
     *,
     repo_root: Path | None = None,
+    paths: RuntimePaths | None = None,
 ) -> WindowsPyAutoGUIBridge:
     """Register Windows PyAutoGUI equipment bridge tools."""
-    config = WindowsPyAutoGUIBridgeConfig.from_devices_config(devices_config or {}, repo_root=repo_root)
+    config = WindowsPyAutoGUIBridgeConfig.from_devices_config(devices_config or {}, repo_root=repo_root, paths=paths)
     bridge = WindowsPyAutoGUIBridge(config)
-    runtime = EquipmentRuntimeService((repo_root or Path.cwd()) / "memory" / "equipment_runtime")
+    runtime = EquipmentRuntimeService((paths.memory_root if paths is not None else (repo_root or Path.cwd()) / "memory") / "equipment_runtime")
     registry.register_resource("equipment.bridge", bridge)
 
     def runtime_current(_payload: dict[str, Any]) -> dict[str, Any]:

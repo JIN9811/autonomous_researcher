@@ -297,10 +297,13 @@ def test_changed_mixed_bridge_arguments_keep_legacy_storage_base(split_bridge_ru
         "equipment_memory": "custom/equipment.json", "equipment_profile": "memory/equipment_utm_profile.json",
         "lerobot_memory": "custom/sessions.json", "lerobot_output": "custom/training", "lerobot_logs": "runs/lerobot_sessions",
     }
-    assert actual == {name: paths.repository_root / suffix for name, suffix in suffixes.items()}
+    expected = {name: paths.repository_root / suffix for name, suffix in suffixes.items()}
+    expected["utm_memory"] = paths.memory_root / "device_bridge/utm_camera_config.json"
+    expected["equipment_profile"] = paths.memory_root / "equipment_utm_profile.json"
+    assert actual == expected
     assert lerobot.artifact_run_root == paths.run_root
     # The direct UTM test handler is software-only and writes a synthetic CSV.
     result = registry.call("utm.run_protocol", {"mode": "test", "run_id": "binding-check", "specimen_id": "fixture"})
-    assert Path(result["result_file"]).is_relative_to(paths.repository_root / "artifacts/equipment/binding-check/utm")
+    assert Path(result["result_file"]).is_relative_to(paths.artifact_root / "equipment/binding-check/utm")
     assert Path(result["result_file"]).is_file()
     assert not paths.runtime_root.exists()

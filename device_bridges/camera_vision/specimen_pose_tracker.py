@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from utils.runtime_paths import RuntimePaths
+
 DEFAULT_RSUSB_RUNTIME = Path.home() / "librealsense-rsusb" / "build-rsusb-system" / "Release"
 
 
@@ -67,18 +69,21 @@ class SpecimenPoseTrackerConfig:
     allow_virtual_pose_in_test: bool = True
 
     @classmethod
-    def from_devices_config(cls, devices_config: dict[str, Any], *, repo_root: Path) -> "SpecimenPoseTrackerConfig":
+    def from_devices_config(cls, devices_config: dict[str, Any], *, repo_root: Path,
+                            paths: RuntimePaths | None = None) -> "SpecimenPoseTrackerConfig":
+        if paths is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         devices = devices_config if isinstance(devices_config, dict) else {}
         while isinstance(devices.get("devices"), dict):
             devices = devices["devices"]
         raw = devices.get("specimen_pose_tracker", {}) if isinstance(devices, dict) else {}
-        script_path = Path(str(raw.get("script_path") or repo_root / "scripts" / "vision" / "run_specimen_pose_snapshot.sh")).expanduser()
+        script_path = Path(str(raw.get("script_path") or (paths.runtime_root if paths is not None else repo_root) / "scripts" / "vision" / "run_specimen_pose_snapshot.sh")).expanduser()
         if not script_path.is_absolute():
             script_path = repo_root / script_path
-        log_dir = Path(str(raw.get("log_dir") or repo_root / "artifacts" / "specimen_pose_tracker")).expanduser()
+        log_dir = Path(str(raw.get("log_dir") or (paths.artifact_root if paths is not None else repo_root / "artifacts") / "specimen_pose_tracker")).expanduser()
         if not log_dir.is_absolute():
             log_dir = repo_root / log_dir
-        artifact_dir = Path(str(raw.get("artifact_dir") or repo_root / "runs")).expanduser()
+        artifact_dir = Path(str(raw.get("artifact_dir") or (paths.run_root if paths is not None else repo_root / "runs"))).expanduser()
         if not artifact_dir.is_absolute():
             artifact_dir = repo_root / artifact_dir
         ros_setup_paths = raw.get("ros_setup_paths", ["/opt/ros/jazzy/setup.bash"])
@@ -262,5 +267,6 @@ class SpecimenPoseTrackerBridge:
         return {"ok": False, "tool": "vision.specimen_pose_snapshot", "failure_code": failure_code, "message": message, "lease": self._lease_payload(), "generated_at": _now_iso()}
 
 
-def get_specimen_pose_tracker_bridge(devices_config: dict[str, Any], *, repo_root: Path) -> SpecimenPoseTrackerBridge:
-    return SpecimenPoseTrackerBridge(SpecimenPoseTrackerConfig.from_devices_config(devices_config, repo_root=repo_root))
+def get_specimen_pose_tracker_bridge(devices_config: dict[str, Any], *, repo_root: Path,
+                                     paths: RuntimePaths | None = None) -> SpecimenPoseTrackerBridge:
+    return SpecimenPoseTrackerBridge(SpecimenPoseTrackerConfig.from_devices_config(devices_config, repo_root=repo_root, paths=paths))
