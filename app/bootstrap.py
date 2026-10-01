@@ -321,7 +321,7 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
         utm_runtime_manager=utm_runtime_manager,
         specimen_pose_tracker=specimen_pose_tracker,
     )
-    register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root)
+    register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
     lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.repository_root)
     lerobot_bridge.config.artifact_run_root = paths.run_root

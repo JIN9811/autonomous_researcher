@@ -13,6 +13,7 @@ from urllib.parse import urlparse, unquote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from utils.paths import resolve_path
+from utils.runtime_paths import RuntimePaths
 
 
 class MaterialPriority(BaseModel):
@@ -136,13 +137,15 @@ def bind_artifact(selection, path, plate_id=1) -> dict:
         return {**selection, "ok": False, "failure_code": "BAMBU_MATERIAL_ARTIFACT_EVIDENCE_REQUIRED"}
 
 
-def material_artifact_path(value, repo_root):
+def material_artifact_path(value, repo_root, *, paths: RuntimePaths | None = None):
+    if paths is not None and Path(repo_root).resolve() != paths.repository_root:
+        raise ValueError("repo_root contradicts paths.repository_root")
     parsed = urlparse(str(value or ""))
     if parsed.scheme in {"http", "https"}:
         parts = [unquote(part) for part in parsed.path.split("/") if part]
         if len(parts) != 4 or parts[:2] != ["printer-artifacts", "bambu"]:
             return None
-        root = (Path(repo_root) / "artifacts/bambu_http_exports").resolve()
+        root = ((paths.artifact_root if paths is not None else Path(repo_root) / "artifacts") / "bambu_http_exports").resolve()
         path = (root / parts[2] / parts[3]).resolve()
         return path if path.is_relative_to(root) else None
     if not value:

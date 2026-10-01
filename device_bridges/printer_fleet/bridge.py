@@ -21,7 +21,8 @@ Modification guide:
 from __future__ import annotations
 
 from utils.specimen_placement import normalize_placement, placement_area, placement_from_payload, preflight_placement, requested_center, validate_sliced_placement
-from utils.bambu_material_priority import load_priority, priority_path, select_material, bind_artifact, material_artifact_path
+from utils.bambu_material_priority import load_priority, select_material, bind_artifact, material_artifact_path
+from utils.runtime_paths import RuntimePaths
 from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile, print_start_calibration_options, normalize_print_start_settings
 from device_bridges.printer_fleet.slicer_profiles import resolve_profile, scale_xy_process_profile
 
@@ -120,9 +121,11 @@ class PrinterProfile:
     priority: int = 0
 
     @classmethod
-    def from_dict(cls, profile_id: str, raw: dict[str, Any], *, repo_root: Path) -> "PrinterProfile":
+    def from_dict(cls, profile_id: str, raw: dict[str, Any], *, repo_root: Path, paths: RuntimePaths | None = None) -> "PrinterProfile":
+        if paths is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         provider = str(raw.get("provider") or profile_id or "bambulab_x2d").strip()
-        memory = _resolve_path(raw.get("connection_memory_path"), repo_root=repo_root)
+        memory = _resolve_path(raw.get("connection_memory_path") or (paths.memory_root / "bambu_connection.json" if paths is not None else DEFAULT_BAMBU_MEMORY), repo_root=repo_root)
         return cls(
             profile_id=str(profile_id),
             provider=provider,
@@ -155,26 +158,33 @@ class BambuSlicerConfig:
     default_process_profile: str = ""
     default_filament_profile: str = ""
     start_point_prime_mm: float = 0.1
+    paths: RuntimePaths | None = field(default=None, kw_only=True, repr=False, compare=False)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any] | None) -> "BambuSlicerConfig":
+    def from_dict(cls, raw: dict[str, Any] | None, *, paths: RuntimePaths | None = None) -> "BambuSlicerConfig":
         raw = raw if isinstance(raw, dict) else {}
         return cls(
             enabled=_as_bool(raw.get("enabled"), False),
             executable_env=str(raw.get("executable_env", "BAMBU_STUDIO_EXECUTABLE")),
-            executable_path=str(raw.get("executable_path", "install/bambustudio/bambu-studio-wrapper")),
-            output_dir=str(raw.get("output_dir", "artifacts/bambu_sliced")),
+            executable_path=str(raw.get("executable_path", paths.runtime_root / "install/bambustudio/bambu-studio-wrapper" if paths is not None else "install/bambustudio/bambu-studio-wrapper")),
+            output_dir=str(raw.get("output_dir", paths.artifact_root / "bambu_sliced" if paths is not None else "artifacts/bambu_sliced")),
             timeout_sec=float(raw.get("timeout_sec", 900) or 900),
             auto_no_skirt_profile=_as_bool(raw.get("auto_no_skirt_profile"), True),
             default_machine_profile=str(raw.get("default_machine_profile", "") or ""),
             default_process_profile=str(raw.get("default_process_profile", "") or ""),
             default_filament_profile=str(raw.get("default_filament_profile", "") or ""),
             start_point_prime_mm=float(raw.get("start_point_prime_mm", 0.1)),
+            paths=paths,
         )
 
-    def resolved_payload(self, *, repo_root: Path | None = None) -> dict[str, Any]:
+    def resolved_payload(self, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> dict[str, Any]:
         """Resolve the Bambu Studio CLI path without treating a missing wrapper as final."""
-        root = repo_root or REPO_ROOT
+        if paths is not None and self.paths is not None and paths != self.paths:
+            raise ValueError("paths contradict config.paths")
+        paths = paths or self.paths
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
+        root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
         output_dir = _resolve_path(self.output_dir, repo_root=root)
         configured_path = str(self.executable_path or "").strip()
         env_name = str(self.executable_env or "").strip()
@@ -219,9 +229,16 @@ class BambuSlicerConfig:
 class BambuStudioSlicerRunner:
     """Run Bambu Studio CLI to create a real printer artifact without publishing."""
 
-    def __init__(self, config: BambuSlicerConfig, *, repo_root: Path | None = None) -> None:
+    def __init__(self, config: BambuSlicerConfig, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> None:
+        if paths is not None and config.paths is not None and paths != config.paths:
+            raise ValueError("paths contradict config.paths")
+        paths = paths or config.paths
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         self.config = config
-        self.repo_root = repo_root or REPO_ROOT
+        self.paths = paths
+        self.repo_root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
+        self.memory_root = paths.memory_root if paths is not None else self.repo_root / "memory"
 
     def slice(
         self,
@@ -251,12 +268,12 @@ class BambuStudioSlicerRunner:
         try:
             print_start_settings = self._print_start_settings()
             xy_speed_scale = load_prusa_print_profile(
-                self.repo_root / "memory/prusa_print_profile.json"
+                self.memory_root / "prusa_print_profile.json"
             )["xy_speed_scale_percent"]
         except ValueError as exc:
             return self._blocked("BAMBU_PRINT_START_SETTINGS_INVALID", error=str(exc))
 
-        resolved = self.config.resolved_payload(repo_root=self.repo_root)
+        resolved = self.config.resolved_payload(repo_root=self.repo_root, paths=self.paths)
         if not resolved.get("enabled"):
             return self._blocked("BAMBU_STUDIO_SLICER_DISABLED", source_path=str(source), slicer=resolved)
         executable = str(resolved.get("resolved_executable_path") or "")
@@ -788,7 +805,7 @@ class BambuStudioSlicerRunner:
         ]
 
     def _print_start_settings(self) -> dict[str, float | bool]:
-        path = self.repo_root / "memory/prusa_print_profile.json"
+        path = self.memory_root / "prusa_print_profile.json"
         if path.exists():
             return normalize_print_start_settings(load_prusa_print_profile(path))
         return normalize_print_start_settings({"start_point_prime_mm": self.config.start_point_prime_mm})
@@ -1132,7 +1149,7 @@ class BambuStudioSlicerRunner:
             return {'ok': False, 'reason': 'profile_resolution_failed', 'error': str(exc)}
         # Successful X2D/PLA setup: resolved vendor defaults, Textured PEI,
         # arc fitting off. Operator/experiment values remain authoritative.
-        saved = load_prusa_print_profile(self.repo_root / 'memory/prusa_print_profile.json')
+        saved = load_prusa_print_profile(self.memory_root / 'prusa_print_profile.json')
         spec = experiment_spec if isinstance(experiment_spec, dict) else {}
         constraints = spec.get('constraints') if isinstance(spec.get('constraints'), dict) else {}
         effective = normalize_prusa_print_profile({**saved, **constraints, **spec})
@@ -1415,10 +1432,13 @@ class BambuBridgeConfig:
     video: BambuVideoConfig = field(default_factory=BambuVideoConfig)
     autoejection: AutoEjectionConfig = field(default_factory=AutoEjectionConfig)
     autoejection_memory_path: Path = DEFAULT_BAMBU_AUTOEJECTION_MEMORY
+    paths: RuntimePaths | None = field(default=None, kw_only=True, repr=False, compare=False)
 
     @classmethod
-    def from_devices_config(cls, cfg: dict[str, Any] | None, *, repo_root: Path | None = None) -> "BambuBridgeConfig":
-        root = repo_root or REPO_ROOT
+    def from_devices_config(cls, cfg: dict[str, Any] | None, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> "BambuBridgeConfig":
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
+        root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
         cfg = cfg if isinstance(cfg, dict) else {}
         devices = cfg.get("devices") if isinstance(cfg.get("devices"), dict) else cfg
         printer = devices.get("printer", {}) if isinstance(devices, dict) else {}
@@ -1427,12 +1447,12 @@ class BambuBridgeConfig:
 
         raw_profiles = printer.get("profiles") if isinstance(printer.get("profiles"), dict) else {}
         profiles = {
-            str(profile_id): PrinterProfile.from_dict(str(profile_id), raw, repo_root=root)
+            str(profile_id): PrinterProfile.from_dict(str(profile_id), raw, repo_root=root, paths=paths)
             for profile_id, raw in raw_profiles.items()
             if isinstance(raw, dict)
         }
         if not profiles:
-            profiles = cls._default_profiles(root)
+            profiles = cls._default_profiles(root, paths=paths)
 
         default_profile_id = str(printer.get("default_profile_id") or printer.get("provider") or "bambulab_x2d_lab_01")
         if default_profile_id == "bambulab_x2d":
@@ -1444,9 +1464,9 @@ class BambuBridgeConfig:
 
         bambu = printer.get("bambu") if isinstance(printer.get("bambu"), dict) else {}
         autoejection_raw = printer.get("autoejection") if isinstance(printer.get("autoejection"), dict) else {}
-        memory_path = _resolve_path(printer.get("connection_memory_path", DEFAULT_FLEET_MEMORY), repo_root=root)
+        memory_path = _resolve_path(printer.get("connection_memory_path", paths.memory_root / "printer_fleet.json" if paths is not None else DEFAULT_FLEET_MEMORY), repo_root=root)
         autoejection_memory_path = _resolve_path(
-            autoejection_raw.get("memory_path") or printer.get("autoejection_memory_path") or "memory/bambu_autoejection.json",
+            autoejection_raw.get("memory_path") or printer.get("autoejection_memory_path") or (paths.memory_root / "bambu_autoejection.json" if paths is not None else "memory/bambu_autoejection.json"),
             repo_root=root,
         )
         return cls(
@@ -1455,21 +1475,23 @@ class BambuBridgeConfig:
             allow_automatic_fallback=_as_bool(printer.get("allow_automatic_fallback"), False),
             connection_memory_path=memory_path,
             profiles=profiles,
-            slicer=BambuSlicerConfig.from_dict(bambu.get("slicer") if isinstance(bambu, dict) else {}),
+            slicer=BambuSlicerConfig.from_dict(bambu.get("slicer") if isinstance(bambu, dict) else {}, paths=paths),
             mqtt=BambuMqttConfig.from_dict(bambu.get("mqtt") if isinstance(bambu, dict) else {}),
             video=BambuVideoConfig.from_dict(bambu.get("video") if isinstance(bambu, dict) else {}),
             autoejection=AutoEjectionConfig.from_dict(autoejection_raw),
             autoejection_memory_path=autoejection_memory_path,
+            paths=paths,
         )
 
     @staticmethod
-    def _default_profiles(repo_root: Path) -> dict[str, PrinterProfile]:
+    def _default_profiles(repo_root: Path, *, paths: RuntimePaths | None = None) -> dict[str, PrinterProfile]:
+        memory_root = paths.memory_root if paths is not None else repo_root / "memory"
         return {
             "bambulab_x2d_lab_01": PrinterProfile(
                 profile_id="bambulab_x2d_lab_01",
                 provider="bambulab_x2d",
                 label="Bambu Lab X2D - Lab 01",
-                connection_memory_path=repo_root / "memory" / "bambu_connection.json",
+                connection_memory_path=memory_root / "bambu_connection.json",
                 priority=10,
                 capabilities={
                     "slicer": "bambu_studio_cli",
@@ -1485,7 +1507,7 @@ class BambuBridgeConfig:
                 profile_id="prusa_mk4s_lab_01",
                 provider="prusa_mk4s",
                 label="Prusa MK4S - Lab 01",
-                connection_memory_path=repo_root / "memory" / "prusa_connection.json",
+                connection_memory_path=memory_root / "prusa_connection.json",
                 priority=5,
                 capabilities={
                     "slicer": "prusa_slicer",
@@ -1587,8 +1609,9 @@ class BambuConnectionMemory:
 class BambuAutoejectionMemory:
     """Local operator-verified Bambu autoejection configuration overlay."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, paths: RuntimePaths | None = None) -> None:
         self.path = path
+        self.paths = paths
 
     def load(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -1616,8 +1639,8 @@ class BambuAutoejectionMemory:
             "standalone_transport": "project_file",
             "actual_print_transport": "project_file",
             "virtual_bridge_transport": "virtual",
-            "artifact_dir": "artifacts/bambu_autoejection",
-            "validation_summary_path": "runs/manual_bambu_validation/",
+            "artifact_dir": str(self.paths.artifact_root / "bambu_autoejection") if self.paths is not None else "artifacts/bambu_autoejection",
+            "validation_summary_path": str(self.paths.run_root / "manual_bambu_validation") if self.paths is not None else "runs/manual_bambu_validation/",
             "home_after_standalone": False,
             "skipped_direct_commands": [],
         }
@@ -3273,9 +3296,18 @@ class BambuFtpsClient:
 class PrinterDeviceBridgeManager:
     """Select and execute the correct vendor bridge for a printer.prepare request."""
 
-    def __init__(self, config: BambuBridgeConfig, *, repo_root: Path | None = None) -> None:
+    def __init__(self, config: BambuBridgeConfig, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> None:
+        if paths is not None and config.paths is not None and paths != config.paths:
+            raise ValueError("paths contradict config.paths")
+        paths = paths or config.paths
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         self.config = config
-        self.repo_root = repo_root or REPO_ROOT
+        self.paths = paths
+        self.repo_root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
+        self.memory_root = paths.memory_root if paths is not None else self.repo_root / "memory"
+        self.artifact_root = paths.artifact_root if paths is not None else self.repo_root / "artifacts"
+        self.run_root = paths.run_root if paths is not None else self.repo_root / "runs"
         self.live_probe = BambuLiveProbe(config)
         self.mqtt_client = BambuMqttReportClient(config)
         self.ftps_client = BambuFtpsClient(config)
@@ -3283,9 +3315,9 @@ class PrinterDeviceBridgeManager:
 
     @classmethod
     def from_devices_config(
-        cls, cfg: dict[str, Any] | None, *, repo_root: Path | None = None
+        cls, cfg: dict[str, Any] | None, *, repo_root: Path | None = None, paths: RuntimePaths | None = None
     ) -> "PrinterDeviceBridgeManager":
-        return cls(BambuBridgeConfig.from_devices_config(cfg or {}, repo_root=repo_root), repo_root=repo_root)
+        return cls(BambuBridgeConfig.from_devices_config(cfg or {}, repo_root=repo_root, paths=paths), repo_root=repo_root, paths=paths)
 
     def available_printers(self) -> list[dict[str, Any]]:
         return [profile.redacted() for profile in self.config.profiles.values()]
@@ -3318,10 +3350,10 @@ class PrinterDeviceBridgeManager:
         return self.fleet_payload()
 
     def autoejection_memory(self) -> BambuAutoejectionMemory:
-        return BambuAutoejectionMemory(self.config.autoejection_memory_path)
+        return BambuAutoejectionMemory(self.config.autoejection_memory_path, paths=self.paths)
 
     def bed_clear_memory(self) -> BambuBedClearMemory:
-        return BambuBedClearMemory(self.repo_root / "memory" / "bambu_bed_clear_evidence.json")
+        return BambuBedClearMemory(self.memory_root / "bambu_bed_clear_evidence.json")
 
     def autoejection_config(self) -> AutoEjectionConfig:
         return self.autoejection_memory().config_with_defaults(self.config.autoejection)
@@ -3426,7 +3458,7 @@ class PrinterDeviceBridgeManager:
         native_params = config.native_gcode_parameters()
         effective_position = str(position or native_params.get("push_direction") or "center")
         patcher = BambuGcodeAutoejectionPatcher(
-            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            output_dir=self.artifact_root / "bambu_autoejection",
             z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 15.0),
             push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
             sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 6000),
@@ -3518,7 +3550,7 @@ class PrinterDeviceBridgeManager:
         native_params = config.native_gcode_parameters()
         effective_position = str(position or native_params.get("push_direction") or "center")
         patcher = BambuGcodeAutoejectionPatcher(
-            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            output_dir=self.artifact_root / "bambu_autoejection",
             z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 15.0),
             push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
             sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 6000),
@@ -3554,7 +3586,7 @@ class PrinterDeviceBridgeManager:
         safe_run = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in str(run_id or "").strip()).strip(".-")
         if not safe_run:
             return ""
-        manifest_dir = self.repo_root / "runs" / safe_run / "workspace" / "printer"
+        manifest_dir = self.run_root / safe_run / "workspace" / "printer"
         manifest_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = manifest_dir / "bambu_autoejection_manifest.json"
         manifest_payload = {
@@ -3616,7 +3648,7 @@ class PrinterDeviceBridgeManager:
         native_params = config.native_gcode_parameters()
         effective_position = str(position or native_params.get("push_direction") or "center")
         patcher = BambuGcodeAutoejectionPatcher(
-            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            output_dir=self.artifact_root / "bambu_autoejection",
             z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 15.0),
             push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
             sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 6000),
@@ -3684,7 +3716,7 @@ class PrinterDeviceBridgeManager:
             }
         native_params = config.native_gcode_parameters()
         patcher = BambuGcodeAutoejectionPatcher(
-            output_dir=self.repo_root / "artifacts" / "bambu_autoejection",
+            output_dir=self.artifact_root / "bambu_autoejection",
             z_push_offset_mm=float(native_params.get("z_push_offset_mm") or 15.0),
             push_lane_offset_mm=float(native_params.get("push_lane_offset_mm") or 30.0),
             sweep_feedrate_mm_min=int(native_params.get("push_speed_mm_min") or 6000),
@@ -3708,13 +3740,13 @@ class PrinterDeviceBridgeManager:
         if _as_bool(payload.get("health_only"), False) or self._should_use_bambu_ejection_only_project_file(payload):
             return {"ok": True, "enabled": False}
         try:
-            policy = load_priority(path=priority_path(self.repo_root))
+            policy = load_priority(path=self.memory_root / "bambu_material_priority.json")
             if not policy["enabled"]:
                 return {"ok": True, "enabled": False}
             experiment = payload.get("experiment_spec") if isinstance(payload.get("experiment_spec"), dict) else {}
             material = experiment.get("material") or payload.get("material") or print_payload.get("material")
             if not material:
-                material = load_prusa_print_profile(self.repo_root / "memory/prusa_print_profile.json")["material"]
+                material = load_prusa_print_profile(self.memory_root / "prusa_print_profile.json")["material"]
             if normalized_report is None:
                 profile, _reason = self._select_profile(payload)
                 raw = BambuConnectionMemory(profile.connection_memory_path).load()
@@ -4057,7 +4089,7 @@ class PrinterDeviceBridgeManager:
         if not material_selection["ok"]:
             known_artifact = self._bambu_sliced_artifact_path(payload) or self._bambu_artifact_url(payload)
             if known_artifact:
-                material_selection = bind_artifact(material_selection, material_artifact_path(known_artifact, self.repo_root),
+                material_selection = bind_artifact(material_selection, material_artifact_path(known_artifact, self.repo_root, paths=self.paths),
                     payload.get("plate_id") or (payload.get("print") or {}).get("plate_id") or 1)
         result["material_selection"] = material_selection
         if not material_selection["ok"]:
@@ -4150,7 +4182,7 @@ class PrinterDeviceBridgeManager:
         if not artifact_path and wants_upload and not health_only:
             source_path = self._bambu_source_path(payload)
             if source_path:
-                slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
+                slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root, paths=self.paths).slice(
                     source_path=source_path,
                     experiment_spec=payload.get('experiment_spec'),
                     specimen_placement=placement_from_payload(payload),
@@ -4256,7 +4288,7 @@ class PrinterDeviceBridgeManager:
         if material_selection.get("enabled"):
             # Slicing can outlive a telemetry snapshot. Recheck before building a start draft.
             material_selection = self.resolve_material_selection(payload)
-            material_selection = bind_artifact(material_selection, material_artifact_path(artifact_path or artifact_url, self.repo_root), plate_id)
+            material_selection = bind_artifact(material_selection, material_artifact_path(artifact_path or artifact_url, self.repo_root, paths=self.paths), plate_id)
             result["material_selection"] = material_selection
             if not material_selection["ok"]:
                 return {**result, "ok": False, "status": "blocked", "failure_code": material_selection["failure_code"],
@@ -4529,7 +4561,7 @@ class PrinterDeviceBridgeManager:
                         "start_command_published": False,
                     },
                 }
-            slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
+            slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root, paths=self.paths).slice(
                 source_path=source_path,
                 experiment_spec=payload.get('experiment_spec'),
                 specimen_placement=placement_from_payload(payload),
@@ -4817,7 +4849,7 @@ class PrinterDeviceBridgeManager:
             }
         token = uuid.uuid4().hex
         filename = self._safe_bambu_http_filename(source)
-        export_path = (self.repo_root / "artifacts" / "bambu_http_exports" / token / filename).resolve()
+        export_path = (self.artifact_root / "bambu_http_exports" / token / filename).resolve()
         export_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, export_path)
         manifest_source = Path(f"{source}.manifest.json")
@@ -5585,7 +5617,7 @@ class PrinterDeviceBridgeManager:
             defaults = {"bed_leveling": False, "flow_cali": False}
         else:
             defaults = print_start_calibration_options(
-                load_prusa_print_profile(self.repo_root / "memory/prusa_print_profile.json")
+                load_prusa_print_profile(self.memory_root / "prusa_print_profile.json")
             )
         resolved: dict[str, bool] = {}
         for key in ("bed_leveling", "flow_cali"):

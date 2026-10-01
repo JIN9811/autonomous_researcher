@@ -2,7 +2,6 @@
 from datetime import datetime, timezone, timedelta
 import json
 import zipfile
-from types import SimpleNamespace
 
 import pytest
 
@@ -104,9 +103,7 @@ def test_bridge_resolver_uses_experiment_material_and_saved_order(tmp_path):
     from utils import bambu_material_priority as priority
     from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
     priority.save_priority({"enabled": True, "slots": ["0:3", "0:2", "0:1"]}, path=priority.priority_path(tmp_path))
-    manager = object.__new__(PrinterDeviceBridgeManager)
-    manager.repo_root = tmp_path
-    manager.config = SimpleNamespace(mode="live")
+    manager = PrinterDeviceBridgeManager.from_devices_config({'printer': {'mode': 'live'}}, repo_root=tmp_path)
     result = manager.resolve_material_selection({"experiment_spec": {"material": "PLA"}}, normalized_report=report())
     assert result["slot_id"] == "0:2"
     still_required = manager.resolve_material_selection({"runtime_mode": "live", "health_only": "false",

@@ -34,7 +34,6 @@ devices:
         label: Bambu Lab X2D - Lab 01
         enabled: true
         priority: 10
-        connection_memory_path: memory/bambu_connection.json
         capabilities:
           slicer: bambu_studio_cli
           transfer:
@@ -77,8 +76,6 @@ devices:
       slicer:
         enabled: true
         executable_env: BAMBU_STUDIO_EXECUTABLE
-        executable_path: install/bambustudio/bambu-studio-wrapper
-        output_dir: artifacts/bambu_sliced
         timeout_sec: 900
 
     autoejection:
@@ -156,8 +153,6 @@ devices:
       executable_env: PRUSA_SLICER_EXECUTABLE
       # Used when the env var is unset. Build with:
       #   docker build -t atr-prusa-slicer:ubuntu24.04 install/prusaslicer
-      executable_path: install/prusaslicer/prusa-slicer-docker
-      output_dir: artifacts/gcode
       timeout_sec: 300
       # Optional map used by PrusaSlicer command templates that include
       # `--load {profile_path}`. Keys may be slicer_profile_hint or printer_profile.

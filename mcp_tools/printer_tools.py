@@ -28,6 +28,7 @@ from device_bridges.printer_fleet.bridge import PrinterDeviceBridgeManager
 from device_bridges.printer_fleet.providers.prusa import PrinterAgenticWorkflow, PrusaBridgeConfig
 from mcp_tools.tool_registry import ToolRegistry
 from utils.specimen_placement import placement_from_payload
+from utils.runtime_paths import RuntimePaths
 
 
 def register_printer_tools(
@@ -35,11 +36,12 @@ def register_printer_tools(
     devices_config: dict[str, Any] | None = None,
     *,
     repo_root: Path | None = None,
+    paths: RuntimePaths | None = None,
 ) -> None:
     """Register printer tools using the selected printer device bridge."""
-    prusa_config = PrusaBridgeConfig.from_devices_config(devices_config or {}, repo_root=repo_root)
-    prusa_workflow = PrinterAgenticWorkflow(prusa_config, repo_root=repo_root)
-    bridge_manager = PrinterDeviceBridgeManager.from_devices_config(devices_config or {}, repo_root=repo_root)
+    prusa_config = PrusaBridgeConfig.from_devices_config(devices_config or {}, repo_root=repo_root, paths=paths)
+    prusa_workflow = PrinterAgenticWorkflow(prusa_config, repo_root=repo_root, paths=paths)
+    bridge_manager = PrinterDeviceBridgeManager.from_devices_config(devices_config or {}, repo_root=repo_root, paths=paths)
 
     def selected_provider(payload: dict[str, Any]) -> str:
         profile, _reason = bridge_manager._select_profile(payload)  # noqa: SLF001 - local routing boundary.

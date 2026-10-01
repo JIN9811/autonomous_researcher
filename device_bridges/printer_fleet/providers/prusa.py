@@ -37,6 +37,7 @@ from urllib.parse import quote
 import httpx
 
 from device_bridges.base_bridge import BaseBridge
+from utils.runtime_paths import RuntimePaths
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -54,21 +55,23 @@ class SlicerConfig:
     command_template: list[str] = field(
         default_factory=lambda: ["{executable}", "--export-gcode", "--output", "{output_path}", "{stl_path}"]
     )
+    paths: RuntimePaths | None = field(default=None, kw_only=True, repr=False, compare=False)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any] | None) -> "SlicerConfig":
+    def from_dict(cls, raw: dict[str, Any] | None, *, paths: RuntimePaths | None = None) -> "SlicerConfig":
         raw = raw if isinstance(raw, dict) else {}
         template = raw.get("command_template")
         return cls(
             enabled=bool(raw.get("enabled", False)),
             executable_env=str(raw.get("executable_env", "PRUSA_SLICER_EXECUTABLE")),
-            executable_path=str(raw.get("executable_path", "install/prusaslicer/prusa-slicer-docker")),
-            output_dir=str(raw.get("output_dir", "artifacts/gcode")),
+            executable_path=str(raw.get("executable_path", paths.runtime_root / "install/prusaslicer/prusa-slicer-docker" if paths is not None else "install/prusaslicer/prusa-slicer-docker")),
+            output_dir=str(raw.get("output_dir", paths.artifact_root / "gcode" if paths is not None else "artifacts/gcode")),
             timeout_sec=float(raw.get("timeout_sec", 300)),
             profile_map={str(key): str(value) for key, value in raw.get("profile_map", {}).items()}
             if isinstance(raw.get("profile_map"), dict)
             else {},
             command_template=[str(item) for item in template] if isinstance(template, list) and template else cls().command_template,
+            paths=paths,
         )
 
 
@@ -190,16 +193,19 @@ class PrusaBridgeConfig:
     slicer: SlicerConfig = field(default_factory=SlicerConfig)
     ejection: EjectionConfig = field(default_factory=EjectionConfig)
     connection_memory_path: Path = DEFAULT_CONNECTION_MEMORY
+    paths: RuntimePaths | None = field(default=None, kw_only=True, repr=False, compare=False)
 
     @classmethod
-    def from_devices_config(cls, cfg: dict[str, Any] | None, *, repo_root: Path | None = None) -> "PrusaBridgeConfig":
-        root = repo_root or REPO_ROOT
+    def from_devices_config(cls, cfg: dict[str, Any] | None, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> "PrusaBridgeConfig":
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
+        root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
         cfg = cfg if isinstance(cfg, dict) else {}
         devices = cfg.get("devices") if isinstance(cfg.get("devices"), dict) else cfg
         printer = devices.get("printer", {}) if isinstance(devices, dict) else {}
         if not isinstance(printer, dict):
             printer = {}
-        memory_path = Path(str(printer.get("connection_memory_path", DEFAULT_CONNECTION_MEMORY)))
+        memory_path = Path(str(printer.get("connection_memory_path", paths.memory_root / "prusa_connection.json" if paths is not None else DEFAULT_CONNECTION_MEMORY)))
         if not memory_path.is_absolute():
             memory_path = root / memory_path
         return cls(
@@ -214,9 +220,10 @@ class PrusaBridgeConfig:
                 else {}
             ),
             live=dict(printer.get("live", {})) if isinstance(printer.get("live"), dict) else {},
-            slicer=SlicerConfig.from_dict(printer.get("slicer") if isinstance(printer.get("slicer"), dict) else {}),
+            slicer=SlicerConfig.from_dict(printer.get("slicer") if isinstance(printer.get("slicer"), dict) else {}, paths=paths),
             ejection=EjectionConfig.from_dict(printer.get("ejection") if isinstance(printer.get("ejection"), dict) else {}),
             connection_memory_path=memory_path,
+            paths=paths,
         )
 
     def live_gate(self, name: str, default: bool = False) -> bool:
@@ -611,9 +618,15 @@ class PrusaSlicerRunner:
 
     ALLOWED_EXTENSIONS = {".stl", ".3mf", ".obj", ".amf", ".step", ".stp"}
 
-    def __init__(self, config: SlicerConfig, *, repo_root: Path | None = None) -> None:
+    def __init__(self, config: SlicerConfig, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> None:
+        if paths is not None and config.paths is not None and paths != config.paths:
+            raise ValueError("paths contradict config.paths")
+        paths = paths or config.paths
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         self.config = config
-        self.repo_root = repo_root or REPO_ROOT
+        self.paths = paths
+        self.repo_root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
 
     def _output_path(self, stl_path: Path, specimen_id: str) -> Path:
         output_dir = Path(self.config.output_dir)
@@ -1282,11 +1295,18 @@ class PaddleEjectionRoutineBuilder:
 class PrinterAgenticWorkflow:
     """Deterministic printer.prepare workflow with test, virtual, and live paths."""
 
-    def __init__(self, config: PrusaBridgeConfig, *, repo_root: Path | None = None) -> None:
+    def __init__(self, config: PrusaBridgeConfig, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> None:
+        if paths is not None and config.paths is not None and paths != config.paths:
+            raise ValueError("paths contradict config.paths")
+        paths = paths or config.paths
+        if paths is not None and repo_root is not None and Path(repo_root).resolve() != paths.repository_root:
+            raise ValueError("repo_root contradicts paths.repository_root")
         self.config = config
-        self.repo_root = repo_root or REPO_ROOT
+        self.paths = paths
+        self.repo_root = repo_root or (paths.repository_root if paths is not None else REPO_ROOT)
+        self.artifact_root = paths.artifact_root if paths is not None else self.repo_root / "artifacts"
         self.connection_memory = PrusaConnectionMemory(config.connection_memory_path)
-        self.slicer = PrusaSlicerRunner(config.slicer, repo_root=self.repo_root)
+        self.slicer = PrusaSlicerRunner(config.slicer, repo_root=self.repo_root, paths=paths)
         self.ejection_builder = PaddleEjectionRoutineBuilder(config.ejection)
 
     def prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2153,7 +2173,7 @@ class PrinterAgenticWorkflow:
         built = self.ejection_builder.build()
         if not built.get("ok"):
             return {"status": "failed", "attempts": 0, "failure_code": built.get("failure_code"), "validation": built.get("validation")}
-        ejection_path = self.repo_root / "artifacts" / "gcode" / "ejection.gcode"
+        ejection_path = self.artifact_root / "gcode" / "ejection.gcode"
         ejection_path.parent.mkdir(parents=True, exist_ok=True)
         ejection_path.write_text(str(built["gcode"]), encoding="utf-8")
         upload = client.upload_file(ejection_path, storage, ejection_path.name, overwrite=True, print_after_upload=False)
@@ -2301,7 +2321,7 @@ class PrinterAgenticWorkflow:
                 "step_trace": trace,
             }
 
-        output_dir = self.repo_root / "artifacts" / "gcode"
+        output_dir = self.artifact_root / "gcode"
         output_dir.mkdir(parents=True, exist_ok=True)
         ejection_path = output_dir / f"{specimen_id}.gcode"
         ejection_path.write_text(str(built["gcode"]).strip() + "\n", encoding="utf-8")
@@ -2950,8 +2970,11 @@ class PrinterAgenticWorkflow:
 class PrusaBridge(BaseBridge):
     """Live bridge facade for Prusa printer control."""
 
-    def __init__(self, config: PrusaBridgeConfig | None = None, *, repo_root: Path | None = None) -> None:
-        self.workflow = PrinterAgenticWorkflow(config or PrusaBridgeConfig(), repo_root=repo_root)
+    def __init__(self, config: PrusaBridgeConfig | None = None, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> None:
+        if config is None:
+            config = (PrusaBridgeConfig.from_devices_config({}, repo_root=repo_root, paths=paths)
+                      if paths is not None else PrusaBridgeConfig())
+        self.workflow = PrinterAgenticWorkflow(config, repo_root=repo_root, paths=paths)
 
     def execute(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         if command == "prepare":
