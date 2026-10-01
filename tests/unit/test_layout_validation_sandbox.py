@@ -1,8 +1,11 @@
 """Exercise real namespace denial before any application import."""
 import json
 import os
-from pathlib import Path
 import subprocess
+import sys
+from types import ModuleType
+
+import pytest
 
 
 def test_os_boundary_denies_host_resources():
@@ -34,24 +37,62 @@ def test_command_rejects_cwd_escape(tmp_path):
         sandbox_command(tmp_path, tmp_path, ["python", "-V"], cwd="/home/operator")
 
 
-def test_real_routes_inside_fixture_import_mode():
-    from tools.repository_layout.fixture_server import verify_routes
-    result = verify_routes(lifespan_mode="import_only")
+def _verify_fixture_process(lifespan_mode):
+    from tools.repository_layout.sandbox import require_boundary
+    require_boundary()
+    result = subprocess.run(
+        [sys.executable, "-S", "-m", "tools.repository_layout.fixture_server", "verify", lifespan_mode],
+        capture_output=True, text=True, timeout=90,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout.splitlines()[-1])
+
+
+@pytest.mark.parametrize("already_imported", [False, True], ids=["fresh-parent", "collected-app-in-parent"])
+def test_real_routes_inside_fixture_import_mode(monkeypatch, already_imported):
+    if already_imported:
+        # Model another suite's collection-time import without importing the app here.
+        collected_module = ModuleType("app.main")
+        monkeypatch.setitem(sys.modules, "app.main", collected_module)
+    result = _verify_fixture_process("import_only")
     assert result["routes"]["/api/state"] == 200
     assert result["routes"]["/static/favicon.svg"] == 200
     assert result["module_assets"] >= 1
     assert result["unexpected_effects"] == []
     assert result["outside_imports"] == []
+    if already_imported:
+        assert sys.modules["app.main"] is collected_module
 
 
 def test_real_lifespan_uses_injected_services():
     # Separate interpreter: imports and application globals cannot leak between modes.
-    result = subprocess.run(
-        [os.sys.executable, "-S", "-m", "tools.repository_layout.fixture_server", "verify", "fake_services"],
-        capture_output=True, text=True, timeout=90,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    payload = json.loads(result.stdout.splitlines()[-1])
+    payload = _verify_fixture_process("fake_services")
     assert payload["lifespan_started"] is True
     assert payload["lifespan_stopped"] is True
     assert payload["unexpected_effects"] == []
+
+
+def test_every_pinned_pytest_command_runs_async_tests(tmp_path):
+    from tools.repository_layout.checks import CHECKS
+    from tools.repository_layout.sandbox import require_boundary
+    require_boundary()
+    probe = tmp_path / "test_async_dispatch.py"
+    probe.write_text(
+        "import asyncio\nimport pytest\n"
+        "@pytest.mark.asyncio\nasync def test_async_dispatch():\n"
+        "    await asyncio.sleep(0)\n"
+    )
+    failures = {}
+    for task_id, commands in CHECKS.items():
+        for command in commands:
+            if command[:3] != ["python", "-m", "pytest"]:
+                continue
+            plugins = [value for index, value in enumerate(command) if
+                       value == "-p" or (index and command[index - 1] == "-p")]
+            result = subprocess.run(
+                [sys.executable, "-S", "-m", "pytest", *plugins, "-q", "-c", "/dev/null", str(probe)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode:
+                failures[task_id] = result.stdout + result.stderr
+    assert failures == {}, failures
