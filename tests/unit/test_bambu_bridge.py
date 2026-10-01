@@ -139,6 +139,13 @@ echo "fake slice complete"
 
 
 def test_bambu_studio_slicer_runner_preserves_defaults_and_removes_front_test_line_only(tmp_path: Path) -> None:
+    # This test exercises profile flags as well as G-code postprocessing: provide
+    # deterministic profile sources rather than depending on the host install.
+    profiles = {}
+    for kind in ("machine", "process", "filament"):
+        path = tmp_path / f"{kind}.json"
+        path.write_text(json.dumps({"name": kind}), encoding="utf-8")
+        profiles[f"default_{kind}_profile"] = str(path)
     fake_cli = tmp_path / "bambu-studio"
     fake_cli.write_text(
         '''#!/usr/bin/env python3
@@ -180,6 +187,7 @@ with zipfile.ZipFile(output_dir / export_name, "w") as archive:
         executable_path=str(fake_cli),
         output_dir=str(tmp_path / "bambu_sliced"),
         timeout_sec=5,
+        **profiles,
     )
     runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
 
