@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import re
+import html
+from urllib.parse import unquote, urlsplit
 
 from .manifest import build_manifest, validate_manifest, git_entries, _git
 from .sandbox import export_tracked, run_bounded, sandbox_command
@@ -238,6 +241,186 @@ CHECKS: dict[str, list[list[str]]] = {
     ]
 }
 BASELINE = "ba273ddb0fc2bf8795630d51d93d3932748e0a51"
+
+DOCUMENT_SUFFIXES = {'.md', '.markdown', '.html', '.htm', '.rst'}
+METADATA_PATH_FIELDS = {'source_of_truth', 'related_docs', 'supersedes', 'superseded_by',
+                        'governing_design', 'source_refs'}
+
+
+def document_locations(manifest: dict) -> dict[str, str]:
+    """Explicit Task-8 intermediate locations; runtime rows have not moved yet."""
+    from .move_files import document_move
+    deferred = manifest.get('phase_deferrals', {})
+    return {source: deferred[source]['current_location'] if source in deferred else
+            row['destination'] if document_move(source, row) else source
+            for source, row in {**manifest['entries'], **manifest.get('additions', {})}.items()}
+
+
+def _mask_code(text: str) -> str:
+    """Preserve offsets while suppressing fenced, indented and inline examples."""
+    lines, fence = [], None
+    for line in text.splitlines(keepends=True):
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})', line)
+        if fence:
+            lines.append(re.sub(r'[^\n]', ' ', line))
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                fence = None
+        elif marker:
+            fence = marker[1]
+            lines.append(re.sub(r'[^\n]', ' ', line))
+        elif line.startswith(('    ', '\t')):
+            lines.append(re.sub(r'[^\n]', ' ', line))
+        else:
+            lines.append(line)
+    masked = ''.join(lines)
+    return re.sub(r'(`+)([^`\n]*?)\1', lambda match: ' ' * len(match[0]), masked)
+
+
+def reference_spans(text: str, suffix: str) -> list[tuple[int, int, str]]:
+    """Return static reference target spans; no basename search or code parsing."""
+    masked = _mask_code(text) if suffix in {'.md', '.markdown'} else text
+    spans = []
+    patterns = [r'''\b(?:href|src)\s*=\s*["']([^"']+)["']''']
+    if suffix in {'.md', '.markdown'}:
+        patterns += [r'!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s()]+(?:\([^()]*\)[^\s()]*)*))',
+                     r'^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|(\S+))',
+                     r'<((?:https?://|mailto:)[^<>\s]+)>']
+    elif suffix == '.rst':
+        # Explicit RST links and file directives, never Python automodule names.
+        patterns += [r'`[^`<\n]*<([^>\n]+)>`_?',
+                     r'^\s*\.\.\s+(?:image|figure|include|literalinclude)::\s*(\S[^\n]*)',
+                     r':doc:`(?:[^`<]*<)?([^`<>]+)>?`']
+    for pattern in patterns:
+        for match in re.finditer(pattern, masked, re.M | re.I):
+            group = next(index for index in range(1, len(match.groups()) + 1) if match[index] is not None)
+            value = match[group]
+            if any(token in value for token in ('{{', '{%', '${', '<%', 'javascript:')):
+                continue
+            spans.append((*match.span(group), html.unescape(value)))
+    return sorted(set(spans))
+
+
+def _anchors(text: str, suffix: str) -> set[str]:
+    masked = _mask_code(text) if suffix in {'.md', '.markdown'} else text
+    anchors = set(re.findall(r'''\b(?:id|name)\s*=\s*["']([^"']+)["']''', masked, re.I))
+    headings = []
+    if suffix in {'.md', '.markdown'}:
+        headings = re.findall(r'^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$', masked, re.M)
+        headings += re.findall(r'^([^\n]+)\n(?:={3,}|-{3,})\s*$', masked, re.M)
+    elif suffix == '.rst':
+        headings = re.findall(r'^([^\n]+)\n[=~^"`:+#*-]{3,}\s*$', masked, re.M)
+        anchors.update(re.findall(r'^\s*\.\. _([^:]+):\s*$', masked, re.M))
+    seen = {}
+    for heading in headings:
+        heading = re.sub(r'<[^>]+>', '', html.unescape(heading)).strip().lower()
+        slug = re.sub(r'[^\w\-\s]', '', heading)
+        slug = re.sub(r'\s', '-', slug)
+        number = seen.get(slug, 0)
+        seen[slug] = number + 1
+        anchors.add(slug + (f'-{number}' if number else ''))
+    return anchors
+
+
+def _front_matter(text: str) -> tuple[dict, str]:
+    import yaml
+    marker = re.match(r'\A(?:---\r?\n|<!-- atr-doc\r?\n)', text)
+    if not marker:
+        return {}, text
+    close = '-->' if text.startswith('<!--') else '---'
+    end = re.search(r'^' + re.escape(close) + r'\s*$', text[marker.end():], re.M)
+    if not end:
+        raise ValueError('Unterminated metadata')
+    content_end = marker.end() + end.start()
+    body_start = marker.end() + end.end()
+    meta = yaml.safe_load(text[marker.end():content_end])
+    if not isinstance(meta, dict):
+        raise ValueError('Document metadata must be a mapping')
+    return meta, ' ' * body_start + text[body_start:]
+
+
+def audit_document_references(repository_root: Path, manifest: dict) -> dict:
+    """Audit exact tracked document rows and declared metadata bases, offline.
+
+    Public absolute URLs/routes are counted separately and not network-checked.
+    Dated audit JSON is historical evidence, not a mutable path database.
+    """
+    import yaml
+    root = Path(repository_root).resolve()
+    result = {key: [] for key in ('missing_files', 'missing_anchors', 'escaping_references', 'metadata_errors')}
+    result.update(checked=0, external_urls=0)
+    locations = document_locations(manifest)
+    anchor_cache = {}
+
+    def inspect(label, target, base, *, metadata=False):
+        if not isinstance(target, str):
+            result['metadata_errors'].append({'document': label, 'reference': repr(target), 'reason': 'non-string path'})
+            return
+        result['checked'] += 1
+        parts = urlsplit(html.unescape(target))
+        if parts.scheme or parts.netloc or target.startswith('/'):
+            result['external_urls'] += 1
+            return
+        path = unquote(parts.path)
+        candidate = (base / path).resolve() if path else (root / label).resolve()
+        issue = {'document': label, 'reference': target}
+        if not candidate.is_relative_to(root):
+            result['escaping_references'].append(issue)
+            return
+        if not candidate.exists():
+            result['metadata_errors' if metadata else 'missing_files'].append(issue)
+            return
+        if parts.fragment and candidate.is_file() and candidate.suffix.lower() in DOCUMENT_SUFFIXES:
+            if candidate not in anchor_cache:
+                anchor_cache[candidate] = _anchors(candidate.read_text(encoding='utf-8'), candidate.suffix.lower())
+            if unquote(parts.fragment) not in anchor_cache[candidate]:
+                result['missing_anchors'].append(issue)
+
+    for original, current in sorted(locations.items()):
+        path = root / current
+        suffix = path.suffix.lower()
+        if suffix not in DOCUMENT_SUFFIXES and not (current.endswith(('document_manifest.yaml',
+                'knowledge/manuals/registry.yaml', 'paper/artifact_manifest.yaml'))):
+            continue
+        if not path.is_file():
+            result['missing_files'].append({'document': current, 'reference': current})
+            continue
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            result['escaping_references'].append({'document': current, 'reference': current})
+            continue
+        try:
+            text = path.read_text(encoding='utf-8')
+            if suffix in DOCUMENT_SUFFIXES:
+                metadata, body = _front_matter(text) if suffix in {'.md', '.markdown'} else ({}, text)
+                for field in METADATA_PATH_FIELDS:
+                    if field in metadata:
+                        values = metadata[field] if isinstance(metadata[field], list) else [metadata[field]]
+                        for value in values:
+                            inspect(current, value, root, metadata=True)
+                if 'source_revision' in metadata and set(metadata.get('source_refs', [])) != set(metadata['source_revision']):
+                    result['metadata_errors'].append({'document': current, 'reason': 'Wiki source key mismatch'})
+                for _, _, target in reference_spans(body, suffix):
+                    inspect(current, target, path.parent)
+            else:
+                metadata = yaml.safe_load(text)
+                if current.endswith('document_manifest.yaml'):
+                    for value in metadata.get('documents', []):
+                        inspect(current, value, root, metadata=True)
+                    if metadata.get('snapshot', {}).get('document'):
+                        inspect(current, metadata['snapshot']['document'], root, metadata=True)
+                elif current.endswith('knowledge/manuals/registry.yaml'):
+                    for source in metadata.get('sources', []):
+                        inspect(current, source.get('path'), path.parent, metadata=True)
+                elif current.endswith('paper/artifact_manifest.yaml'):
+                    for record in metadata.get('evidence', []):
+                        for value in record.get('inputs', []):
+                            inspect(current, value, root, metadata=True)
+                        for value in record.get('outputs', []):
+                            inspect(current, value.get('path'), root, metadata=True)
+        except (UnicodeError, ValueError, TypeError, yaml.YAMLError) as exc:
+            result['metadata_errors'].append({'document': current, 'reason': str(exc)})
+    for key in ('missing_files', 'missing_anchors', 'escaping_references', 'metadata_errors'):
+        result[key].sort(key=lambda row: json.dumps(row, sort_keys=True))
+    return result
 
 # Task 7's final, bounded cross-slice gate. Keep failures visible by partition,
 # with fresh child-origin evidence and the original behavior suites alongside
