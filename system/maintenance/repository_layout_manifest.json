@@ -47421,9 +47421,9 @@
       },
       "runtime/tests/unit/test_layout_manifest.py": {
         "mode": "100644",
-        "git_blob": "5e5f0c84b4a9d4739108affe1953763c022a3b13",
-        "sha256": "3775ebc14867a4c01e14c4ec2f1aca32c814cf8ec0161b79d6a5dbdef3144044",
-        "size": 10019
+        "git_blob": "56202199a90ebbf06fe58036bb9c2c4a129ea401",
+        "sha256": "95d0e87b29f33bdd79e56af3b9227b5609021f64b70c276558f1e31864272fe3",
+        "size": 11705
       },
       "runtime/tests/unit/test_layout_validation_sandbox.py": {
         "mode": "100644",
@@ -47457,9 +47457,9 @@
       },
       "runtime/tools/repository_layout/checks.py": {
         "mode": "100644",
-        "git_blob": "9db08752abfc3e1975d2e6e1498550574a262e22",
-        "sha256": "eb36d256b8aa5879f5efeded984c4a6e7db10cc384d92a5e17a81d2c70ee69cf",
-        "size": 38708
+        "git_blob": "17625713efd9bbf6a2ef61ba934e64e9a7467d17",
+        "sha256": "d3a50a9582d7ae6bdb886185279e3b0e4b77f29988b92dfd32ef190225474deb",
+        "size": 40293
       },
       "runtime/tools/repository_layout/fixture_server.py": {
         "mode": "100644",

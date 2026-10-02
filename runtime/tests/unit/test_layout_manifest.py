@@ -134,6 +134,37 @@ def test_receipt_directory_is_exclusive(tmp_path):
     assert (output / "prior.log").read_text() == "immutable"
 
 
+@pytest.mark.parametrize('command', [
+    ['bash', '-c', 'python -m pytest tests'],
+    ['python', '-c', 'import pytest; pytest.main(["tests"])'],
+    ['env', 'python', '-m', 'pytest', 'tests/unit/test_example.py'],
+    ['python', '-m', 'pytest', '@selection.txt', 'tests/unit/test_example.py'],
+    ['python', '-m', 'pytest', '--pyargs', 'tests/unit/test_example.py'],
+    ['python', '-m', 'pytest', '-c', 'custom.ini', 'tests/unit/test_example.py'],
+    ['python', '-m', 'pytest', '-p', 'unreviewed.plugin', 'tests/unit/test_example.py'],
+    ['python', '-m', 'pytest', 'tests/unit/test_example.py', 'tests/integration'],
+    ['python', '-m', 'pytest', 'tests/../outside.py'],
+    ['node', '--test', '--import=unreviewed.mjs', 'tests/js/example.cjs'],
+    ['node', '--eval', 'require("node:test")', 'tests/js/example.cjs'],
+    ['node', '--test', '@selection.txt', 'tests/js/example.cjs'],
+])
+def test_literal_selection_rejects_wrappers_and_indirection(command):
+    from tools.repository_layout.checks import literal_selection
+    with pytest.raises(ValueError):
+        literal_selection({'id': 'fixture', 'timeout': 30, 'command': command})
+
+
+@pytest.mark.parametrize('command', [
+    ['/deps/bin/python3', '-S', '-u', '-m', 'pytest', '-v', '--tb=short', '-rA',
+     '-p', 'pytest_asyncio.plugin', 'tests/unit/test_example.py::test_case[one]'],
+    ['node', '--test', '--test-name-pattern=exact case', 'tests/js/example.cjs'],
+])
+def test_literal_selection_accepts_direct_bounded_runners(command):
+    from tools.repository_layout.checks import literal_selection
+    payload = {'id': 'fixture', 'timeout': 30, 'command': command}
+    assert literal_selection(payload) == payload
+
+
 def test_bounded_log_preserves_success_stdout_and_stderr(tmp_path):
     from tools.repository_layout.sandbox import run_bounded
     output = tmp_path / "raw.log"

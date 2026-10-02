@@ -599,8 +599,42 @@ def literal_selection(payload: dict) -> dict:
             or any('*' in value or value.rstrip('/') in {'tests', 'tests/unit', 'tests/integration', 'tests/js'}
                    for value in command)):
         raise ValueError('Literal file/node argv required; no broad test roots or globs')
-    if ('pytest' in command and not any(value.split('::')[0].endswith('.py') for value in command)
-            or '--test' in command and not any(value.endswith(('.cjs', '.mjs', '.js')) for value in command)):
+    # This entrypoint accepts test runners, not arbitrary executable wrappers.
+    # Other reviewed audit commands use the separately pinned task launcher.
+    arguments = list(command[1:])
+    if command[0] in {'python', 'python3', '/deps/bin/python3'}:
+        while arguments and arguments[0] in {'-S', '-u'}:
+            arguments.pop(0)
+        if arguments[:2] != ['-m', 'pytest']:
+            raise ValueError('Only direct python -m pytest is approved')
+        arguments = arguments[2:]
+        suffixes = ('.py',)
+        flags = {'-q', '-v', '-vv', '-s', '-x', '-rA', '--tb=short', '--tb=long'}
+        runner = 'pytest'
+    elif command[0] in {'node', '/deps/validation-tools/bin/node'} and arguments[:1] == ['--test']:
+        arguments = arguments[1:]
+        suffixes = ('.js', '.cjs', '.mjs')
+        flags = set()
+        runner = 'node'
+    else:
+        raise ValueError('Only direct approved pytest/Node test runners are allowed')
+    selectors = 0
+    while arguments:
+        value = arguments.pop(0)
+        if value in flags:
+            continue
+        if runner == 'pytest' and value == '-p' and arguments[:1] == ['pytest_asyncio.plugin']:
+            arguments.pop(0)
+            continue
+        if runner == 'node' and value.startswith('--test-name-pattern=') and value.partition('=')[2]:
+            continue
+        filename, separator, node = value.partition('::')
+        if (not re.fullmatch(r'tests/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:py|js|cjs|mjs)', filename)
+                or not filename.endswith(suffixes)
+                or separator and (runner != 'pytest' or not node or '\n' in node or '\r' in node)):
+            raise ValueError('Every test selector must be an explicit tests/ file or pytest node')
+        selectors += 1
+    if not selectors:
         raise ValueError('Test runners require explicit test files or node IDs')
     return payload
 
