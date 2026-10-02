@@ -128,7 +128,9 @@ def prepare_error_resume(controller, *, reference_roots=None, relocation_map=Non
     if (controller._state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'ready':
         from app.equipment_tail_recovery import read_request, validate
         request = read_request(controller._deps.run_root, run_id, **context)
-        validate(controller._state, request, request['description']['flow'], **context)
+        ctx = getattr(controller._deps, 'agent_context', None)
+        validate(controller._state, request, request['description']['flow'], **context,
+            **({'ctx': ctx} if ctx is not None else {}))
         return request['source_execution_id']
     _, data = equipment_archive(controller._deps.run_root, run_id)
     if controller._state.run_metadata.get("clearance_review_recovery") and not controller._state.run_metadata.get("archived_postprocessing_request"):

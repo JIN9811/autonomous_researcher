@@ -88,6 +88,57 @@ def test_preparation_reads_selected_record_before_rejecting_identity(tmp_path):
             paths.run_root, 'source', ctx=SimpleNamespace(paths=paths))
 
 
+@pytest.mark.parametrize('mutation', [None, 'deployment', 'evidence'])
+def test_tail_ready_resume_authenticates_real_selected_request(tmp_path, monkeypatch, mutation):
+    from dataclasses import replace
+    import hashlib
+    import shutil
+    from utils.runtime_paths import current_paths
+    from tests.unit.test_equipment_workflow_decision import setup_flow
+    from agents.equipment.workflow import _describe
+    from app.run_recovery import prepare_error_resume
+    from orchestrator.state import Stage
+    agent, state, _, executed, _, flow = setup_flow(tmp_path, monkeypatch)
+    paths = replace(current_paths(), memory_root=tmp_path / 'selected-memory', run_root=tmp_path / 'selected-runs')
+    shutil.copytree(tmp_path / 'skills', paths.memory_root / 'equipment_skills')
+    state.current_experiment_spec.pop('equipment_skill_registry_root')
+    state.current_experiment_spec['specimen_id'] = 'specimen-selected-tail'
+    state.stage = Stage.ERROR
+    state.run_metadata['equipment_tail_recovery'] = {'status': 'ready'}
+    ctx = SimpleNamespace(paths=paths)
+    _, source = fixture()
+    source['identity'].update(run_id=state.run_id, experiment_id=state.experiment_id,
+        specimen_id=state.current_experiment_spec['specimen_id'])
+    source_path = paths.memory_root / 'equipment_runtime/workflow_decisions/executions/source/state.json'
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(json.dumps(source))
+    request = {'run_id': state.run_id, 'requested_by': 'operator', 'loop_id': 0,
+        'source_execution_id': 'source', 'source_path': str(source_path),
+        'evidence_hashes': {str(source_path): recovery.digest(source_path)},
+        'description': _describe(agent, state, flow, ctx=ctx),
+        'experiment_spec': deepcopy(state.current_experiment_spec)}
+    raw = json.dumps(request)
+    request_path = paths.run_root / state.run_id / 'recovery/equipment_tail_request.json'
+    request_path.parent.mkdir(parents=True)
+    request_path.write_text(json.dumps({'payload_json': raw, 'sha256': hashlib.sha256(raw.encode()).hexdigest()}))
+    original = request_path.read_bytes()
+    controller = SimpleNamespace(_state=state, _deps=SimpleNamespace(run_root=paths.run_root, agent_context=ctx),
+        snapshot=lambda: {'state': state.model_dump(mode='json'), 'is_running': False})
+    if mutation == 'deployment':
+        path = paths.memory_root / 'equipment_skills/prepare/1.0.0/manifest.json'
+        data = json.loads(path.read_text())
+        data['deployment']['deployment_sha256'] = 'changed'
+        path.write_text(json.dumps(data))
+    elif mutation == 'evidence':
+        source_path.write_text(source_path.read_text() + ' ')
+    if mutation:
+        with pytest.raises(ValueError, match='deployed programs changed' if mutation == 'deployment' else 'evidence changed'):
+            prepare_error_resume(controller)
+    else:
+        assert prepare_error_resume(controller) == 'source'
+    assert request_path.read_bytes() == original and executed == []
+
+
 @pytest.mark.asyncio
 async def test_dispatches_original_loop_tail_once_without_standalone_device_calls(tmp_path, monkeypatch):
     from orchestrator.state import Stage
