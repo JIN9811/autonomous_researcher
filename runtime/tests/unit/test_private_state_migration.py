@@ -699,3 +699,60 @@ def test_keyboard_interrupt_returns_incomplete_without_source_or_destination_rol
     assert result["selected_bindings"] is None and result["compatibility_map"] is None
     assert published[0].read_bytes() == b'{"cycle":1}'
     assert tree(tmp_path / "originals") == original
+
+
+def test_created_store_root_parents_are_synced_before_verified_manifest(migration, stores, tmp_path, monkeypatch):
+    source, destination = stores
+    parent_identities = set()
+    for name in STORES:
+        parent = tmp_path / ("destination-parent-" + name)
+        parent.mkdir(mode=0o700)
+        info = parent.stat()
+        parent_identities.add((info.st_dev, info.st_ino))
+        destination["stores"][name] = str(parent / "copied-store")
+    receipts = tmp_path / "separate-private-manifests"
+    receipts.mkdir(mode=0o700)
+    plan = migration.plan_copy(source, destination)
+    plan_file = write(receipts / "plan.json", json.dumps(plan).encode())
+    original = tree(tmp_path / "originals")
+    synced, fsync = [], migration.os.fsync
+
+    def record_sync(descriptor):
+        info = os.fstat(descriptor)
+        fsync(descriptor)
+        if stat.S_ISDIR(info.st_mode):
+            synced.append((info.st_dev, info.st_ino))
+
+    monkeypatch.setattr(migration.os, "fsync", record_sync)
+    output = receipts / "copied.json"
+    assert migration.main(["copy", "--manifest", str(plan_file), "--writers-quiescent",
+                           "--output", str(output)]) == 0
+    result = json.loads(output.read_text())
+    assert result["status"] == "verified" and result["activated"] is False
+    assert parent_identities.issubset(set(synced))
+    assert tree(tmp_path / "originals") == original
+
+
+def test_root_parent_sync_failure_retains_created_root_and_blocks_verification(migration, stores, tmp_path, monkeypatch):
+    plan = migration.plan_copy(*stores)
+    original = tree(tmp_path / "originals")
+    first_root = Path(stores[1]["stores"]["artifact_root"])
+    info = first_root.parent.stat()
+    parent_identity = (info.st_dev, info.st_ino)
+    fsync = migration.os.fsync
+
+    def fail_root_parent_sync(descriptor):
+        info = os.fstat(descriptor)
+        if (info.st_dev, info.st_ino) == parent_identity:
+            raise OSError("synthetic root-parent fsync failure")
+        fsync(descriptor)
+
+    monkeypatch.setattr(migration.os, "fsync", fail_root_parent_sync)
+    result = migration.copy_and_verify(plan, writers_quiescent=True)
+    assert result["status"] == "copy_incomplete"
+    assert result["activated"] is False
+    assert result["compatibility_map"] is None and result["selected_bindings"] is None
+    assert "synthetic root-parent fsync failure" in result["errors"]
+    assert str(first_root) in result["retained_paths"]
+    assert first_root.is_dir() and list(first_root.iterdir()) == []
+    assert tree(tmp_path / "originals") == original

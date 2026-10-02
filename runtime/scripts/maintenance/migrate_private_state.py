@@ -350,7 +350,8 @@ def verify(manifest: dict) -> dict:
 def _make_directory(path, retained):
     with _directory(path.parent) as parent:
         os.mkdir(path.name, 0o700, dir_fd=parent)
-    retained.append(str(path))
+        retained.append(str(path))
+        os.fsync(parent)
 
 
 def _copy_file(entry, retained, owned):
