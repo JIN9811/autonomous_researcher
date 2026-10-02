@@ -32,6 +32,12 @@ def document_move(source: str, row: dict) -> bool:
                                     ('LICENSE', 'runtime/LICENSE')})
 
 
+def runtime_move(source: str, row: dict) -> bool:
+    """Only explicit executable peers, never completed legal/document rows."""
+    return (row['disposition'] == 'move' and row['destination'] == 'runtime/' + source
+            and source != 'LICENSE' and not source.startswith(('runtime/', 'system/', 'docs/')))
+
+
 def _identity(data: bytes, mode: str) -> dict:
     header = f'blob {len(data)}\0'.encode()
     return {'mode': mode, 'git_blob': hashlib.sha1(header + data).hexdigest(),
@@ -89,7 +95,7 @@ def _lfs_object(root: Path, source: str, destination: str, data: bytes, records:
 
 
 def apply_moves(repository_root: Path, manifest: dict, *, phase: str,
-                dry_run: bool = True) -> dict:
+                dry_run: bool = True, phase_context: dict | None = None) -> dict:
     """Preflight every selected path, then rename without staging or rewriting.
 
     ``move_revision`` must be the exact reviewed HEAD commit. ``additions`` is
@@ -97,13 +103,16 @@ def apply_moves(repository_root: Path, manifest: dict, *, phase: str,
     The two raw manual PDFs require explicit ``phase_deferrals`` and remain in
     place for the separately authorized private-state phase.
     """
-    if phase != 'documents':
+    if phase not in {'documents', 'runtime'}:
         raise ValueError(f'Unsupported move phase: {phase}')
     root = Path(repository_root).resolve()
     errors = validate_manifest(manifest)
     if errors:
         raise ValueError('; '.join(errors))
-    revision = manifest.get('move_revision')
+    context = manifest if phase == 'documents' else phase_context
+    if not isinstance(context, dict):
+        raise ValueError('Separate runtime phase context required')
+    revision = context.get('move_revision')
     if not isinstance(revision, str) or not re.fullmatch('[0-9a-f]{40}', revision):
         raise ValueError('An exact reviewed move_revision commit is required')
     if _git(root, 'rev-parse', 'HEAD').decode().strip() != revision:
@@ -114,20 +123,51 @@ def apply_moves(repository_root: Path, manifest: dict, *, phase: str,
     entries = manifest['entries']
     if set(entries) != set(baseline):
         raise ValueError('Frozen inventory must account for exactly the baseline')
-    additions = manifest.get('additions', {})
+    additions = context.get('additions', {})
     if not isinstance(additions, dict) or set(additions) & set(entries):
         raise ValueError('Invalid separate addition inventory')
     combined = {**entries, **additions}
     validation = {**manifest, 'entries': combined, 'tracked_paths': sorted(combined)}
     if validate_manifest(validation):
         raise ValueError('Invalid addition destinations or identities')
-    # New paths are only classified to detect omissions; no inferred row moves.
+    selector = document_move if phase == 'documents' else runtime_move
+    prior_digest = None
+    generated = []
+    if phase == 'runtime':
+        prior = context.get('prior_documents')
+        prior_digest = context.get('prior_documents_sha256')
+        if (not isinstance(prior, dict) or prior.get('phase') != 'documents'
+                or prior.get('dry_run') is not False or prior.get('move_revision') != manifest.get('move_revision')
+                or hashlib.sha256(json.dumps(prior, sort_keys=True).encode()).hexdigest() != prior_digest):
+            raise ValueError('Invalid pinned prior document receipt')
+        document_rows = {**entries, **manifest.get('additions', {})}
+        expected_prior = {p: r['destination'] for p, r in document_rows.items()
+                          if document_move(p, r) and p not in manifest.get('phase_deferrals', {})}
+        previous = prior.get('moves', [])
+        if (len(previous) != len(expected_prior)
+                or {r['source']: r['destination'] for r in previous} != expected_prior):
+            raise ValueError('Prior document selection differs from accepted inventory')
+        for source, destination in expected_prior.items():
+            if source in current or destination not in current:
+                raise ValueError(f'Prior document phase location changed: {source}')
+        generated_rows = {p: r for p, r in entries.items() if r['disposition'] == 'regenerated_build_output'}
+        deferrals = context.get('generated_deferrals', {})
+        if set(deferrals) != set(generated_rows):
+            raise ValueError('Exact generated-output deferrals required')
+        for source, row in generated_rows.items():
+            deferred_row = deferrals[source]
+            if (deferred_row.get('current_location') != source or not deferred_row.get('reason')
+                    or deferred_row.get('handoff') != 'Task 10'
+                    or current.get(source) != (row['mode'], 'blob', row['git_blob'])):
+                raise ValueError(f'Invalid generated-output deferral: {source}')
+            generated.append({'source': source, 'destination': row['destination'], **deferred_row})
+    # New paths are classified only to detect omissions; no inferred row moves.
     for source in set(current) - set(entries):
         destination, action, _ = disposition(source)
-        if document_move(source, {'destination': destination, 'disposition': action}) and source not in additions:
-            raise ValueError(f'Unaccounted document addition: {source}')
-    selected = {path: row for path, row in combined.items() if document_move(path, row)}
-    deferrals = manifest.get('phase_deferrals', {})
+        if selector(source, {'destination': destination, 'disposition': action}) and source not in additions:
+            raise ValueError(f'Unaccounted {phase} addition: {source}')
+    selected = {path: row for path, row in combined.items() if selector(path, row)}
+    deferrals = manifest.get('phase_deferrals', {}) if phase == 'documents' else {}
     required_deferrals = set(selected) & RAW_SOURCE_DEFERRALS
     if not isinstance(deferrals, dict) or set(deferrals) != required_deferrals:
         raise ValueError('Exact raw source phase deferral accounting required')
@@ -211,8 +251,12 @@ def apply_moves(repository_root: Path, manifest: dict, *, phase: str,
             if actual != expected_working:
                 raise ValueError(f'Post-move identity differs: {record["destination"]}')
             changed.extend((record['source'], record['destination']))
-    return {'phase': phase, 'dry_run': dry_run, 'move_revision': revision,
-            'moves': moves, 'deferred': deferred, 'changed_paths': sorted(changed)}
+    result = {'phase': phase, 'dry_run': dry_run, 'move_revision': revision,
+              'moves': moves, 'deferred': deferred, 'changed_paths': sorted(changed)}
+    if phase == 'runtime':
+        result.update(prior_documents_sha256=prior_digest, generated_deferrals=generated,
+                      preserved_private_deferrals=manifest.get('phase_deferrals', {}))
+    return result
 
 
 def rewrite_document_references(text: str, old_path: str, new_path: str,

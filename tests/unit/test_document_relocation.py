@@ -1,6 +1,7 @@
 """Guarded moves use reviewed Git objects, never a regenerated baseline."""
 from copy import deepcopy
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -76,6 +77,51 @@ def test_dry_run_changes_nothing_and_reports_exact_document_targets(repository):
     ]
     assert not (root / 'system').exists()
     assert git(root, 'status', '--porcelain') == before
+
+
+def runtime_context(root, manifest):
+    receipt = apply(root, manifest, dry_run=False)
+    revision = commit(root, 'accepted document phase')
+    return {'move_revision': revision, 'prior_documents': receipt,
+            'prior_documents_sha256': hashlib.sha256(
+                json.dumps(receipt, sort_keys=True).encode()).hexdigest(),
+            'additions': {}, 'generated_deferrals': {}}
+
+
+def test_runtime_phase_preserves_prior_document_receipt_and_original_baseline(repository):
+    root, manifest = repository
+    context = runtime_context(root, manifest)
+    original = deepcopy((manifest, context))
+    result = move_files.apply_moves(root, manifest, phase='runtime',
+                                    phase_context=context, dry_run=False)
+    assert (manifest, context) == original
+    assert [(r['source'], r['destination']) for r in result['moves']] == [
+        ('scripts/example.py', 'runtime/scripts/example.py')]
+    assert result['prior_documents_sha256'] == context['prior_documents_sha256']
+    assert result['moves'][0]['baseline']['revision'] == manifest['baseline_commit']
+    assert result['move_revision'] == context['move_revision']
+    assert (root / 'runtime/LICENSE').read_bytes() == b'Unchanged legal bytes\n'
+    assert (root / 'runtime/scripts/example.py').read_bytes() == b'print("runtime source stays")\n'
+
+
+@pytest.mark.parametrize('damage', ['receipt', 'revision', 'bytes', 'collision', 'baseline'])
+def test_runtime_phase_rejects_unreviewed_or_damaged_state(repository, damage):
+    root, manifest = repository
+    context = runtime_context(root, manifest)
+    if damage == 'receipt':
+        context['prior_documents']['moves'].pop()
+    elif damage == 'revision':
+        context['move_revision'] = manifest['baseline_commit']
+    elif damage == 'bytes':
+        (root / 'scripts/example.py').write_text('private/unreviewed')
+    elif damage == 'collision':
+        put(root, 'runtime/scripts/example.py', b'collision')
+    else:
+        manifest['entries']['scripts/example.py']['sha256'] = '0' * 64
+    with pytest.raises(ValueError):
+        move_files.apply_moves(root, manifest, phase='runtime',
+                               phase_context=context, dry_run=False)
+    assert (root / 'scripts/example.py').exists()
 
 
 def test_moves_preserve_modes_bytes_and_distinct_baseline_reviewed_identities(repository):
