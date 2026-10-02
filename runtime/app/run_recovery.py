@@ -156,7 +156,8 @@ def prepare_error_resume(controller, *, reference_roots=None, relocation_map=Non
         state.mode = Mode.TEST
     flow = EquipmentSkillFlowStore(agent._SKILL_FLOW_PATH).get(
         state.current_experiment_spec.get("equipment_profile_id") or "utm_windows_v1")
-    record = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions").get(data["equipment_workflow_execution_id"])
+    record = EquipmentRuntimeService(agent._runtime_root(
+        getattr(controller._deps, "agent_context", None)) / "workflow_decisions").get(data["equipment_workflow_execution_id"])
     identity = record.get("identity") or {}
     if (identity.get("run_id") != run_id or identity.get("experiment_id") != state.experiment_id
             or record.get("lifecycle") not in {"ESCALATED", "COMPLETED"}
@@ -358,7 +359,8 @@ def restore_completed_equipment_handoff(controller, execution_id, *, reference_r
         if data["equipment_workflow_execution_id"] != execution_id:
             raise ValueError("Equipment execution identity changed")
     else:
-        record = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions").get(execution_id)
+        record = EquipmentRuntimeService(agent._runtime_root(
+            getattr(controller._deps, "agent_context", None)) / "workflow_decisions").get(execution_id)
         flow = EquipmentSkillFlowStore(agent._SKILL_FLOW_PATH).get(
             controller._state.current_experiment_spec.get("equipment_profile_id") or "utm_windows_v1")
         candidate = completed_candidate(record, flow, controller._state)

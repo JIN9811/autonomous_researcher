@@ -64,6 +64,16 @@ def test_bo_json_artifacts_use_independent_selected_run_roots(tmp_path):
                    for path in artifacts.values())
 
 
+def test_equipment_registry_root_preserves_operator_and_legacy_contracts(disposable_paths, tmp_path):
+    from types import SimpleNamespace
+    from agents.equipment.agent import LabEquipmentAgent
+    ctx = SimpleNamespace(paths=disposable_paths)
+    explicit = tmp_path / 'operator-selected-skills'
+    assert LabEquipmentAgent._skill_registry_root(ctx, explicit=explicit) == explicit
+    assert LabEquipmentAgent._skill_registry_root(ctx) == disposable_paths.memory_root / 'equipment_skills'
+    assert LabEquipmentAgent._skill_registry_root() == Path(__file__).resolve().parents[2] / 'memory/equipment_skills'
+
+
 def test_equipment_projection_and_test_csv_use_selected_private_roots(disposable_paths, tmp_path, monkeypatch):
     from agents.equipment.agent import LabEquipmentAgent
     from orchestrator.state import OrchestratorState, Mode, Stage
@@ -94,6 +104,8 @@ async def test_equipment_actual_workflow_writes_only_each_context_memory(disposa
         ctx = Model(tools)
         ctx.paths = replace(disposable_paths, memory_root=root)
         state = original_state.model_copy(deep=True)
+        shutil.copytree(tmp_path / 'skills', root / 'equipment_skills')
+        state.current_experiment_spec.pop('equipment_skill_registry_root')
         result = await agent.run(state, ctx)
         assert result.success, result
         decisions = root / 'equipment_runtime/workflow_decisions'
@@ -101,8 +113,87 @@ async def test_equipment_actual_workflow_writes_only_each_context_memory(disposa
         assert list((decisions / 'executions').glob('*/state.json'))
         latest = root / 'equipment_runtime/equipment_skill_flow_latest/windows_desktop_v1.json'
         assert json.loads(latest.read_text())['status'] == 'completed'
+        from types import SimpleNamespace
+        from app.run_recovery import restore_completed_equipment_handoff
+        merged = []
+        state.run_metadata['archived_postprocessing_request'] = {'fixture': True}
+        controller = SimpleNamespace(_state=state,
+            _deps=SimpleNamespace(agent_context=ctx, agent_registry={'equipment_agent': agent}),
+            _merge_planning_agent_data=lambda stage, data: merged.append(data))
+        restore_completed_equipment_handoff(controller, result.data['equipment_workflow_execution_id'])
+        assert merged[0]['equipment_workflow_execution_id'] == result.data['equipment_workflow_execution_id']
     assert executed == ['prepare', 'measure', 'export'] * 2
     assert not (tmp_path / 'runtime').exists()
+
+
+@pytest.mark.parametrize('stopped', [False, True])
+def test_equipment_entry_recovery_reads_selected_memory_without_mutating_evidence(disposable_paths, tmp_path, stopped):
+    from types import SimpleNamespace
+    from tests.unit.test_equipment_entry_resume import fixture
+    from app.equipment_entry_resume import inputs, stopped_inputs
+    from orchestrator.state import Stage
+    import hashlib
+    for root in (tmp_path / 'selected-memory', tmp_path / 'unrelated-store'):
+        state, record, program = fixture()
+        execution_id = 'equipment-' + 'a' * 32
+        state.run_metadata['equipment_agent_payload']['equipment_workflow_execution_id'] = execution_id
+        record['execution_id'] = execution_id
+        record['workflow_result']['data']['equipment_workflow_execution_id'] = execution_id
+        record_path = root / 'equipment_runtime/workflow_decisions/executions' / execution_id / 'state.json'
+        record_path.parent.mkdir(parents=True)
+        record_path.write_text(json.dumps(record))
+        package = root / 'equipment_skills/utm_prepare_next_specimen/1.0.6'
+        (package / 'programs').mkdir(parents=True)
+        for name, value in {'manifest.json': {}, 'workflow.json': {'program_ids': ['segment']},
+                            'annotations.json': {}, 'programs/segment.json': program}.items():
+            (package / name).write_text(json.dumps(value))
+        original = hashlib.sha256(record_path.read_bytes()).hexdigest()
+        ctx = SimpleNamespace(paths=replace(disposable_paths, memory_root=root))
+        controller = SimpleNamespace(_state=state, _deps=SimpleNamespace(agent_context=ctx),
+            _planning_handoff_active=lambda: False, _planning_request_lock=SimpleNamespace(locked=lambda: False),
+            _active_safety_sources=lambda: [])
+        if stopped:
+            state.stage, state.loop_count, state.is_paused = Stage.COMPLETE, 1, False
+            state.run_metadata['guardian_recovery_wait']['status'] = 'stopped'
+            state.run_metadata['_planning_resume_context'] = {'cycle_index': 1, 'current_spec': {'specimen_id': 'spec'}}
+            identity = {'run_id': 'run', 'loop_id': 0, 'specimen_id': 'spec'}
+            state.run_metadata['manipulation_execution'] = {**identity, 'state': 'done', 'success': True, 'session_id': 'fixture'}
+            state.run_metadata['utm_verifications'] = {**identity, 'verification_1': {'confirmed': True,
+                'evidence': {'rollout_stopped': True, 'rollout_stop_status': 'STOPPED', 'session_id': 'fixture'}}}
+        assert (stopped_inputs if stopped else inputs)(controller) == (record, program)
+        assert hashlib.sha256(record_path.read_bytes()).hexdigest() == original
+
+
+def test_equipment_selection_recovery_reads_selected_memory(disposable_paths, tmp_path):
+    from types import SimpleNamespace
+    from tests.unit.test_equipment_selection_recovery import fixture
+    from app.equipment_selection_recovery import selection_recovery_inputs
+    state, record = fixture()
+    execution_id = 'equipment-' + 'b' * 32
+    record['execution_id'] = execution_id
+    memory = tmp_path / 'selected-memory'
+    record_path = memory / 'equipment_runtime/workflow_decisions/executions' / execution_id / 'state.json'
+    record_path.parent.mkdir(parents=True)
+    record_path.write_text(json.dumps(record))
+    run_root = tmp_path / 'independent-runs'
+    loop = run_root / 'r/runtime/loops/loop-000001'
+    specimen = {'specimen_id': 's', 'candidate_id': 'candidate'}
+    state.run_metadata['specimen_result'] = specimen.copy()
+    for owner, value in {
+        'equipment_agent': {'status': 'failed', 'data': {
+            'failure_code': 'EQUIPMENT_WORKFLOW_SELECTION_REJECTED', 'equipment_workflow_execution_id': execution_id}},
+        'specimen_agent': {'status': 'completed', 'data': {'specimen_result': specimen}},
+    }.items():
+        path = loop / owner / 'attempt-000001/result.json'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(value))
+    controller = SimpleNamespace(_state=state, _active_safety_sources=lambda: [],
+        _deps=SimpleNamespace(run_root=run_root, agent_context=SimpleNamespace(
+            paths=replace(disposable_paths, run_root=run_root, memory_root=memory))))
+    selected, corrected = selection_recovery_inputs(controller)
+    assert selected == record
+    assert corrected['specimen_id'] == 's' and corrected['run_id'] == 'r' and corrected['loop_id'] == 0
+    assert json.loads(record_path.read_text()) == record
 
 
 @pytest.mark.parametrize("legacy", [None, "operator-runs", "/tmp/absolute-operator-runs"])

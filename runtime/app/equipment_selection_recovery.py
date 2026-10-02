@@ -67,7 +67,8 @@ def selection_recovery_inputs(controller):
     data = archived_equipment.get("data") or {}
     if archived_equipment.get("status") != "failed" or data.get("failure_code") != "EQUIPMENT_WORKFLOW_SELECTION_REJECTED":
         raise ValueError("Only rejected selection can be reviewed")
-    record = EquipmentRuntimeService(LabEquipmentAgent._RUNTIME_ROOT / "workflow_decisions").get(data["equipment_workflow_execution_id"])
+    record = EquipmentRuntimeService(LabEquipmentAgent._runtime_root(
+        getattr(controller._deps, "agent_context", None)) / "workflow_decisions").get(data["equipment_workflow_execution_id"])
     validate_selection_boundary(state, record)
     paths = sorted((root / f"runtime/loops/loop-{state.loop_count + 1:06d}/specimen_agent").glob("attempt-*/result.json"))
     if not paths:

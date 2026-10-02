@@ -98,10 +98,12 @@ def inputs(controller):
     from utils.equipment_skill_runtime import EquipmentSkillRegistry
     state = controller._state
     payload = state.run_metadata.get('equipment_agent_payload') or {}
-    record = EquipmentRuntimeService(LabEquipmentAgent._RUNTIME_ROOT / 'workflow_decisions').get(
+    ctx = getattr(getattr(controller, '_deps', None), 'agent_context', None)
+    record = EquipmentRuntimeService(LabEquipmentAgent._runtime_root(ctx) / 'workflow_decisions').get(
         payload['equipment_workflow_execution_id'])
     exception = record['workflow_result']['data']['equipment_skill_exception']
-    root = state.current_experiment_spec.get('equipment_skill_registry_root') or Path(__file__).resolve().parents[1] / 'memory/equipment_skills'
+    root = LabEquipmentAgent._skill_registry_root(
+        ctx, explicit=state.current_experiment_spec.get('equipment_skill_registry_root'))
     package = EquipmentSkillRegistry(root).get(exception['skill_id'], exception['version'])
     programs = package['programs']
     if not programs or programs[0].get('program_id') != exception['segment_id']:
@@ -123,8 +125,10 @@ def stopped_inputs(controller):
         raise ValueError('Resolve safety controls before Equipment retry')
     loop = state.run_metadata['guardian_recovery_wait']['loop_id']
     normalized = state.model_copy(update={'loop_count': loop})
-    record, program = inputs(SimpleNamespace(_state=normalized))
-    store = EquipmentRuntimeService(LabEquipmentAgent._RUNTIME_ROOT / 'workflow_decisions')
+    deps = getattr(controller, '_deps', None)
+    record, program = inputs(SimpleNamespace(_state=normalized, _deps=deps))
+    store = EquipmentRuntimeService(LabEquipmentAgent._runtime_root(
+        getattr(deps, 'agent_context', None)) / 'workflow_decisions')
     # Do not rewind across any later owner execution, including uncertain effects.
     for path in store.execution_root.glob('*/state.json'):
         import json

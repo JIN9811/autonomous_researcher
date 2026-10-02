@@ -83,6 +83,15 @@ class LabEquipmentAgent(BaseAgent):
     @classmethod
     def _runtime_service(cls, ctx: AgentContext | None = None) -> EquipmentRuntimeService:
         return EquipmentRuntimeService(cls._runtime_root(ctx))
+
+    @staticmethod
+    def _skill_registry_root(ctx: AgentContext | None = None, *, explicit=None) -> Path:
+        if explicit:
+            return Path(explicit)
+        paths = getattr(ctx, "paths", None)
+        if paths is not None:
+            return paths.memory_root / "equipment_skills"
+        return Path(__file__).resolve().parents[2] / "memory" / "equipment_skills"
     _RESULT_FILE_KEYS = ("result_file", "result_path", "csv_path", "utm_result_file", "utm_csv_path", "artifact_path")
 
     @staticmethod
@@ -2704,6 +2713,8 @@ class LabEquipmentAgent(BaseAgent):
         self,
         state: OrchestratorState,
         flow: dict[str, Any],
+        *,
+        ctx: AgentContext | None = None,
     ) -> AgentResult:
         """Resolve the saved agentic UTM flow without crossing its worker boundary."""
         profile_id = str(flow.get("profile_id") or "").strip()
@@ -2720,10 +2731,8 @@ class LabEquipmentAgent(BaseAgent):
                 profile_id=profile_id,
                 details={"flow_id": str(flow.get("flow_id") or "")},
             )
-        registry_root = str(
-            state.current_experiment_spec.get("equipment_skill_registry_root")
-            or Path(__file__).resolve().parents[2] / "memory" / "equipment_skills"
-        )
+        registry_root = str(self._skill_registry_root(
+            ctx, explicit=state.current_experiment_spec.get("equipment_skill_registry_root")))
         resources = self._preflight_skill_flow_resources(
             profile_id=profile_id,
             blocks=blocks,
@@ -2972,10 +2981,8 @@ class LabEquipmentAgent(BaseAgent):
             checkpoint["flow_execution_id"] = flow_execution_id
         store = EquipmentSkillFlowStore(self._SKILL_FLOW_PATH)
         blocks = [block for block in flow.get("blocks", []) if isinstance(block, dict)]
-        registry_root = str(
-            state.current_experiment_spec.get("equipment_skill_registry_root")
-            or Path(__file__).resolve().parents[2] / "memory" / "equipment_skills"
-        )
+        registry_root = str(self._skill_registry_root(
+            ctx, explicit=state.current_experiment_spec.get("equipment_skill_registry_root")))
         transitions: list[dict[str, Any]] = deepcopy((checkpoint or {}).get("transitions", []))
         last_result: AgentResult | None = None
         saved_csv_result: dict[str, Any] = deepcopy((checkpoint or {}).get("saved_csv_result", {}))
@@ -3799,9 +3806,7 @@ class LabEquipmentAgent(BaseAgent):
         skill_id = str(request.get("skill_id") or "").strip()
         version = str(request.get("version") or "").strip()
         target_profile = str(request.get("target_profile") or "").strip()
-        registry_root = Path(
-            str(request.get("registry_root") or Path(__file__).resolve().parents[2] / "memory" / "equipment_skills")
-        )
+        registry_root = self._skill_registry_root(ctx, explicit=request.get("registry_root"))
         registry = EquipmentSkillRegistry(registry_root)
         try:
             package = registry.get(skill_id, version)
@@ -4382,7 +4387,7 @@ class LabEquipmentAgent(BaseAgent):
                     profile_id=str(state.current_experiment_spec.get("equipment_profile_id") or ""),
                 )
             if skill_flow:
-                return self._preflight_equipment_skill_flow(state, skill_flow)
+                return self._preflight_equipment_skill_flow(state, skill_flow, ctx=ctx)
             return self._blocked_equipment_preflight(
                 state,
                 failure_code="EQUIPMENT_PREFLIGHT_FLOW_REQUIRED",

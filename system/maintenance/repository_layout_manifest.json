@@ -47341,6 +47341,30 @@
   "task11_phase": {
     "accepted_checkpoint": "982b15adb1dd3bcdf94a4c26eda71a0cf3158fa4",
     "current_source_identities": {
+      "runtime/app/equipment_entry_resume.py": {
+        "mode": "100644",
+        "git_blob": "2671f91a98674700a3d1de3013eda68636b48e9e",
+        "sha256": "7a9562f88afd95be3e6669899d803d1f3ffab9ca16e4b521feb16538f76a9c5a",
+        "size": 24115
+      },
+      "runtime/app/equipment_selection_recovery.py": {
+        "mode": "100644",
+        "git_blob": "b70966b09d041e882c789b927b544b77be29886d",
+        "sha256": "ad6efa4e300da574e3fd71592c996b9e01a6a3c5e9aac244ff7b3c2ecdb8d81d",
+        "size": 5614
+      },
+      "runtime/app/run_recovery.py": {
+        "mode": "100644",
+        "git_blob": "5d027d5b8243d4db87849d1ac6f592578be0752b",
+        "sha256": "7380576546e8a535489b4dafe1102da7782743f617e6afd7601d16cee7b0e62b",
+        "size": 47798
+      },
+      "runtime/tests/unit/test_equipment_workflow_decision.py": {
+        "mode": "100644",
+        "git_blob": "b434e027ed6a983ec6649bef0a88ad174796e204",
+        "sha256": "46bd4cc506cd7142a13d0c17155b6c460ad2dd651152caf5f0b96f3db4ca381f",
+        "size": 39495
+      },
       "runtime/agents/bo/agent.py": {
         "mode": "100644",
         "git_blob": "234908ae545c3ea6ffb3a7a0e5e5ced8fba2b0ea",
@@ -47355,9 +47379,9 @@
       },
       "runtime/agents/equipment/agent.py": {
         "mode": "100644",
-        "git_blob": "a092a8d96390115ec3133448fe0034842d0106b4",
-        "sha256": "cce9eabc977f9589f1ad3b9f1365e800ea35ac39df40d528d0b320a0140fc838",
-        "size": 255450
+        "git_blob": "6807cced645e995829ea0f08340160fb10c5c29c",
+        "sha256": "efea185d74ff3616a1dc4865408e4a7399d771fb2efbebaec80eac5a16939792",
+        "size": 255724
       },
       "runtime/agents/equipment/workflow.py": {
         "mode": "100644",
@@ -47385,9 +47409,9 @@
       },
       "runtime/tests/unit/test_runtime_path_consumers.py": {
         "mode": "100644",
-        "git_blob": "61a0aaea769ced440e8efa7eef3e3abcf6fe62c5",
-        "sha256": "8e85a13417915d80025fde4489f3e8bc003e0be17c464f21364a20d7563f23a8",
-        "size": 22417
+        "git_blob": "a8c8f16048fa67f46ad9a0841b047e1b11e04332",
+        "sha256": "4218a1d274f0fdc8b87f9abbf8e719a892cf869d4c6a9346b03b54be5dc36720",
+        "size": 28345
       },
       "runtime/tests/unit/test_vision_agent.py": {
         "mode": "100644",

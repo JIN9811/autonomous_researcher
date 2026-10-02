@@ -494,10 +494,14 @@ async def test_completed_work_can_be_revalidated_without_reopening_actuation_cla
 @pytest.mark.asyncio
 @pytest.mark.parametrize("revoked", [False, True])
 async def test_error_resume_accepts_completed_review_but_not_changed_authority(tmp_path, monkeypatch, revoked):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
     from app.run_recovery import prepare_error_resume
     from orchestrator.state import Stage
     agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
-    first = await agent.run(state, Model(tools))
+    ctx = Model(tools)
+    ctx.paths = replace(current_paths(), memory_root=tmp_path / 'selected-memory')
+    first = await agent.run(state, ctx)
     archive_data = deepcopy(first.data)
     archive_data["equipment_handoff"] = {"status": "ready_for_analysis", "ready_for_analysis": True}
     archive = tmp_path / state.run_id / "runtime/loops/loop-000001/equipment_agent/attempt-000001/result.json"
@@ -507,7 +511,7 @@ async def test_error_resume_accepts_completed_review_but_not_changed_authority(t
     if revoked:
         state.active_session_id = "another-session"
     controller = SimpleNamespace(_state=state,
-        _deps=SimpleNamespace(run_root=tmp_path, agent_registry={"equipment_agent": agent}),
+        _deps=SimpleNamespace(run_root=tmp_path, agent_registry={"equipment_agent": agent}, agent_context=ctx),
         snapshot=lambda: {"is_running": False, "state": state.model_dump(mode="json")},
         _is_planning_test_spec=lambda spec: True)
     if revoked:
