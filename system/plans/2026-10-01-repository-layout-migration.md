@@ -18,8 +18,8 @@ supersedes: []
 
 # Repository Layout Migration Implementation Plan
 
-Implementation status (2026-10-03): Tasks1–10 source/layout work and reviews are
-accepted; Task11 software validation and Task12 reviewed synthetic-copy tooling
+Implementation status (2026-10-03): Tasks 1–10 source/layout work and reviews are
+accepted; Task 11 software validation and Task 12 reviewed synthetic-copy tooling
 are integrated, with final combined accounting/publication review pending.
 The checklist below retains unperformed operational steps: no operating source
 or private-state cutover, provider validation, device commissioning or automatic

@@ -7,8 +7,8 @@ private-state cutovers each require an explicitly agreed stopped maintenance poi
 
 ## Implementation status — 2026-10-03
 
-Tasks1–10 source/layout work and scoped reviews are accepted. Task11 software
-validation and Task12's reviewed synthetic private-copy tooling are integrated;
+Tasks 1–10 source/layout work and scoped reviews are accepted. Task 11 software
+validation and Task 12's reviewed synthetic private-copy tooling are integrated;
 final combined accounting/publication review is still required. The operating
 checkout, deployed services and real private stores have not been cut over.
 
@@ -17,16 +17,16 @@ independently reviewed. The evidence retains unrelated baseline test failures,
 skips and warning debt; it is not a full-suite-green claim. Default Runtime IDE
 geometry still fails three old audit assertions with unchanged UI bytes.
 Contained Firefox evidence separately covers actual routes, ten owner reports,
-Replay and Knowledge; unauthenticated401 and GPU-less WebGL limitations remain.
-The49 offline owner scenarios/84 accepted captures are injected-response
+Replay and Knowledge; unauthenticated 401 and GPU-less WebGL limitations remain.
+The 49 offline owner scenarios/84 accepted captures are injected-response
 evidence, not actual-provider, hardware or full cross-owner sequence evidence.
 External-provider validation awaits explicit credential/provider authorization;
 two original Playwright tests, unreleased long controller cases and native
 Windows/device operation remain unassessed. Temporary ROS rebuild evidence is
 not an installed production prefix.
 
-The previously recorded outgoing publication gate has32 textual findings
-(31 personal-path and1 credential-pattern finding). Their policy/identity
+The previously recorded outgoing publication gate has 32 textual findings
+(31 personal-path and 1 credential-pattern finding). Their policy/identity
 decision remains pending; neither source review nor software tests authorize
 publishing them. Retain the final outgoing scan's exact result and revision.
 
@@ -65,7 +65,7 @@ publishing them. Retain the final outgoing scan's exact result and revision.
    A conflicting or ambiguous binding is a stop condition, not a fallback.
 4. Rebuild the owned ROS package in the **intended deployed runtime prefix**
    using the approved platform procedure before declaring its snapshot launcher
-   ready. Task10's isolated temporary build proves source compatibility only;
+   ready. Task 10's isolated temporary build proves source compatibility only;
    it does not populate operating `runtime/ros/install`. Never silently source
    stale outer `ros/install`. Confirm the new setup/install paths and relocated
    resource paths without running a simulator, node or device as an implicit step.
@@ -87,7 +87,7 @@ The synthetic rehearsal is not evidence that real private stores were migrated.
 
 The reviewed helper `runtime/scripts/maintenance/migrate_private_state.py`
 offers `plan`, `copy`, `verify` and `propose-bindings`, all with explicit inputs
-and exclusive private0600 output manifests. It never activates bindings,
+and exclusive private 0600 output manifests. It never activates bindings,
 restarts/resumes, discovers stores, operates devices or rewrites checkpoints.
 Inputs must contain all seven canonical absolute normalized
 `atr.path_bindings.v1` store roots; this is deliberately stricter than the
