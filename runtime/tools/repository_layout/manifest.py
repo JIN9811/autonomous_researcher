@@ -80,7 +80,7 @@ def _consumers(path: str, data: bytes) -> list[dict]:
     if not path.endswith(".py"):
         return []
     try:
-        tree = ast.parse(data)
+        tree = ast.parse(data, filename=path)
     except (SyntaxError, UnicodeDecodeError):
         return []
     rows = []

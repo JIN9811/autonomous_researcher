@@ -10,6 +10,17 @@ import sys
 import pytest
 
 
+def test_consumer_ast_warning_retains_source_filename():
+    import warnings
+    from tools.repository_layout.manifest import _consumers
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter('always', SyntaxWarning)
+        _consumers('runtime/fixture_invalid_escape.py', b"pattern = '\\s'\n")
+    assert len(recorded) == 1
+    assert recorded[0].filename == 'runtime/fixture_invalid_escape.py'
+    assert recorded[0].lineno == 1
+
+
 def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args])
 

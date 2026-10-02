@@ -56,8 +56,9 @@ def test_bootstrap_shares_effective_paths_and_preserves_legacy_settings(disposab
     assert ctx.artifact_run_root == str(expected_run)
     assert ctx.knowledge_service.data_root == disposable_paths.memory_root / "knowledge"
     assert controller._test_mode_execution_profiles_path == disposable_paths.memory_root / "test_mode_execution_profiles.json"
-    baseline_guide = disposable_paths.repository_root / "docs/project/Project_guide.txt"
-    expected = LocalRAGIndex.from_file(baseline_guide)
+    baseline_guide = disposable_paths.system_root / "project/Project_guide.txt"
+    expected = LocalRAGIndex.from_file(baseline_guide,
+        source_label=str(disposable_paths.repository_root / "docs/project/Project_guide.txt"))
     assert [(c.text, c.source) for c in ctx.rag._local_index._chunks] == [(c.text, c.source) for c in expected._chunks]
 
 
@@ -106,7 +107,7 @@ async def test_rendered_guideline_context_is_unchanged_with_unrelated_run_store(
              "DesignAgent printer specimen spec Guardian operator approval goal message")
     result = await controller._deps.agent_context.rag.retrieve(query, top_k_local=3)
     lines = [f"[source={c['source']}]\n{c['text'].strip()[:1200]}" for c in result["local_chunks"] if c["text"].strip()]
-    guideline = disposable_paths.repository_root / "docs/agents/specimen_design_existing_runtime_guideline.txt"
+    guideline = disposable_paths.system_root / "agents/specimen_design_existing_runtime_guideline.txt"
     lines.append("[source=docs/agents/specimen_design_existing_runtime_guideline.txt]\n" + guideline.read_text().strip()[:1800])
     assert await controller._live_guideline_context(operator_message="message", goal="goal") == "\n\n---\n\n".join(lines)
     assert controller._resolve_workspace_source_path("artifacts/a.bin") == disposable_paths.repository_root / "artifacts/a.bin"
@@ -122,7 +123,8 @@ def test_main_resources_use_finalized_unrelated_roots(tmp_path):
         (code / suffix).mkdir(parents=True)
     shutil.copytree(root / "configs", code / "configs")
     shutil.copytree(root / "graphs", code / "graphs")
-    shutil.copytree(root / "docs/project", guides / "project")
+    selected = rp.load_paths(root / "configs/repository_layout.json")
+    shutil.copytree(selected.system_root / "project", guides / "project")
     config = tmp_path / "layout.json"
     layout = json.loads((root / "configs/repository_layout.json").read_text())
     layout.update(repository_root=str(root), runtime_root=str(code), system_root=str(guides),

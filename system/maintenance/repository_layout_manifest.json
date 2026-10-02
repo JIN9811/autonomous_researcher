@@ -47338,6 +47338,81 @@
       }
     }
   },
+  "task11_phase": {
+    "base_revision": "a8486a3dd893cb5cd20804c9fe5ba5a4ebe3d4a3",
+    "paired_before_revision": "428067bd117fb3d466900a4c90e73ca460b62ff8",
+    "scope": "Validation diagnostics, document syntax and moved-source fixture compatibility only",
+    "files": {
+      "docs/README.ko.md": {
+        "mode": "100644",
+        "git_blob": "777fe46b50295bb213d074fbe2df3a0a9a2a6835",
+        "sha256": "965641a0fd99c55eb4a06209f38a7b79b73627caded3a0e4b6deba159dca5211",
+        "size": 16180
+      },
+      "runtime/tests/js/live_window.test.cjs": {
+        "mode": "100644",
+        "git_blob": "ffe4644abb9c79e44e97f5c85801b5d2d0b480c1",
+        "sha256": "f782998dc4a40c050bb3e947ddac5377fd5799e045de12208e5732ed2a4f10c1",
+        "size": 2921
+      },
+      "runtime/tests/js/omx_grasp_sample_pose.test.cjs": {
+        "mode": "100644",
+        "git_blob": "e610fe9c4ac1f00a620dad2cac27989e6d6de440",
+        "sha256": "953b86e71bd798af83477ee233d5c5e0a9d09e6b72e4c3ffff4fa37117a70dff",
+        "size": 3997
+      },
+      "runtime/tests/unit/test_distribution_layout.py": {
+        "mode": "100644",
+        "git_blob": "52dea2910ce87b1c30570d534ea216d483790955",
+        "sha256": "d5e1638fe0c67da22687f6982b13e82460d65c0f9be36f48b541fcc90c25b385",
+        "size": 8623
+      },
+      "runtime/tests/unit/test_document_relocation.py": {
+        "mode": "100644",
+        "git_blob": "882aac77f8b17810d966d235a8aad4a47f6685d8",
+        "sha256": "db326699f89dd42ada3a09bb651f10d0f196cc91ae74bf8c6a3328f0f988f7bf",
+        "size": 27867
+      },
+      "runtime/tests/unit/test_layout_manifest.py": {
+        "mode": "100644",
+        "git_blob": "fe19453a7807dfbcb3726918481e80c81a043a96",
+        "sha256": "59ddb5bd8e320e6c695f14d376a4bb59e40f4f98dabe6ae79531a69621a70956",
+        "size": 8016
+      },
+      "runtime/tests/unit/test_layout_validation_sandbox.py": {
+        "mode": "100644",
+        "git_blob": "06051cd7af4fca115b711261b085ac96dfa74abd",
+        "sha256": "e6e2819003f681b61ee48048164066473b5f4ce6f2de1f270ab85633fd7a5218",
+        "size": 7801
+      },
+      "runtime/tests/unit/test_runtime_path_consumers.py": {
+        "mode": "100644",
+        "git_blob": "fc4c85274d878c43aec441cd87cea648d714d7a6",
+        "sha256": "9846ed65cd600df10aa5db6ea7dbd413f53f09630484b380a27c51d083d6887e",
+        "size": 17862
+      },
+      "runtime/tests/unit/test_runtime_reference_roots.py": {
+        "mode": "100644",
+        "git_blob": "0d0076c97556d601f3bb74b8f91d8d28d7705f56",
+        "sha256": "c739ddb62b1e1b9f03e0ce1d1397210e12e96e7b994c441769f3ca500f81faed",
+        "size": 5264
+      },
+      "runtime/tools/repository_layout/checks.py": {
+        "mode": "100644",
+        "git_blob": "8c966825cb46f03cf14ba476dd5e485704de6b03",
+        "sha256": "145455a786eb05581454721b5048dd9af1900f97c86fac48ce6b1b11b56290cc",
+        "size": 34612
+      },
+      "runtime/tools/repository_layout/manifest.py": {
+        "mode": "100644",
+        "git_blob": "cc78e2c4f9e61c8083e8ad675327ec1bac8d8d4b",
+        "sha256": "6e5b01782370cda0d1180240ec8660d457eb0b3b1142739852ef548be5fa0d2b",
+        "size": 18430
+      }
+    },
+    "additions": {},
+    "preservation": "All prior phase fields and identities remain frozen; latest explicit phase overlays identify current bytes"
+  },
   "task10_phase": {
     "base_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
     "files": {

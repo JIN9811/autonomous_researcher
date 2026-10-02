@@ -19,7 +19,7 @@ test('all seven workspace cells share generated icons with their documentation',
     const path = `web/static/workspace_icons/${icon}.webp`;
     assert.ok(fs.existsSync(path));
     assert.ok(html.includes(`/static/workspace_icons/${icon}.webp`));
-    assert.ok(fs.readFileSync(`docs/${doc}.md`,'utf8').includes(`../../${path}`));
+    assert.ok(fs.readFileSync(`../system/${doc}.md`,'utf8').includes(`../../runtime/${path}`));
   }
 });
 

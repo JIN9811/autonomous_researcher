@@ -266,7 +266,7 @@ def document_locations(manifest: dict) -> dict[str, str]:
             for source, current in locations.items()}
 
 
-def _mask_code(text: str) -> str:
+def _mask_code(text: str, *, inline: bool = True) -> str:
     """Preserve offsets while suppressing fenced, indented and inline examples."""
     lines, fence = [], None
     for line in text.splitlines(keepends=True):
@@ -283,7 +283,12 @@ def _mask_code(text: str) -> str:
         else:
             lines.append(line)
     masked = ''.join(lines)
-    return re.sub(r'(`+)([^`\n]*?)\1', lambda match: ' ' * len(match[0]), masked)
+    return re.sub(r'(`+)([^`\n]*?)\1', lambda match: ' ' * len(match[0]), masked) if inline else masked
+
+
+def _rst_roles(text: str) -> list[tuple[int, int, str, str]]:
+    return [(*match.span(2), match[2], match[1]) for match in
+            re.finditer(r':(doc|ref):`(?:[^`<]*<)?([^`<>]+)>?`', text)]
 
 
 def reference_spans(text: str, suffix: str) -> list[tuple[int, int, str]]:
@@ -292,14 +297,16 @@ def reference_spans(text: str, suffix: str) -> list[tuple[int, int, str]]:
     spans = []
     patterns = [r'''\b(?:href|src)\s*=\s*["']([^"']+)["']''']
     if suffix in {'.md', '.markdown'}:
-        patterns += [r'!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s()]+(?:\([^()]*\)[^\s()]*)*))',
+        # The closing label also belongs to outer links around nested images.
+        # Restrict the capture to the destination; an optional title is not a URL.
+        patterns += [r'\]\(\s*(?:<([^>\n]+)>|([^\s()]+(?:\([^()]*\)[^\s()]*)*))',
                      r'^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|(\S+))',
                      r'<((?:https?://|mailto:)[^<>\s]+)>']
     elif suffix == '.rst':
         # Explicit RST links and file directives, never Python automodule names.
         patterns += [r'`[^`<\n]*<([^>\n]+)>`_?',
-                     r'^\s*\.\.\s+(?:image|figure|include|literalinclude)::\s*(\S[^\n]*)',
-                     r':doc:`(?:[^`<]*<)?([^`<>]+)>?`']
+                     r'^\s*\.\.\s+(?:image|figure|include|literalinclude)::\s*(\S[^\n]*)']
+        spans.extend((start, end, target) for start, end, target, _ in _rst_roles(text))
     for pattern in patterns:
         for match in re.finditer(pattern, masked, re.M | re.I):
             group = next(index for index in range(1, len(match.groups()) + 1) if match[index] is not None)
@@ -311,7 +318,7 @@ def reference_spans(text: str, suffix: str) -> list[tuple[int, int, str]]:
 
 
 def _anchors(text: str, suffix: str) -> set[str]:
-    masked = _mask_code(text) if suffix in {'.md', '.markdown'} else text
+    masked = _mask_code(text, inline=False) if suffix in {'.md', '.markdown'} else text
     anchors = set(re.findall(r'''\b(?:id|name)\s*=\s*["']([^"']+)["']''', masked, re.I))
     headings = []
     if suffix in {'.md', '.markdown'}:
@@ -410,6 +417,13 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
     result.update(checked=0, external_urls=0, historical_references=[], repository_provenance=[])
     locations = document_locations(manifest)
     anchor_cache = {}
+    rst_labels = {}
+    for current in locations.values():
+        document = root / current
+        if (document.suffix == '.rst' and document.resolve().is_relative_to(root)
+                and document.is_file() and not document.is_symlink()):
+            for label in re.findall(r'^\s*\.\. _([^:]+):\s*$', document.read_text(), re.M):
+                rst_labels.setdefault(label, []).append(current)
 
     def inspect(label, target, base, *, metadata=False, provenance=False, filesystem=False):
         if not isinstance(target, str):
@@ -477,7 +491,25 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
                             inspect(current, value, root, metadata=True, provenance=field == 'source_of_truth')
                 if 'source_revision' in metadata and set(metadata.get('source_refs', [])) != set(metadata['source_revision']):
                     result['metadata_errors'].append({'document': current, 'reason': 'Wiki source key mismatch'})
-                for _, _, target in reference_spans(body, suffix):
+                roles = {(start, end): role for start, end, _, role in _rst_roles(body)} if suffix == '.rst' else {}
+                for start, end, target in reference_spans(body, suffix):
+                    role = roles.get((start, end))
+                    if role == 'ref':
+                        matches = rst_labels.get(target, [])
+                        if len(matches) != 1:
+                            result['checked'] += 1
+                            result['missing_anchors'].append({'document': current,
+                                'reference': target, 'reason': 'Missing or ambiguous explicit RST label'})
+                        else:
+                            inspect(current, matches[0] + '#' + target, root)
+                        continue
+                    if role == 'doc' and not Path(target).suffix:
+                        candidate = (path.parent / target).resolve()
+                        if candidate.is_relative_to(root):
+                            matches = [target + extension for extension in ('.rst', '.md')
+                                       if (path.parent / (target + extension)).is_file()]
+                            if len(matches) == 1:
+                                target = matches[0]
                     inspect(current, target, path.parent)
             else:
                 metadata = yaml.safe_load(text)

@@ -41,7 +41,9 @@ def test_runtime_move_targets_match_exact_phase_identities():
     phase = manifest['runtime_phase']
     assert 'files' in phase, 'runtime final identity accounting is missing'
     assert set(phase['files']) == set(phase['moves'])
-    subsequent = manifest.get('task10_phase', {}).get('files', {})
+    # Later phases are explicit overlays, never refreshed earlier proof hashes.
+    subsequent = {**manifest.get('task10_phase', {}).get('files', {}),
+                  **manifest.get('task11_phase', {}).get('files', {})}
     for source, record in phase['files'].items():
         record = subsequent.get(phase['moves'][source], record)
         path = outer / phase['moves'][source]
@@ -54,7 +56,15 @@ def test_runtime_move_targets_match_exact_phase_identities():
         record = subsequent.get(source, record)
         assert hashlib.sha256((outer / source).read_bytes()).hexdigest() == record['sha256'], source
     for source, record in manifest.get('task10_phase', {}).get('additions', {}).items():
+        record = subsequent.get(source, record)
         assert hashlib.sha256((outer / source).read_bytes()).hexdigest() == record['sha256'], source
+    for source, record in manifest.get('task11_phase', {}).get('files', {}).items():
+        path = outer / source
+        assert path.is_file() and not path.is_symlink(), source
+        data = path.read_bytes()
+        assert len(data) == record['size'], source
+        assert hashlib.sha256(data).hexdigest() == record['sha256'], source
+        assert ('100755' if path.stat().st_mode & 0o111 else '100644') == record['mode'], source
     assert len(phase['generated_deferrals']) == 39
     for source, record in phase['generated_deferrals'].items():
         assert record['current_location'] == source and record['handoff'] == 'Task 10'

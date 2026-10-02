@@ -167,7 +167,7 @@ High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도�
 
 ## Orchestration Route
 
-[![에이전트 실행 경로, 제어 게이트, Device Bridge와 근거 연결을 보여주는 메인 GUI 런타임 맵](assets/readme/orchestration-route.svg)](docs/assets/readme/orchestration-route.svg "원본 크기의 SVG 열기")
+[![에이전트 실행 경로, 제어 게이트, Device Bridge와 근거 연결을 보여주는 메인 GUI 런타임 맵](assets/readme/orchestration-route.svg)](assets/readme/orchestration-route.svg "원본 크기의 SVG 열기")
 
 메인 GUI의 런타임 맵으로, 설정된 에이전트 인계와 조건부 복귀 경로를
 제어·Device Bridge·근거 연결과 함께 보여줍니다.

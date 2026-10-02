@@ -305,6 +305,42 @@ def audit(root, manifest):
     return checks.audit_document_references(root, manifest)
 
 
+def test_nested_image_link_with_title_audits_both_targets_and_rewrites_only_urls(tmp_path):
+    original = '[![map](docs/assets/map.svg)](docs/assets/map.svg "Original SVG")\n'
+    updated, edits = move_files.rewrite_document_references(
+        original, 'README.ko.md', 'docs/README.ko.md', {})
+    assert updated == '[![map](assets/map.svg)](assets/map.svg "Original SVG")\n'
+    assert len(edits) == 2
+    put(tmp_path, 'docs/README.ko.md', updated.encode())
+    put(tmp_path, 'docs/assets/map.svg', b'<svg/>')
+    manifest = {'entries': {'docs/README.ko.md': {'destination': 'docs/README.ko.md', 'disposition': 'keep'}}}
+    assert audit(tmp_path, manifest)['missing_files'] == []
+    put(tmp_path, 'docs/README.ko.md', updated.replace('](assets/map.svg "', '](docs/assets/map.svg "').encode())
+    assert audit(tmp_path, manifest)['missing_files'] == [
+        {'document': 'docs/README.ko.md', 'reference': 'docs/assets/map.svg'}]
+
+
+def test_inline_code_heading_anchor_preserves_heading_words_but_ignores_examples():
+    text = '# Using `RuntimePaths`\n## Using `RuntimePaths`\n```md\n# Fake\n```\n'
+    assert checks._anchors(text, '.md') == {'using-runtimepaths', 'using-runtimepaths-1'}
+
+
+def test_rst_roles_resolve_exact_labels_and_document_extensions(tmp_path):
+    files = {
+        'docs/index.rst': ':doc:`guide`\n:ref:`Named <stable-label>`\n',
+        'docs/guide.rst': '.. _stable-label:\n\nGuide\n=====\n',
+    }
+    for path, value in files.items():
+        put(tmp_path, path, value.encode())
+    manifest = {'entries': {p: {'destination': p, 'disposition': 'keep'} for p in files}}
+    result = audit(tmp_path, manifest)
+    assert not result['missing_files'] and not result['missing_anchors'], result
+    put(tmp_path, 'docs/index.rst', b':doc:`absent`\n:ref:`missing-label`\n')
+    result = audit(tmp_path, manifest)
+    assert len(result['missing_files']) == 1
+    assert len(result['missing_anchors']) == 1
+
+
 def audit_fixture(root):
     files = {
         'docs/user.md': b'''---

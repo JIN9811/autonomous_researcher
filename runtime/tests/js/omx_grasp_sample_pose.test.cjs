@@ -20,7 +20,7 @@ for (const compact of [false,true]) test(`${compact ? 'backend compact' : 'full'
   vm.createContext(context); vm.runInContext(apply+append, context);
   context.sample={type:'joint_sample',session_id:'run',execution_index:1,sequence:1,actual_rad:{Joint1:Math.PI/2},grasp_visual:{status:'success',gripper_state:'ungrasping'}};
   if (compact) {
-    context.sample = JSON.parse(execFileSync('.venv/bin/python',['-c',`
+    context.sample = JSON.parse(execFileSync(process.env.ATR_VALIDATION_PYTHON || '.venv/bin/python',['-c',`
 import json,sys
 from utils.lerobot_joint_telemetry import build_joint_telemetry_batch
 packet=json.load(sys.stdin)

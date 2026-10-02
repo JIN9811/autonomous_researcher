@@ -104,8 +104,21 @@ def _verify_fixture_process(lifespan_mode):
         [sys.executable, "-S", "-m", "tools.repository_layout.fixture_server", "verify", lifespan_mode],
         capture_output=True, text=True, timeout=90,
     )
+    # -rA retains successful child diagnostics in the enclosing raw receipt too.
+    print(result.stdout, end='')
+    print(result.stderr, end='', file=sys.stderr)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout.splitlines()[-1])
+
+
+def test_successful_fixture_child_diagnostics_are_retained(monkeypatch, capsys):
+    result = subprocess.CompletedProcess([], 0, 'child diagnostic\n{"ok": true}\n',
+                                         'synthetic child warning\n')
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: result)
+    assert _verify_fixture_process('import_only') == {'ok': True}
+    captured = capsys.readouterr()
+    assert captured.out == result.stdout
+    assert captured.err == result.stderr
 
 
 @pytest.mark.parametrize("already_imported", [False, True], ids=["fresh-parent", "collected-app-in-parent"])

@@ -56,10 +56,11 @@ def test_installed_owner_reference_classification(paths):
     for owner in ('design', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'bo'):
         descriptor = import_module(f'agents.{owner}.module').MODULE.describe()
         doc = document(descriptor['documentation'], paths=paths)
-        assert doc.is_relative_to(paths.repository_root / 'docs')
+        assert doc.is_relative_to(paths.repository_root / 'system')
         doc.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source / descriptor['documentation'], doc)
-        assert doc.read_bytes() == (source / descriptor['documentation']).read_bytes()
+        document_source = rp.current_paths().repository_root / descriptor['documentation']
+        shutil.copyfile(document_source, doc)
+        assert doc.read_bytes() == document_source.read_bytes()
         references = [*descriptor['backend'].values(), descriptor['frontend']['descriptor']]
         references.extend(descriptor['configuration'].get(key) for key in ('source', 'plan_contract', 'profile', 'skill_flow'))
         references.extend(descriptor.get('owned_references', {}).values())
