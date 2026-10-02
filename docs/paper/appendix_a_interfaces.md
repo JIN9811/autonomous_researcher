@@ -14,12 +14,12 @@ scope:
   - schemas
 summary: Maps paper-level ATR components to their current interface, schema, policy, and evidence boundaries.
 source_of_truth:
-  - agents
-  - orchestrator
-  - graphs/modules
-  - device_bridges
-  - knowledge
-  - app/main.py
+  - runtime/agents
+  - runtime/orchestrator
+  - runtime/graphs/modules
+  - runtime/device_bridges
+  - runtime/knowledge
+  - runtime/app/main.py
 last_verified: 2026-09-12
 verified_against: 5542ef2
 paper_section: appendix_interfaces

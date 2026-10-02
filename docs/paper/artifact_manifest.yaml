@@ -76,9 +76,9 @@ evidence:
       check SEA energy-to-mass normalization and final BO behavior.
       No model, device or runtime API was invoked.
     inputs:
-      - utils/agent_artifact_archive.py
-      - agents/analysis/agent.py
-      - agents/bo/agent.py
+      - runtime/utils/agent_artifact_archive.py
+      - runtime/agents/analysis/agent.py
+      - runtime/agents/bo/agent.py
     outputs:
       - path: docs/paper/evidence/2026-09-28-campaign-archive-audit.md
         sha256: d38b292e00f497377c75cfd9108b5e64840bf13098bd2b0e9ab6f91aa387b8d1
@@ -102,11 +102,11 @@ evidence:
       the current source inputs below resolve the same implementations at their
       canonical owner paths.
     inputs:
-      - graphs/configs/atr_closed_loop.yaml
-      - agents/equipment/agent.py
-      - agents/analysis/agent.py
-      - agents/bo/agent.py
-      - agents/design/agent.py
+      - runtime/graphs/configs/atr_closed_loop.yaml
+      - runtime/agents/equipment/agent.py
+      - runtime/agents/analysis/agent.py
+      - runtime/agents/bo/agent.py
+      - runtime/agents/design/agent.py
     outputs:
       - path: docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
         sha256: 2874d8e44d59cef2e28748df02d4742c1ba861ac113f3d4e0dc5587bfc5f924b
@@ -131,11 +131,11 @@ evidence:
       evidence retains the flat import paths used at execution time; the current
       source inputs below resolve the same implementations at canonical paths.
     inputs:
-      - graphs/configs/atr_closed_loop.yaml
-      - agents/equipment/agent.py
-      - agents/analysis/agent.py
-      - agents/bo/agent.py
-      - agents/design/agent.py
+      - runtime/graphs/configs/atr_closed_loop.yaml
+      - runtime/agents/equipment/agent.py
+      - runtime/agents/analysis/agent.py
+      - runtime/agents/bo/agent.py
+      - runtime/agents/design/agent.py
     outputs:
       - path: docs/paper/evidence/2026-09-07-supervised-closed-loop.md
         sha256: 86d93656e194ee6aa1d99861d759ccfac1003402f6be055aa6757d9554c3ab97
@@ -156,8 +156,8 @@ evidence:
       edges, and stage_dispatch mappings using the exact commands recorded in
       the output document.
     inputs:
-      - app/main.py
-      - graphs/configs/atr_closed_loop.yaml
+      - runtime/app/main.py
+      - runtime/graphs/configs/atr_closed_loop.yaml
     outputs:
       - path: docs/paper/evidence/architecture_inspection.md
         sha256: adf2e12be22f2184ad6893aeeaba26e67b95ba0edbeb949207e076f7d2997e14
@@ -174,10 +174,10 @@ evidence:
       scripts/validate_documentation.py && .venv/bin/python
       scripts/validate_paper_publication.py
     inputs:
-      - scripts/validate_documentation.py
-      - scripts/validate_paper_publication.py
-      - tests/unit/test_documentation_validation.py
-      - tests/unit/test_paper_publication_validation.py
+      - runtime/scripts/validate_documentation.py
+      - runtime/scripts/validate_paper_publication.py
+      - runtime/tests/unit/test_documentation_validation.py
+      - runtime/tests/unit/test_paper_publication_validation.py
     outputs:
       - path: docs/paper/evidence/documentation_validation.md
         sha256: e5cb003fd9e9f127e72535edd2e0f57407024a35f8e38fbba1d08504b29a8a40

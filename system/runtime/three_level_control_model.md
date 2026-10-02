@@ -15,14 +15,14 @@ scope:
   - device_bridges
 summary: Three-level control model for the ATR automatic experiment loop.
 source_of_truth:
-  - graphs/configs/atr_closed_loop.yaml
-  - orchestrator/langgraph_runtime.py
-  - app/controller.py
-  - orchestrator/state.py
-  - agents
-  - graphs/modules
-  - mcp_tools/tool_registry.py
-  - device_bridges
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/app/controller.py
+  - runtime/orchestrator/state.py
+  - runtime/agents
+  - runtime/graphs/modules
+  - runtime/mcp_tools/tool_registry.py
+  - runtime/device_bridges
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:

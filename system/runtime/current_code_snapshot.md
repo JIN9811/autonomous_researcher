@@ -14,14 +14,14 @@ scope:
   - knowledge
 summary: Reproducible snapshot of the routes, graph, workspaces, and runtime contracts, including Knowledge relation reconciliation.
 source_of_truth:
-  - app/main.py
-  - objectives/service.py
-  - objectives/compiler.py
-  - objectives/evaluator.py
-  - graphs/configs/atr_closed_loop.yaml
-  - orchestrator/langgraph_runtime.py
-  - web/templates/knowledge.html
-  - web/static/knowledge.js
+  - runtime/app/main.py
+  - runtime/objectives/service.py
+  - runtime/objectives/compiler.py
+  - runtime/objectives/evaluator.py
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/web/templates/knowledge.html
+  - runtime/web/static/knowledge.js
 last_verified: 2026-09-28
 verified_against: e70daa1
 related_docs:
@@ -68,7 +68,7 @@ system inventory. See the [file-by-file audit](../maintenance/documentation_revi
 The following bullets are historical subsystem evidence, not a current page/API
 inventory. The current Knowledge Workspace exposes Wiki, Memory, Source Library,
 Agent Delivery and Ontology; graph-relation review/edit is retired. See
-[Wiki and Memory](../knowledge/wiki_memory.md) and [the current template](../../web/templates/knowledge.html).
+[Wiki and Memory](../knowledge/wiki_memory.md) and [the current template](../../runtime/web/templates/knowledge.html).
 
 The current Knowledge owner uses reviewed Wiki context, scoped Markdown notes,
 typed memory and explicit publication contracts. Neo4j/reconciliation is an

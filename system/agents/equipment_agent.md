@@ -7,23 +7,23 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, equipment, pyautogui, equipment_runtime, vision_link]
 summary: Equipment-owned bounded Flow selection and terminal multimodal review over the existing Linux Runtime and local or Windows workers.
 source_of_truth:
-  - agents/equipment/agent.py
-  - agents/equipment/workflow.py
-  - agents/equipment/decision.py
-  - agents/equipment/execution.py
-  - agents/equipment/structure.py
-  - agents/equipment/presentation.py
-  - agents/equipment/frontend/live_report.js
-  - scripts/verify_equipment_decisions.py
-  - utils/equipment_runtime_service.py
-  - utils/equipment_profiles.py
-  - utils/equipment_skill_runtime.py
-  - utils/equipment_skill_flow.py
-  - graphs/modules/equipment/equipment_skill_flows.json
-  - device_bridges/windows_pyautogui/module.py
-  - packages/agents/equipment/package.yaml
-  - graphs/modules/equipment/module.yaml
-  - graphs/modules/equipment/ui.yaml
+  - runtime/agents/equipment/agent.py
+  - runtime/agents/equipment/workflow.py
+  - runtime/agents/equipment/decision.py
+  - runtime/agents/equipment/execution.py
+  - runtime/agents/equipment/structure.py
+  - runtime/agents/equipment/presentation.py
+  - runtime/agents/equipment/frontend/live_report.js
+  - runtime/scripts/verify_equipment_decisions.py
+  - runtime/utils/equipment_runtime_service.py
+  - runtime/utils/equipment_profiles.py
+  - runtime/utils/equipment_skill_runtime.py
+  - runtime/utils/equipment_skill_flow.py
+  - runtime/graphs/modules/equipment/equipment_skill_flows.json
+  - runtime/device_bridges/windows_pyautogui/module.py
+  - runtime/packages/agents/equipment/package.yaml
+  - runtime/graphs/modules/equipment/module.yaml
+  - runtime/graphs/modules/equipment/ui.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -79,7 +79,7 @@ paths retain their existing behavior; this decision boundary manages stacked Flo
 
 ## Installed Package and Executable Structure
 
-The installed [Equipment Agent Package](../../packages/agents/equipment/README.md)
+The installed [Equipment Agent Package](../../runtime/packages/agents/equipment/README.md)
 binds owner `equipment@1.0.0` to bridge `windows_pyautogui@1.0.0`. Canonical
 owner, decision, workflow, execution, source structure, report projection and
 Live composition now live under `agents/equipment/`. Maintained callers and

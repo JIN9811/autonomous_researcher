@@ -12,9 +12,9 @@ scope:
   - contributions
 summary: Defines the laboratory-automation systems problem, research questions, and bounded ATR contributions.
 source_of_truth:
-  - orchestrator/graph.py
-  - graphs/configs/atr_closed_loop.yaml
-  - app/controller.py
+  - runtime/orchestrator/graph.py
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/app/controller.py
 last_verified: 2026-08-09
 verified_against: 0b7627b
 paper_section: problem_and_contributions

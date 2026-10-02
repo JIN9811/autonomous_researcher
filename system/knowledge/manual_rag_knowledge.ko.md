@@ -7,12 +7,12 @@ audience: [operator, developer, maintainer]
 scope: [knowledge_agent, source_library, source_curation, scoped_rag]
 summary: Operate folder-driven source curation, page-level processing, consolidated Markdown and scoped agent retrieval.
 source_of_truth:
-  - knowledge/source_library.py
-  - knowledge/source_extraction.py
-  - knowledge/source_runtime.py
-  - knowledge/source_api.py
-  - agents/core/knowledge/source_curation.py
-  - mcp_tools/source_tools.py
+  - runtime/knowledge/source_library.py
+  - runtime/knowledge/source_extraction.py
+  - runtime/knowledge/source_runtime.py
+  - runtime/knowledge/source_api.py
+  - runtime/agents/core/knowledge/source_curation.py
+  - runtime/mcp_tools/source_tools.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -120,7 +120,7 @@ Unreadable or unsupported content is not fabricated. A failed or interrupted
 curation cannot expose a partial publication as ready. Retry does not repeat an
 unchanged successful publication.
 
-The opt-in [`verify_source_curation.py`](../../scripts/verify_source_curation.py)
+The opt-in [`verify_source_curation.py`](../../runtime/scripts/verify_source_curation.py)
 probe uses isolated originals, page files, Markdown and indices. By default,
 temporary workspaces are removed on success and failure. To preserve validation
 evidence separately, supply an external directory:

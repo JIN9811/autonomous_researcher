@@ -7,22 +7,22 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, vision, perception, verification, decision_tools]
 summary: Bounded multimodal Vision decisions over existing capture, detector, freshness, rollout-stop, and evidence contracts.
 source_of_truth:
-  - agents/vision/agent.py
-  - agents/vision/decision.py
-  - agents/vision/module.py
-  - agents/vision/execution.py
-  - agents/vision/presentation.py
-  - agents/vision/frontend/live_report.js
-  - agents/base_agent.py
-  - orchestrator/langgraph_runtime.py
-  - backends/llm_backend.py
-  - graphs/modules/vision/module.yaml
-  - device_bridges/camera_vision/utm_runtime_bridge.py
-  - device_bridges/lerobot_bridge.py
-  - app/main.py
-  - utils/utm_clear_cycle.py
-  - utils/utm_specimen_presence.py
-  - device_bridges/camera_vision/tools.py
+  - runtime/agents/vision/agent.py
+  - runtime/agents/vision/decision.py
+  - runtime/agents/vision/module.py
+  - runtime/agents/vision/execution.py
+  - runtime/agents/vision/presentation.py
+  - runtime/agents/vision/frontend/live_report.js
+  - runtime/agents/base_agent.py
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/backends/llm_backend.py
+  - runtime/graphs/modules/vision/module.yaml
+  - runtime/device_bridges/camera_vision/utm_runtime_bridge.py
+  - runtime/device_bridges/lerobot_bridge.py
+  - runtime/app/main.py
+  - runtime/utils/utm_clear_cycle.py
+  - runtime/utils/utm_specimen_presence.py
+  - runtime/device_bridges/camera_vision/tools.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -58,7 +58,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 ## Installed Package and Executable Structure
 
-The [Vision package](../../packages/agents/vision/package.yaml) binds the installed
+The [Vision package](../../runtime/packages/agents/vision/package.yaml) binds the installed
 `vision@1.0.0` AgentModule to the observation-only `camera_vision@1.0.0`
 [Device Bridge](../device_bridges/utm_vision_bridge.md). Package Manager shows the
 package; Device Bridges shows its bridge and internal observation components.
@@ -434,7 +434,7 @@ preview does not grant capture, motion, rollout, replay, or equipment authority.
 
 ## Verification Status and Evidence
 
-The opt-in [registered multimodal verification script](../../scripts/verify_vision_multimodal.py)
+The opt-in [registered multimodal verification script](../../runtime/scripts/verify_vision_multimodal.py)
 was run with `--execute` against the configured routes. All eight fixture decisions
 were accepted:
 

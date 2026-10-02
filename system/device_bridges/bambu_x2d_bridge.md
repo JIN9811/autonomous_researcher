@@ -14,14 +14,14 @@ scope:
   - autoejection
 summary: Current Bambu Lab X2D provider contract for slicing, probing, transfer, telemetry, video, guarded start, and artifact-based autoejection.
 source_of_truth:
-  - device_bridges/printer_fleet/bridge.py
-  - device_bridges/printer_fleet/providers/bambu_autoejection.py
-  - configs/devices.yaml
-  - mcp_tools/printer_tools.py
-  - app/main.py
-  - utils/specimen_placement.py
-  - utils/bambu_material_priority.py
-  - web/static/printer.js
+  - runtime/device_bridges/printer_fleet/bridge.py
+  - runtime/device_bridges/printer_fleet/providers/bambu_autoejection.py
+  - runtime/configs/devices.yaml
+  - runtime/mcp_tools/printer_tools.py
+  - runtime/app/main.py
+  - runtime/utils/specimen_placement.py
+  - runtime/utils/bambu_material_priority.py
+  - runtime/web/static/printer.js
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -44,7 +44,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | Purpose | Slicing, artifact transfer, telemetry and guarded autoejection |
 | Connects | Specimen / 3D workspace ↔ Bambu provider |
 | Effect | Upload, heating and motion are possible through gated commands |
-| Implementation | [Bambu implementation](../../device_bridges/printer_fleet/bridge.py) · [Requirements](../../device_bridges/printer_fleet/providers/bambu-requirements.txt) |
+| Implementation | [Bambu implementation](../../runtime/device_bridges/printer_fleet/bridge.py) · [Requirements](../../runtime/device_bridges/printer_fleet/providers/bambu-requirements.txt) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
 
 ## Summary

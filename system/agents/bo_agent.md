@@ -7,23 +7,23 @@ audience: [researcher, reviewer, developer, operator]
 scope: [agents, bayesian_optimization, next_candidate, decision_tools]
 summary: BO-owned strategy and tool decisions around the existing numerical optimizer, with continuous parameter handoff to Design.
 source_of_truth:
-  - agents/bo/agent.py
-  - agents/bo/decision.py
-  - agents/bo/module.py
-  - agents/bo/execution.py
-  - agents/bo/structure.py
-  - agents/bo/presentation.py
-  - agents/bo/frontend/live_report.js
-  - packages/agents/bo/package.yaml
-  - learning/bo_parameter_space.py
-  - learning/botorch_backend.py
-  - experiments/bo_visualization.py
-  - experiments/lhs_design_visualization.py
-  - reporting/bo_visualization_artifacts.py
-  - graphs/modules/bo/module.yaml
-  - app/main.py
-  - objectives/authoring.py
-  - objectives/service.py
+  - runtime/agents/bo/agent.py
+  - runtime/agents/bo/decision.py
+  - runtime/agents/bo/module.py
+  - runtime/agents/bo/execution.py
+  - runtime/agents/bo/structure.py
+  - runtime/agents/bo/presentation.py
+  - runtime/agents/bo/frontend/live_report.js
+  - runtime/packages/agents/bo/package.yaml
+  - runtime/learning/bo_parameter_space.py
+  - runtime/learning/botorch_backend.py
+  - runtime/experiments/bo_visualization.py
+  - runtime/experiments/lhs_design_visualization.py
+  - runtime/reporting/bo_visualization_artifacts.py
+  - runtime/graphs/modules/bo/module.yaml
+  - runtime/app/main.py
+  - runtime/objectives/authoring.py
+  - runtime/objectives/service.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -43,7 +43,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # Bayesian Optimization Agent Reference
 
-<img src="../../web/static/workspace_icons/bo.webp" width="96" alt="Bayesian Optimization Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/bo.webp" width="96" alt="Bayesian Optimization Workspace icon">
 
 Main GUI: **Bayesian Optimization · Workspace** opens the optimization workspace in a separate window.
 

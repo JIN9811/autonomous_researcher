@@ -1,7 +1,7 @@
 # Windows PyAutoGUI Bridge 설치 및 운영 가이드
 
-현재 권위 문서는 [Windows Bridge README](../../Pyautogui_server_for_window/README.md)와
-[Windows Bridge USAGE](../../Pyautogui_server_for_window/docs/USAGE.md)이며 이 문서는 ATR 시스템 관점의 설치 요약입니다.
+현재 권위 문서는 [Windows Bridge README](../../runtime/Pyautogui_server_for_window/README.md)와
+[Windows Bridge USAGE](../../runtime/Pyautogui_server_for_window/docs/USAGE.md)이며 이 문서는 ATR 시스템 관점의 설치 요약입니다.
 
 ## 설치
 

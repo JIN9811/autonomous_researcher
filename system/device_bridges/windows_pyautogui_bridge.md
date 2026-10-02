@@ -7,19 +7,19 @@ audience: [researcher, operator, developer, integrator]
 scope: [windows_pyautogui, equipment_worker, pairing, recording]
 summary: Lightweight Windows worker contract for paired bounded PyAutoGUI programs and recording evidence.
 source_of_truth:
-  - Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py
-  - install/windows_pyautogui_bridge_server.py
-  - device_bridges/windows_pyautogui/bridge.py
-  - device_bridges/windows_pyautogui/tools.py
-  - device_bridges/windows_pyautogui/module.py
-  - device_bridges/windows_pyautogui/README.md
-  - packages/agents/equipment/package.yaml
+  - runtime/Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py
+  - runtime/install/windows_pyautogui_bridge_server.py
+  - runtime/device_bridges/windows_pyautogui/bridge.py
+  - runtime/device_bridges/windows_pyautogui/tools.py
+  - runtime/device_bridges/windows_pyautogui/module.py
+  - runtime/device_bridges/windows_pyautogui/README.md
+  - runtime/packages/agents/equipment/package.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
   - system/agents/equipment_agent.md
   - system/hardware/windows_pyautogui_bridge_windows_setup.md
-  - Pyautogui_server_for_window/README.md
+  - runtime/Pyautogui_server_for_window/README.md
 supersedes: []
 -->
 
@@ -29,7 +29,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # Windows PyAutoGUI Bridge Reference
 
-<img src="../../web/static/workspace_icons/windows.webp" width="96" alt="Windows Automation Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/windows.webp" width="96" alt="Windows Automation Workspace icon">
 
 Main GUI: **Windows Automation · Workspace** opens the Windows bridge workspace in a separate window.
 
@@ -40,7 +40,7 @@ Main GUI: **Windows Automation · Workspace** opens the Windows bridge workspace
 | Purpose | Paired desktop programs, recording and execution evidence |
 | Connects | Lab Equipment / workspace ↔ Windows worker |
 | Effect | GUI input can operate equipment through the selected application |
-| Implementation | [Installed bridge module](../../device_bridges/windows_pyautogui/module.py) · [Windows bridge](../../device_bridges/windows_pyautogui/bridge.py) |
+| Implementation | [Installed bridge module](../../runtime/device_bridges/windows_pyautogui/module.py) · [Windows bridge](../../runtime/device_bridges/windows_pyautogui/bridge.py) |
 | Package | `windows_pyautogui@1.0.0`, referenced once by `equipment@1.0.0` |
 | Verification | Guarded software/API checks through 2026-09-13; no new hardware validation implied |
 
@@ -152,7 +152,7 @@ inspection scope, not permission to call an instrument.
 ## Tools and Registry Integration
 
 The installed module declares the existing registered tool IDs and queue;
-see [bridge tools](../../device_bridges/windows_pyautogui/tools.py) and the
+see [bridge tools](../../runtime/device_bridges/windows_pyautogui/tools.py) and the
 [connection matrix](bridge_api_connection_matrix.md). The owning package does
 not create a second execution worker.
 
@@ -373,4 +373,4 @@ audit. A successful program receipt is not by itself experiment completion.
 
 - [Equipment Agent](../agents/equipment_agent.md)
 - [Windows setup](../hardware/windows_pyautogui_bridge_windows_setup.md)
-- [Worker README](../../Pyautogui_server_for_window/README.md)
+- [Worker README](../../runtime/Pyautogui_server_for_window/README.md)

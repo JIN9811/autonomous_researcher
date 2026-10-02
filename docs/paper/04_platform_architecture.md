@@ -14,13 +14,13 @@ scope:
   - extension_surfaces
 summary: Describes the secondary ATR platform contribution and the contracts that keep extensions subordinate to the system thesis.
 source_of_truth:
-  - app/main.py
-  - app/bootstrap.py
-  - graphs/modules
-  - backends
-  - device_bridges
-  - web/templates
-  - web/static
+  - runtime/app/main.py
+  - runtime/app/bootstrap.py
+  - runtime/graphs/modules
+  - runtime/backends
+  - runtime/device_bridges
+  - runtime/web/templates
+  - runtime/web/static
 last_verified: 2026-09-12
 verified_against: 5542ef2
 paper_section: platform_architecture

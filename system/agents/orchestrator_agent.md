@@ -7,21 +7,21 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, orchestrator, control_plane, experimental_setup]
 summary: Current contract for bounded Orchestrator decisions, dynamic Experimental Setup, Chat editing, handoffs, and next-run application.
 source_of_truth:
-  - agents/core/orchestrator/agent.py
-  - agents/core/orchestrator/capabilities.py
-  - agents/core/orchestrator/decision.py
-  - agents/core/orchestrator/execution.py
-  - agents/core/orchestrator/structure.py
-  - agents/execution_graph.py
-  - app/controller.py
-  - app/main.py
-  - app/planning_setup.py
-  - app/planning_dialogue.py
-  - app/test_scenario.py
-  - orchestrator/experimental_setup.py
-  - orchestrator/setup_application.py
-  - orchestrator/langgraph_runtime.py
-  - graphs/modules/orchestrator/module.yaml
+  - runtime/agents/core/orchestrator/agent.py
+  - runtime/agents/core/orchestrator/capabilities.py
+  - runtime/agents/core/orchestrator/decision.py
+  - runtime/agents/core/orchestrator/execution.py
+  - runtime/agents/core/orchestrator/structure.py
+  - runtime/agents/execution_graph.py
+  - runtime/app/controller.py
+  - runtime/app/main.py
+  - runtime/app/planning_setup.py
+  - runtime/app/planning_dialogue.py
+  - runtime/app/test_scenario.py
+  - runtime/orchestrator/experimental_setup.py
+  - runtime/orchestrator/setup_application.py
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/graphs/modules/orchestrator/module.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -124,17 +124,17 @@ that supplies context and consumes its response ([shared label contract](../runt
 ![Orchestrator five-area editable internal graph](assets/figures/orchestrator_control_areas.svg)
 
 The backend, existing editable canvas and SVG consume the same
-[`module.execution_graph`](../../graphs/modules/orchestrator/module.yaml):
+[`module.execution_graph`](../../runtime/graphs/modules/orchestrator/module.yaml):
 `mission → plan → decide → report`. The decision's explicit outcomes select
 the declared edges; ordering the node array or moving a card does not select a
 route. Mission and plan construction are independent operations whose valid
 ordering can be edited while both remain prerequisites for decision-making.
 
-The [owner adapters](../../agents/core/orchestrator/execution.py) call the existing
+The [owner adapters](../../runtime/agents/core/orchestrator/execution.py) call the existing
 mission, plan, bounded LLM/tool decision and reporting functions. **LLM** labels
 the composite decision, including its existing checks and tool loop—not each
 internal check as an independently editable operation. Dashed **CODE** boxes now
-expose the [existing internal relationships](../../agents/core/orchestrator/structure.py):
+expose the [existing internal relationships](../../runtime/agents/core/orchestrator/structure.py):
 plan builders and bound tool dispatch in **Middle**, schema/target/effect checks in
 **Guardian / Safety**, and scoped references and decision records in **Knowledge /
 Evidence**. Inspection evidence returns to the same bounded LLM decision.
@@ -148,7 +148,7 @@ path; it is not an extra invocation of the full mission graph.
 
 Validate/version/activate use the current module API. Active runs retain their
 definition; backend edits appear on reload, and invalid drafts are not applied.
-The [shared renderer](../../web/static/module_control_view.js) draws explicit
+The [shared renderer](../../runtime/web/static/module_control_view.js) draws explicit
 outcomes and connection kinds, not an inferred checkpoint chain. Regenerate with
 `python -m scripts.render_module_control_views`. Documentation uses a light,
 print-readable theme independently of the IDE's dark theme. Structural Dry Run enumerates

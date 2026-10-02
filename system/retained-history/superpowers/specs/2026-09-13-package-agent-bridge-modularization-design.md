@@ -101,15 +101,15 @@ Orchestrator·Knowledge·Guardian는 플랫폼 기본 에이전트로 유지한�
 
 | 현재 경로 | 확인한 역할 | 전환 시 사용 방식 |
 |---|---|---|
-| [agents/base_agent.py](../../../../agents/base_agent.py) | `run(state, ctx)`, `AgentResult`, 공통 모델·툴·지식 서비스 | 기존 호출 표면을 유지하고 서비스 접근 및 상태 소유권을 명시 |
-| [agents/registry.py](../../../../agents/registry.py) | 이름별 에이전트 register/get/names | 검증된 모듈 진입점으로 등록을 모으고 중복 ID 정책 추가 |
-| [agents/core/orchestrator/capabilities.py](../../../../agents/core/orchestrator/capabilities.py) | 그래프 연결 owner, Setup callback, 가용성, 실행 snapshot | ORC와 Setup의 실행 가능 owner 판정에 재사용; 유지 호출자는 canonical package import 사용 |
-| [graphs/module_store.py](../../../../graphs/module_store.py), [graphs/schema.py](../../../../graphs/schema.py) | IDE module 설정 저장·버전과 스키마 | 구현 모듈 선언과 IDE 편집 설정을 연결 |
-| [graphs/modules/design/module.yaml](../../../../graphs/modules/design/module.yaml), [ui.yaml](../../../../graphs/modules/design/ui.yaml) | 인계 설명·pre-execution·내부 단계 및 표시 descriptor | 현재 형식에 맞춰 점진적으로 공통 선언 참조 |
-| [graphs/registry.py](../../../../graphs/registry.py) | 허용된 실행 handler 조회 | 모듈 선언을 임의 실행 코드로 해석하지 않고 등록 handler 연결 |
-| [mcp_tools/tool_registry.py](../../../../mcp_tools/tool_registry.py) | 툴 호출·장비 큐·리소스·산출물 기록 | 에이전트와 브릿지 간 기존 툴 경로 보존 |
-| [device_bridges/base_bridge.py](../../../../device_bridges/base_bridge.py) | `execute(command, payload)` 기본 계약 | 구현별 기존 방식에 adapter를 적용; 모든 브릿지의 상속을 가정하지 않음 |
-| [app/main.py](../../../../app/main.py), [app/bootstrap.py](../../../../app/bootstrap.py) | API·화면·manifest 병합·등록·설정 파일 연결 | 모듈별 구현을 이관하고 공통 mount·주입·조합 유지 |
+| [agents/base_agent.py](../../../../runtime/agents/base_agent.py) | `run(state, ctx)`, `AgentResult`, 공통 모델·툴·지식 서비스 | 기존 호출 표면을 유지하고 서비스 접근 및 상태 소유권을 명시 |
+| [agents/registry.py](../../../../runtime/agents/registry.py) | 이름별 에이전트 register/get/names | 검증된 모듈 진입점으로 등록을 모으고 중복 ID 정책 추가 |
+| [agents/core/orchestrator/capabilities.py](../../../../runtime/agents/core/orchestrator/capabilities.py) | 그래프 연결 owner, Setup callback, 가용성, 실행 snapshot | ORC와 Setup의 실행 가능 owner 판정에 재사용; 유지 호출자는 canonical package import 사용 |
+| [graphs/module_store.py](../../../../runtime/graphs/module_store.py), [graphs/schema.py](../../../../runtime/graphs/schema.py) | IDE module 설정 저장·버전과 스키마 | 구현 모듈 선언과 IDE 편집 설정을 연결 |
+| [graphs/modules/design/module.yaml](../../../../runtime/graphs/modules/design/module.yaml), [ui.yaml](../../../../runtime/graphs/modules/design/ui.yaml) | 인계 설명·pre-execution·내부 단계 및 표시 descriptor | 현재 형식에 맞춰 점진적으로 공통 선언 참조 |
+| [graphs/registry.py](../../../../runtime/graphs/registry.py) | 허용된 실행 handler 조회 | 모듈 선언을 임의 실행 코드로 해석하지 않고 등록 handler 연결 |
+| [mcp_tools/tool_registry.py](../../../../runtime/mcp_tools/tool_registry.py) | 툴 호출·장비 큐·리소스·산출물 기록 | 에이전트와 브릿지 간 기존 툴 경로 보존 |
+| [device_bridges/base_bridge.py](../../../../runtime/device_bridges/base_bridge.py) | `execute(command, payload)` 기본 계약 | 구현별 기존 방식에 adapter를 적용; 모든 브릿지의 상속을 가정하지 않음 |
+| [app/main.py](../../../../runtime/app/main.py), [app/bootstrap.py](../../../../runtime/app/bootstrap.py) | API·화면·manifest 병합·등록·설정 파일 연결 | 모듈별 구현을 이관하고 공통 mount·주입·조합 유지 |
 | [보관 계약](../../../runtime/loop_artifact_archiving.md) | run/loop/agent/attempt 및 독립 세션 구분 | 파일 위치 호환과 실행별 기록을 유지 |
 
 ## Options Considered

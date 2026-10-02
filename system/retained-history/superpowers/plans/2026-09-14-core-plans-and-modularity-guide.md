@@ -8,7 +8,7 @@ audience: [developer, maintainer, reviewer]
 scope: [core_plans, modularity, runtime_ide, packages, documentation]
 summary: Connect core-owner plans through existing module configuration and package paths, explain modularity, and retire only verified superseded code.
 governing_design: system/retained-history/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md
-related_docs: [packages/README.md, system/runtime/runtime_ide.md, system/agents/knowledge_agent.md, system/agents/guardian_agent.md]
+related_docs: [runtime/packages/README.md, system/runtime/runtime_ide.md, system/agents/knowledge_agent.md, system/agents/guardian_agent.md]
 supersedes: []
 -->
 

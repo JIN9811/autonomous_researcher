@@ -8,7 +8,7 @@ governing_design: system/retained-history/superpowers/specs/2026-09-07-five-area
 audience: [developer, maintainer]
 scope: [manipulation, decision-layer]
 summary: Bounded skill selection and post-Vision task-result judgment on the existing cycle.
-source_of_truth: [agents/manipulation/agent.py, agents/manipulation/decision.py, utils/utm_clear_cycle.py, agents/equipment/agent.py, device_bridges/windows_pyautogui_bridge.py]
+source_of_truth: [runtime/agents/manipulation/agent.py, runtime/agents/manipulation/decision.py, runtime/utils/utm_clear_cycle.py, runtime/agents/equipment/agent.py, runtime/device_bridges/windows_pyautogui_bridge.py]
 historical_source_paths: [agents/manipulation_agent.py, agents/manipulation_decision.py, agents/equipment_agent.py]
 last_verified: 2026-09-09
 verified_against: working-tree

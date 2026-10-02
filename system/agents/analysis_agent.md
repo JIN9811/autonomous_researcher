@@ -7,16 +7,16 @@ audience: [researcher, developer, reviewer, operator]
 scope: [agents, analysis, experimental_data, objective_evaluation]
 summary: Evidence-backed experimental postprocessing, physical metrics and bound-objective delivery to BO.
 source_of_truth:
-  - agents/analysis/agent.py
-  - agents/analysis/decisions.py
-  - agents/analysis/module.py
-  - agents/analysis/execution.py
-  - agents/analysis/structure.py
-  - agents/analysis/presentation.py
-  - agents/analysis/frontend/live_report.js
-  - graphs/modules/analysis/module.yaml
-  - graphs/modules/analysis/ui.yaml
-  - packages/agents/analysis/package.yaml
+  - runtime/agents/analysis/agent.py
+  - runtime/agents/analysis/decisions.py
+  - runtime/agents/analysis/module.py
+  - runtime/agents/analysis/execution.py
+  - runtime/agents/analysis/structure.py
+  - runtime/agents/analysis/presentation.py
+  - runtime/agents/analysis/frontend/live_report.js
+  - runtime/graphs/modules/analysis/module.yaml
+  - runtime/graphs/modules/analysis/ui.yaml
+  - runtime/packages/agents/analysis/package.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs: [system/agents/README.md, system/agents/equipment_agent.md, system/agents/bo_agent.md, system/agents/knowledge_agent.md]
@@ -64,7 +64,7 @@ and scoped Knowledge context supply reference-only information to these decision
 
 ## Installed Package and Executable Structure
 
-The [Analysis package](../../packages/agents/analysis/package.yaml) installs the
+The [Analysis package](../../runtime/packages/agents/analysis/package.yaml) installs the
 owner, report projection, frontend and execution definition. Its bridge dependency
 list is empty. Registration and removal continue to use the existing module host.
 

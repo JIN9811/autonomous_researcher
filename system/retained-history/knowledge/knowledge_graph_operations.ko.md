@@ -13,15 +13,15 @@ scope:
   - knowledge_workspace
 summary: ATR Knowledge ledger, durable outbox, Neo4j sync, bounded query, and workspace를 안전하게 운영하는 절차.
 source_of_truth:
-  - knowledge/service.py
-  - knowledge/reconciliation_service.py
-  - knowledge/relation_store.py
-  - knowledge/durable_outbox.py
-  - knowledge/graph_sync_worker.py
-  - knowledge/ontology/atr_core.v1.yaml
-  - scripts/knowledge_graph_cli.py
-  - app/main.py
-  - web/static/knowledge.js
+  - runtime/knowledge/service.py
+  - runtime/knowledge/reconciliation_service.py
+  - runtime/knowledge/relation_store.py
+  - runtime/knowledge/durable_outbox.py
+  - runtime/knowledge/graph_sync_worker.py
+  - runtime/knowledge/ontology/atr_core.v1.yaml
+  - runtime/scripts/knowledge_graph_cli.py
+  - runtime/app/main.py
+  - runtime/web/static/knowledge.js
 last_verified: 2026-08-17
 verified_against: working-tree-2026-08-17
 related_docs:

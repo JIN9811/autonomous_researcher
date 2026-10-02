@@ -76,7 +76,7 @@ supersedes: []
 | **[Device Bridges](../system/device_bridges/README.md)** | 로봇, 실험 장비, 해석 도구의 연동 규약. |
 | **[Runtime IDE](../system/runtime/runtime_ide.md)** | 실행 계획 편집, 실행 제어, 런 상태 확인. |
 | **[결과와 근거](paper/06_evaluation_and_results.md)** | 실증 결과와 이를 뒷받침하는 아티팩트. |
-| **[설치와 운영](../install/README.md)** | 설치, 설정, 운영 절차. |
+| **[설치와 운영](../runtime/install/README.md)** | 설치, 설정, 운영 절차. |
 | **[전체 문서](README.md)** | 상세 문서, 가이드, 문서 작성 규칙. |
 
 </div>
@@ -249,7 +249,7 @@ Runtime IDE와 Replay를 설명한
 | 독자 | 시작할 문서 |
 |---|---|
 | 연구자·리뷰어 | [문제 정의와 기여](paper/01_problem_and_contributions.md) → [결과](paper/06_evaluation_and_results.md) |
-| 운영자 | [설치](../install/README.md) → [첫 실행 튜토리얼](tutorials/first_autonomous_run.ko.md) → [Device Bridges](../system/device_bridges/README.md) |
+| 운영자 | [설치](../runtime/install/README.md) → [첫 실행 튜토리얼](tutorials/first_autonomous_run.ko.md) → [Device Bridges](../system/device_bridges/README.md) |
 | 개발자 | [런타임 상세 문서](../system/runtime/current_code_snapshot.md) → [에이전트 API](../system/agents/agent_api_connection_matrix.md) |
 | 기여자 | [기여 가이드](project/CONTRIBUTING.md) → [문서 작성 규칙](../system/standards/documentation_standard.md) |
 

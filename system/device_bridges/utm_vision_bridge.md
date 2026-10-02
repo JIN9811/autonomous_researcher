@@ -14,16 +14,16 @@ scope:
   - specimen_pose
 summary: Current UTM and visual-evidence bridge contract for ROS process lifecycle, topics, camera streams/configuration, RealSense capture, pose tracking, and temporal state evidence.
 source_of_truth:
-  - device_bridges/camera_vision/module.py
-  - device_bridges/camera_vision/utm_runtime_bridge.py
-  - device_bridges/camera_vision/realsense_bridge.py
-  - device_bridges/camera_vision/specimen_pose_tracker.py
-  - device_bridges/camera_vision/utm_state_observer.py
-  - device_bridges/utm_macro_bridge.py
-  - device_bridges/camera_vision/tools.py
-  - mcp_tools/utm_tools.py
-  - configs/devices.yaml
-  - app/main.py
+  - runtime/device_bridges/camera_vision/module.py
+  - runtime/device_bridges/camera_vision/utm_runtime_bridge.py
+  - runtime/device_bridges/camera_vision/realsense_bridge.py
+  - runtime/device_bridges/camera_vision/specimen_pose_tracker.py
+  - runtime/device_bridges/camera_vision/utm_state_observer.py
+  - runtime/device_bridges/utm_macro_bridge.py
+  - runtime/device_bridges/camera_vision/tools.py
+  - runtime/mcp_tools/utm_tools.py
+  - runtime/configs/devices.yaml
+  - runtime/app/main.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -40,7 +40,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # UTM Vision Bridge Reference
 
-<img src="../../web/static/workspace_icons/camera.webp" width="96" alt="Vision Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/camera.webp" width="96" alt="Vision Workspace icon">
 
 Main GUI: **Vision · Workspace** opens the camera bridge workspace in a separate window.
 
@@ -51,7 +51,7 @@ Main GUI: **Vision · Workspace** opens the camera bridge workspace in a separat
 | Purpose | Camera capture, pose tracking and temporal visual evidence |
 | Connects | Vision / camera workspace ↔ camera and ROS services |
 | Effect | Capture, configuration and process control; not instrument actuation |
-| Implementation | [Camera/Vision module](../../device_bridges/camera_vision/module.py) and [runtime](../../device_bridges/camera_vision/utm_runtime_bridge.py) |
+| Implementation | [Camera/Vision module](../../runtime/device_bridges/camera_vision/module.py) and [runtime](../../runtime/device_bridges/camera_vision/utm_runtime_bridge.py) |
 | Verification | Package, alias, observation and API regressions on 2026-09-13; earlier physical scope remains [recorded separately](#current-verification) |
 
 ## Installed Observation Bridge
@@ -66,7 +66,7 @@ The package directory contains the UTM runtime manager, temporal observer,
 RealSense adapter, specimen-pose tracker and camera tool registration. Legacy
 imports alias these canonical modules, preserving monkeypatches, injected resources
 and existing configuration/calibration/output locations. Dependencies are listed in
-the [bridge README](../../device_bridges/camera_vision/README.md); discovery does not
+the [bridge README](../../runtime/device_bridges/camera_vision/README.md); discovery does not
 install packages, start processes or probe hardware.
 
 LeRobot is a shared execution dependency: it owns ActiveCam move/capture/return

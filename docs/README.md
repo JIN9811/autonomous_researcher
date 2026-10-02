@@ -36,10 +36,10 @@ owner reference, not in a second copy of the same instructions here.
 
 | Goal | Start here |
 |---|---|
-| Install and run the application | [Installation](../install/README.md) → [Tutorial selector](tutorials/first_autonomous_run.md) |
+| Install and run the application | [Installation](../runtime/install/README.md) → [Tutorial selector](tutorials/first_autonomous_run.md) |
 | Understand the existing screens | [GUI structure and 1920 × 1080 screenshots](../system/runtime/gui/visual_structure.md) |
 | Understand the research and retained results | [Paper overview](paper/README.md) → [Results](paper/06_evaluation_and_results.md) |
-| Change or extend a module | [Modularity](../system/modularity.md) → [Runtime IDE](../system/runtime/runtime_ide.md) → [Packages](../packages/README.md) |
+| Change or extend a module | [Modularity](../system/modularity.md) → [Runtime IDE](../system/runtime/runtime_ide.md) → [Packages](../runtime/packages/README.md) |
 | Inspect an agent or device contract | [Agent references](../system/agents/README.md) · [Bridge references](../system/device_bridges/README.md) |
 | Find older decisions | [Historical archive](../system/retained-history/README.md), not current operating instructions |
 
@@ -73,7 +73,7 @@ machine-enforced metadata; it is not the complete repository file inventory.
 
 | Reader | Recommended sequence |
 |---|---|
-| New operator | [Install](../install/README.md), [first run EN](tutorials/first_autonomous_run.en.md) / [한국어](tutorials/first_autonomous_run.ko.md), [user manual EN](tutorials/user_manual.en.md) / [한국어](tutorials/user_manual.ko.md) |
+| New operator | [Install](../runtime/install/README.md), [first run EN](tutorials/first_autonomous_run.en.md) / [한국어](tutorials/first_autonomous_run.ko.md), [user manual EN](tutorials/user_manual.en.md) / [한국어](tutorials/user_manual.ko.md) |
 | Existing operator | [GUI reference](../system/runtime/gui/visual_structure.md), [Live details](gui/gui.md), [Replay](gui/run_replay.md), relevant workspace guide below |
 | Researcher / reviewer | [Paper](paper/README.md), [claim–evidence map](paper/09_claim_evidence_traceability.md), [reproducibility](paper/07_reproducibility.md), [limitations](paper/08_safety_ethics_and_limitations.md) |
 | Developer | [Code snapshot](../system/runtime/current_code_snapshot.md), [control model](../system/runtime/three_level_control_model.md), [runtime](../system/runtime/langgraph_runtime.md), [module contracts](../system/modularity.md) |
@@ -103,7 +103,7 @@ when documents disagree; do not treat a past successful run as current device re
 | Domain | Maintained owner documents |
 |---|---|
 | Execution, routes and modes | [Current snapshot](../system/runtime/current_code_snapshot.md), [closed loop and pages](../system/runtime/closed_loop_and_pages_reference.md), [experiment API](../system/runtime/autonomous_experiment_runtime.md) |
-| Graph and module lifecycle | [LangGraph](../system/runtime/langgraph_runtime.md), [Runtime IDE](../system/runtime/runtime_ide.md), [modularity](../system/modularity.md), [packages](../packages/README.md) |
+| Graph and module lifecycle | [LangGraph](../system/runtime/langgraph_runtime.md), [Runtime IDE](../system/runtime/runtime_ide.md), [modularity](../system/modularity.md), [packages](../runtime/packages/README.md) |
 | Models and credentials | [Agent program baseline](../system/runtime/agent_program_baseline.md), [API keys](../system/runtime/api_keys.md) |
 | Safety and recovery evidence | [Guardian](../system/runtime/guardian_graphwide_safety.md), [hardware alerts](gui/hardware_alert_lifecycle.md) |
 | Run persistence and playback | [Loop artifacts](../system/runtime/loop_artifact_archiving.md), [read-only Replay](gui/run_replay.md) |

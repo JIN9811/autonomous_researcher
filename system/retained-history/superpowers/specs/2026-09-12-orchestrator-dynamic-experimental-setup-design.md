@@ -86,14 +86,14 @@ supersedes: []
 
 | 현재 코드 | 확인한 동작 | 재사용·변경 방향 |
 |---|---|---|
-| [OrchestratorAgent](../../../../agents/core/orchestrator/agent.py) | `orchestrator_plan`으로 문장을 생성한 뒤 고정 결정 `prepare_stage_handoff_context` 구성 | 기존 결과 키를 유지하고 제한된 판단·도구 실행 추가 |
-| [Supervisor](../../../../orchestrator/supervisor.py) | mission/plan/followup/decision/handoff 계약 생성 | 구조화 결과와 근거의 직렬화에 재사용 |
-| [LangGraph runtime](../../../../orchestrator/langgraph_runtime.py) | pre-step 실행, 완료 결과 처리, graph 후보·다음 단계 계산, followup 기록 | 기존 인계 경계에서만 판단 결과 소비; 별도 실행 루프 신설 금지 |
-| [Controller](../../../../app/controller.py) | planning lock, 세션 snapshot, Chat, 실행 중 followup queue, Design 인계 경로 | 같은 판단 서비스·설정 상태를 연결하고 기존 진입 경로 유지 |
-| [Planning API](../../../../app/main.py) | `/api/planning/session`, `/messages`, `/message`, `/bootstrap` | 기존 Chat와 snapshot에 선택적 설정 맥락·요약 추가 |
-| [Planning UI](../../../../web/static/planning.js) | `renderLiveExperimentSetupPanel`에 고정된 6개 readonly 항목 | 에이전트가 공개한 주제별 블록으로 교체 |
+| [OrchestratorAgent](../../../../runtime/agents/core/orchestrator/agent.py) | `orchestrator_plan`으로 문장을 생성한 뒤 고정 결정 `prepare_stage_handoff_context` 구성 | 기존 결과 키를 유지하고 제한된 판단·도구 실행 추가 |
+| [Supervisor](../../../../runtime/orchestrator/supervisor.py) | mission/plan/followup/decision/handoff 계약 생성 | 구조화 결과와 근거의 직렬화에 재사용 |
+| [LangGraph runtime](../../../../runtime/orchestrator/langgraph_runtime.py) | pre-step 실행, 완료 결과 처리, graph 후보·다음 단계 계산, followup 기록 | 기존 인계 경계에서만 판단 결과 소비; 별도 실행 루프 신설 금지 |
+| [Controller](../../../../runtime/app/controller.py) | planning lock, 세션 snapshot, Chat, 실행 중 followup queue, Design 인계 경로 | 같은 판단 서비스·설정 상태를 연결하고 기존 진입 경로 유지 |
+| [Planning API](../../../../runtime/app/main.py) | `/api/planning/session`, `/messages`, `/message`, `/bootstrap` | 기존 Chat와 snapshot에 선택적 설정 맥락·요약 추가 |
+| [Planning UI](../../../../runtime/web/static/planning.js) | `renderLiveExperimentSetupPanel`에 고정된 6개 readonly 항목 | 에이전트가 공개한 주제별 블록으로 교체 |
 | 같은 UI의 `draft_apply` 처리 | 현재 spec을 문장으로 만들어 Chat 입력란에 배치 | 블록 ID·revision 기반 편집 맥락으로 교체; 클릭만으로 전송하지 않음 |
-| [State](../../../../orchestrator/state.py) | `agent_status`, `device_health`, `run_metadata` 등 | 기존 증거의 출처로 활용하되 idle/health 문자열만으로 실행 가능 판정 금지 |
+| [State](../../../../runtime/orchestrator/state.py) | `agent_status`, `device_health`, `run_metadata` 등 | 기존 증거의 출처로 활용하되 idle/health 문자열만으로 실행 가능 판정 금지 |
 
 `OrchestratorAgent.run`만 바꾸면 Live Chat와 일부 planning 경로에는 반영되지 않는다.
 반대로 Chat 답변만 바꾸면 runtime 인계 결정은 그대로다. 두 진입점이 같은 판단

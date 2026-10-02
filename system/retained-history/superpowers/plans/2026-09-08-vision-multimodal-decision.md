@@ -9,9 +9,9 @@ audience: [developer, maintainer]
 scope: [agents, vision, decision_tools, multimodal]
 summary: Shared image forwarding and bounded Vision decisions using existing verification routes.
 source_of_truth:
-  - agents/vision/decision.py
-  - agents/vision/agent.py
-  - orchestrator/langgraph_runtime.py
+  - runtime/agents/vision/decision.py
+  - runtime/agents/vision/agent.py
+  - runtime/orchestrator/langgraph_runtime.py
 historical_source_paths:
   - agents/vision_decision.py
   - agents/vision_agent.py

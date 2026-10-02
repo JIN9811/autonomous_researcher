@@ -7,7 +7,7 @@ audience: [operator, developer, maintainer]
 scope: [knowledge, publication_boundary, github]
 summary: Pre-commit and CI procedures for preventing private Knowledge data from entering public publication.
 source_of_truth:
-  - scripts/verify_knowledge_publication.py
+  - runtime/scripts/verify_knowledge_publication.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:

@@ -13,9 +13,9 @@ scope:
 summary: Defines progressive ATR reproduction tiers from static inspection through supervised live hardware.
 source_of_truth:
   - docs/project/REQUIREMENTS.md
-  - scripts/validate_documentation.py
-  - scripts/validate_paper_publication.py
-  - tests
+  - runtime/scripts/validate_documentation.py
+  - runtime/scripts/validate_paper_publication.py
+  - runtime/tests
 last_verified: 2026-08-09
 verified_against: 78b0913
 paper_section: reproducibility

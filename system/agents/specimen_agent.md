@@ -7,22 +7,22 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, specimen, manufacturing, printer_connection]
 summary: Current contract for geometry, manufacturing QA, printer preparation, fabrication evidence, and specimen handoff.
 source_of_truth:
-  - agents/specimen/agent.py
-  - agents/specimen/decision.py
-  - agents/specimen/execution.py
-  - agents/specimen/structure.py
-  - agents/specimen/module.py
-  - agents/specimen/presentation.py
-  - agents/specimen/frontend/live_report.js
-  - utils/specimen_execution.py
-  - graphs/modules/specimen/module.yaml
-  - device_bridges/printer_fleet/module.py
-  - device_bridges/printer_fleet/bridge.py
-  - device_bridges/printer_fleet/providers/bambu_autoejection.py
-  - device_bridges/printer_fleet/providers/prusa.py
-  - packages/agents/specimen/package.yaml
-  - app/main.py
-  - web/static/planning.js
+  - runtime/agents/specimen/agent.py
+  - runtime/agents/specimen/decision.py
+  - runtime/agents/specimen/execution.py
+  - runtime/agents/specimen/structure.py
+  - runtime/agents/specimen/module.py
+  - runtime/agents/specimen/presentation.py
+  - runtime/agents/specimen/frontend/live_report.js
+  - runtime/utils/specimen_execution.py
+  - runtime/graphs/modules/specimen/module.yaml
+  - runtime/device_bridges/printer_fleet/module.py
+  - runtime/device_bridges/printer_fleet/bridge.py
+  - runtime/device_bridges/printer_fleet/providers/bambu_autoejection.py
+  - runtime/device_bridges/printer_fleet/providers/prusa.py
+  - runtime/packages/agents/specimen/package.yaml
+  - runtime/app/main.py
+  - runtime/web/static/planning.js
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -58,7 +58,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 ### Module Ownership and Layout
 
-The installed [Specimen module](../../agents/specimen/module.py) binds the
+The installed [Specimen module](../../runtime/agents/specimen/module.py) binds the
 existing `SpecimenMakingAgent` to `AgentRegistry`. The handler remains
 `agent.specimen_agent`; maintained Python callers import `agents.specimen`
 directly after retirement of the flat agent wrappers.
@@ -80,7 +80,7 @@ Removing a graph reference never deletes installed code or historical results.
 
 ### Agent Package and Device Bridge Composition
 
-The [Specimen Agent Package](../../packages/agents/specimen/package.yaml)
+The [Specimen Agent Package](../../runtime/packages/agents/specimen/package.yaml)
 declares `specimen@1.0.0` and its `printer_fleet@1.0.0` dependency. Fleet
 references the existing Bambu and Prusa provider components; it is not another
 printer protocol or an installer.
@@ -88,9 +88,9 @@ printer protocol or an installer.
 | Package boundary | Canonical location | Contract |
 |---|---|---|
 | Agent | `agents/specimen/` | Decision, execution, report and frontend ownership |
-| Shared bridge | [Printer Fleet](../../device_bridges/printer_fleet/README.md) | Registered printer tools and package membership |
-| Internal providers | [Printer Fleet package layout](../../device_bridges/printer_fleet/README.md) | Bambu and Prusa implementations within one Device Bridge Package |
-| Experimental Package | [Package API](../../packages/README.md) | Graph plan, exact dependencies and portable module drafts |
+| Shared bridge | [Printer Fleet](../../runtime/device_bridges/printer_fleet/README.md) | Registered printer tools and package membership |
+| Internal providers | [Printer Fleet package layout](../../runtime/device_bridges/printer_fleet/README.md) | Bambu and Prusa implementations within one Device Bridge Package |
+| Experimental Package | [Package API](../../runtime/packages/README.md) | Graph plan, exact dependencies and portable module drafts |
 
 Bridge code stays under `device_bridges/`; existing connection memory and
 run/loop artifacts keep their owners and locations. Export does not bundle that
@@ -198,8 +198,8 @@ The preparation artifact alone is not physical completion.
 ![Specimen owner operations and source-bound five-area relationships](assets/figures/specimen_control_areas.svg)
 
 The IDE and this document projection share the
-[execution definition](../../graphs/modules/specimen/module.yaml) and
-[source relationships](../../agents/specimen/structure.py). Solid owner nodes
+[execution definition](../../runtime/graphs/modules/specimen/module.yaml) and
+[source relationships](../../runtime/agents/specimen/structure.py). Solid owner nodes
 are executable; CODE relationships expose inner checks, tools and evidence
 without adding execution steps. The document uses the light theme.
 
@@ -532,5 +532,5 @@ camera, and provider availability varies by environment.
 - [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Bambu Runtime Guide](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md)
 - [3DP Usage Guide](../../docs/tutorials/device_workspace_3dp_usage.ko.md)
-- [Specimen handler](../../agents/specimen/agent.py) and [decision dispatcher](../../agents/specimen/decision.py)
+- [Specimen handler](../../runtime/agents/specimen/agent.py) and [decision dispatcher](../../runtime/agents/specimen/decision.py)
 - [Five-area contract](../retained-history/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)

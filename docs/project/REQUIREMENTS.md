@@ -11,7 +11,7 @@ not a fresh installation or hardware verification performed during this audit.
 | Purpose | Install external runtimes, services and device-side dependencies |
 | Audience | Workstation maintainers and deployment operators |
 | Preparation | Choose the operating system, model backend and required device integrations |
-| Reading path | [Python packages](../../requirements.txt) · [Setup and operation](../../README.md) · [Device bridges](../../system/device_bridges/README.md) |
+| Reading path | [Python packages](../../runtime/requirements.txt) · [Setup and operation](../../README.md) · [Device bridges](../../system/device_bridges/README.md) |
 
 This file lists non-Python installation requirements, external checkouts, local
 services, model downloads, and device-side programs required by this repository.

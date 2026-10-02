@@ -226,7 +226,7 @@ Manipulation rejects expired Vision signals before issuing robot commands. Visio
 owns observation/review, but is not purely passive: registered LeRobot tools may
 perform Active Cam capture and stop the identity-bound rollout after verification.
 Those effects remain in the owning bridge, with camera-return/stop evidence;
-Vision does not introduce an independent robot driver. See [the Vision owner](../../agents/vision/agent.py).
+Vision does not introduce an independent robot driver. See [the Vision owner](../../runtime/agents/vision/agent.py).
 
 ### 2026-05-29 Manipulation Report and Robot Task Result Contract
 

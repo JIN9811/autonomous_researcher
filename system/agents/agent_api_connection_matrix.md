@@ -16,20 +16,20 @@ scope:
   - safety
 summary: Cross-agent matrix of responsibilities, contracts, APIs, services, external effects, and recovery boundaries.
 source_of_truth:
-  - agents
-  - graphs/modules
-  - graphs/configs/atr_closed_loop.yaml
-  - app/main.py
-  - app/controller.py
-  - backends
-  - device_bridges
-  - knowledge
-  - knowledge/http_api.py
-  - knowledge/source_api.py
-  - agents/core/plans.py
-  - agents/core/knowledge/plan.py
-  - agents/core/guardian/plan.py
-  - packages/service.py
+  - runtime/agents
+  - runtime/graphs/modules
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/app/main.py
+  - runtime/app/controller.py
+  - runtime/backends
+  - runtime/device_bridges
+  - runtime/knowledge
+  - runtime/knowledge/http_api.py
+  - runtime/knowledge/source_api.py
+  - runtime/agents/core/plans.py
+  - runtime/agents/core/knowledge/plan.py
+  - runtime/agents/core/guardian/plan.py
+  - runtime/packages/service.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -237,7 +237,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 |---|---|---|---|---|
 | Orchestrator | planning session/message plus scoped Setup proposal/action contract | owner availability/readback and registered model backend | run lifecycle, run events/artifacts, approvals, SSE/recent events | `/openapi.json`, `/api/planning/*`, `/api/run*`, `/api/runtime/*` |
 | Design | no dedicated direct execution endpoint | planning artifact/session context; `/api/agents/design/report` | Existing `/api/graphs/*` path; `/api/modules/design` exposes code-module metadata | `/openapi.json`, unchanged `agent.design_agent` handler; module-owned report UI hosted at `/live` |
-| Specimen Making | `GET /api/agents/specimen/report`; module-owned frontend asset | `/api/printer/*`, geometry/artifact tools; `/api/packages` describes composition | printer workspace and existing module draft/save controls | [Owner module](../../agents/specimen/module.py), `/openapi.json`, printer bridge implementations |
+| Specimen Making | `GET /api/agents/specimen/report`; module-owned frontend asset | `/api/printer/*`, geometry/artifact tools; `/api/packages` describes composition | printer workspace and existing module draft/save controls | [Owner module](../../runtime/agents/specimen/module.py), `/openapi.json`, printer bridge implementations |
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
 | Lab Equipment | `GET /api/agents/equipment/report`; installed frontend asset | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces; module/package catalogs | `/openapi.json`, `agents/equipment/module.py`, Windows/PyAutoGUI bridge/tool registry |

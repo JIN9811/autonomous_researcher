@@ -48,14 +48,14 @@ data and has no active computation-device bridge.
 
 ## Integration Architecture
 
-The [Manipulation Agent Package](../../packages/agents/manipulation/README.md)
+The [Manipulation Agent Package](../../runtime/packages/agents/manipulation/README.md)
 and Vision package both pin `lerobot@1.0.0`. Its canonical implementation lives
 under `device_bridges/lerobot/`, with exact legacy import aliases and one runtime
 identity, `lerobot_bridge`. Device Bridges exposes ten internal capability groups
 under this shared bridge; the [LeRobot Reference](lerobot_bridge.md) documents
 their existing workspace, API, configuration and artifact boundaries.
 
-The installed [Vision Agent Package](../../packages/agents/vision/README.md)
+The installed [Vision Agent Package](../../runtime/packages/agents/vision/README.md)
 declares the observation-only `camera_vision@1.0.0` bridge. Package Manager lists
 the package; Device Bridges presents package → bridge and opens its existing
 observation components. [Camera/Vision](utm_vision_bridge.md) shares its temporal
@@ -140,30 +140,30 @@ Current paths worth distinguishing:
 ### Package-Owned Bridge Composition
 
 The current modularized fabrication slice declares a
-[Specimen Agent Package](../../packages/agents/specimen/package.yaml) referencing
-one [Printer Fleet module](../../device_bridges/printer_fleet/README.md).
+[Specimen Agent Package](../../runtime/packages/agents/specimen/package.yaml) referencing
+one [Printer Fleet module](../../runtime/device_bridges/printer_fleet/README.md).
 Its canonical Bambu and Prusa providers and separate requirements live under
-`device_bridges/printer_fleet/providers/`. The [Bambu](../../device_bridges/bambu/README.md)
-and [Prusa](../../device_bridges/prusa/README.md) directories document compatibility
+`device_bridges/printer_fleet/providers/`. The [Bambu](../../runtime/device_bridges/bambu/README.md)
+and [Prusa](../../runtime/device_bridges/prusa/README.md) directories document compatibility
 aliases, not separate installed bridge packages. Bridge source stays under
 `device_bridges/`, not inside the agent package; flat imports remain adapters.
 
 `GET /api/packages` describes installed ownership without hardware probes.
-[Experimental Packages](../../packages/README.md) combine exact installed package
+[Experimental Packages](../../runtime/packages/README.md) combine exact installed package
 references, orchestration plans and portable module drafts. Importing a package
 does not install code, configure equipment, activate a graph or delete shared
 bridges. Other bridge families retain their current structure until their own
 module migration.
 
-The installed [Equipment Agent Package](../../packages/agents/equipment/package.yaml)
-now references [Windows/PyAutoGUI](../../device_bridges/windows_pyautogui/module.py)
+The installed [Equipment Agent Package](../../runtime/packages/agents/equipment/package.yaml)
+now references [Windows/PyAutoGUI](../../runtime/device_bridges/windows_pyautogui/module.py)
 as `windows_pyautogui@1.0.0`. Its canonical implementation and tool registration
 live under `device_bridges/windows_pyautogui/`; flat imports remain exact aliases.
 The package reuses the existing Windows/Local worker choice, 18 tool IDs,
 `equipment:windows_pyautogui` queue, `/equipment/windows` workspace and storage.
 Catalog and IDE inspection never pairs, selects or executes a worker.
 
-The [Analysis Agent Package](../../packages/agents/analysis/package.yaml) has no
+The [Analysis Agent Package](../../runtime/packages/agents/analysis/package.yaml) has no
 device bridge. It processes equipment-produced measurements and passes validated
 objectives to BO through the existing agent contracts.
 

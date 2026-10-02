@@ -177,7 +177,7 @@ MTP assistant mapping:
 
 NemoClaw/vLLM GPU residency profile:
 
-- `gemma4:31b`: `--gpu-memory-utilization 0.55`, `--max-model-len 32768`, as declared in [the managed deployment](../../deploy/nemoclaw-vllm.yaml). These are configured limits, not measured current residency.
+- `gemma4:31b`: `--gpu-memory-utilization 0.55`, `--max-model-len 32768`, as declared in [the managed deployment](../../runtime/deploy/nemoclaw-vllm.yaml). These are configured limits, not measured current residency.
 - `gemma4:e4b-it-nvfp4`: `--gpu-memory-utilization 0.14` with `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0`
 - The current managed model list is intentionally limited to two deployments: 31B and E4B. E2B is not part of the active `/api/runtime/models` surface.
 - E4B retains the low-residency `0.14` configuration. Its CUDA-graph profiler override is specific to this GB10/NVFP4 deployment; it is not a general vLLM requirement.
@@ -383,7 +383,7 @@ Frequently written by run loop merge:
   1. stops active run if needed
   2. scales down managed vLLM deployments, including persistent ones
   3. calls Ollama `/api/ps` and unloads its resident models via `/api/generate` with `keep_alive=0`
-- The response records vLLM and Ollama outcomes separately; a successful vLLM scale-down does not imply a successful Ollama query. This is a mutating model/run control, not a read-only resource refresh. See `MainController.clear_gpu` in [the controller](../../app/controller.py).
+- The response records vLLM and Ollama outcomes separately; a successful vLLM scale-down does not imply a successful Ollama query. This is a mutating model/run control, not a read-only resource refresh. See `MainController.clear_gpu` in [the controller](../../runtime/app/controller.py).
 - Designed to free resident GPU model memory without killing the whole process tree.
 
 ## CLI Control Baseline

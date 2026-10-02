@@ -14,9 +14,9 @@ scope:
 summary: Defines the environments, units of evaluation, controls, and evidence collection required for ATR experiments.
 source_of_truth:
   - docs/project/REQUIREMENTS.md
-  - configs
-  - graphs/configs/atr_closed_loop.yaml
-  - tests
+  - runtime/configs
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/tests
 last_verified: 2026-08-09
 verified_against: 0b7627b
 paper_section: experimental_setup

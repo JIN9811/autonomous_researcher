@@ -168,7 +168,7 @@ the complete contract and
 [Agent Reference Index](../../agents/README.md#three-level-control-classification)
 for the per-agent classification.
 
-The default execution graph is [graphs/configs/atr_closed_loop.yaml](../../../graphs/configs/atr_closed_loop.yaml).
+The default execution graph is [graphs/configs/atr_closed_loop.yaml](../../../runtime/graphs/configs/atr_closed_loop.yaml).
 A run starts through `POST /api/run/start` or `POST /api/runtime/start`. The runtime then invokes `LangGraphRunLoop`, reads the current stage, executes the corresponding node, and records events.
 
 ```text
@@ -281,9 +281,9 @@ Shared contracts:
 ## 7. Important Config Files
 
 - [REQUIREMENTS.md](../../../docs/project/REQUIREMENTS.md): external dependencies, installs, clone/download requirements
-- [requirements.txt](../../../requirements.txt): Python packages
-- [pyproject.toml](../../../pyproject.toml): project and pytest settings
-- [graphs/configs/atr_closed_loop.yaml](../../../graphs/configs/atr_closed_loop.yaml): default closed-loop graph
+- [requirements.txt](../../../runtime/requirements.txt): Python packages
+- [pyproject.toml](../../../runtime/pyproject.toml): project and pytest settings
+- [graphs/configs/atr_closed_loop.yaml](../../../runtime/graphs/configs/atr_closed_loop.yaml): default closed-loop graph
 - `graphs/modules/*/module.yaml`: per-stage execution contract, handler, tool allowlist, and safety settings
 - `graphs/modules/*/ui.yaml`: Live GUI card/report section presentation descriptor. It does not grant execution authority
 - `memory/printer_fleet.json`: active printer profile selection

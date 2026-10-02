@@ -14,12 +14,12 @@ scope:
   - specimen_fabrication
 summary: Current contract for selecting, configuring, and routing ATR printer providers without silent fallback.
 source_of_truth:
-  - device_bridges/printer_fleet/module.py
-  - device_bridges/printer_fleet/bridge.py
-  - device_bridges/printer_fleet/providers/prusa.py
-  - mcp_tools/printer_tools.py
-  - configs/devices.yaml
-  - app/main.py
+  - runtime/device_bridges/printer_fleet/module.py
+  - runtime/device_bridges/printer_fleet/bridge.py
+  - runtime/device_bridges/printer_fleet/providers/prusa.py
+  - runtime/mcp_tools/printer_tools.py
+  - runtime/configs/devices.yaml
+  - runtime/app/main.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -36,7 +36,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # Printer Fleet Bridge Reference
 
-<img src="../../web/static/workspace_icons/printer.webp" width="96" alt="3D Printer Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/printer.webp" width="96" alt="3D Printer Workspace icon">
 
 Main GUI: **3D Printer · Workspace** opens the printer workspace in a separate window.
 
@@ -47,7 +47,7 @@ Main GUI: **3D Printer · Workspace** opens the printer workspace in a separate 
 | Purpose | Select a printer profile and route preparation/status requests |
 | Connects | Specimen / 3D workspace ↔ selected Bambu or Prusa provider |
 | Effect | Delegated upload and motion are possible; no silent provider fallback |
-| Implementation | [Printer tools](../../mcp_tools/printer_tools.py) |
+| Implementation | [Printer tools](../../runtime/mcp_tools/printer_tools.py) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
 
 ## Summary
@@ -59,23 +59,23 @@ implementations own their network commands and device-specific proof.
 
 ## Package Composition
 
-The installed [Fleet descriptor](../../device_bridges/printer_fleet/module.py)
-publishes `printer_fleet@1.0.0`. The [Specimen Agent Package](../../packages/agents/specimen/package.yaml)
+The installed [Fleet descriptor](../../runtime/device_bridges/printer_fleet/module.py)
+publishes `printer_fleet@1.0.0`. The [Specimen Agent Package](../../runtime/packages/agents/specimen/package.yaml)
 references it; Design has no bridge dependency. Package membership is available
 through `GET /api/packages` without opening transports or reading connection
 memory. A shared bridge remains one installed module across package references.
 
 | Owner | Folder and requirements | Runtime boundary |
 |---|---|---|
-| Printer Fleet | [Fleet](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/requirements.txt) | Existing manager and tool registration |
-| Bambu provider | [Bambu](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/providers/bambu-requirements.txt) | Provider clients and autoejection transformer |
-| Prusa provider | [Prusa](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/providers/prusa-requirements.txt) | PrusaLink and slicer workflow |
+| Printer Fleet | [Fleet](../../runtime/device_bridges/printer_fleet/README.md) · [Requirements](../../runtime/device_bridges/printer_fleet/requirements.txt) | Existing manager and tool registration |
+| Bambu provider | [Bambu](../../runtime/device_bridges/printer_fleet/README.md) · [Requirements](../../runtime/device_bridges/printer_fleet/providers/bambu-requirements.txt) | Provider clients and autoejection transformer |
+| Prusa provider | [Prusa](../../runtime/device_bridges/printer_fleet/README.md) · [Requirements](../../runtime/device_bridges/printer_fleet/providers/prusa-requirements.txt) | PrusaLink and slicer workflow |
 
 The original flat imports remain identity-preserving compatibility adapters.
 Provider commands, selection, configuration and artifact locations are unchanged.
 External slicers are documented separately from Python requirements. Experimental
 Package import/export carries declarations and editable drafts, not credentials,
-equipment readiness or installation actions; see the [package contract](../../packages/README.md).
+equipment readiness or installation actions; see the [package contract](../../runtime/packages/README.md).
 
 The 2026-09-13 folder migration was checked with 150 original provider/tool/
 autoejection tests and 57 overlapping workflow/completion checks. These used

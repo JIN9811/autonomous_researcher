@@ -13,12 +13,12 @@ scope:
   - agents
 summary: 현재 닫힌 루프 실행 순서와 페이지·에이전트·이벤트 계약을 연결한 시스템 Reference.
 source_of_truth:
-  - graphs/configs/atr_closed_loop.yaml
-  - orchestrator/langgraph_runtime.py
-  - app/controller.py
-  - app/main.py
-  - web/templates/planning.html
-  - web/static/planning.js
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/app/controller.py
+  - runtime/app/main.py
+  - runtime/web/templates/planning.html
+  - runtime/web/static/planning.js
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -187,7 +187,7 @@ Management는 주요 descriptor 필드를 typed form으로 편집할 수 있습�
 ## 3) 기본 닫힌루프(기본 모드) 단계별 상세
 
 아래는 대표 실험 흐름입니다. 실제 기본/조건부 경로는
-[`atr_closed_loop.yaml`](../../graphs/configs/atr_closed_loop.yaml)이 결정합니다.
+[`atr_closed_loop.yaml`](../../runtime/graphs/configs/atr_closed_loop.yaml)이 결정합니다.
 
 ```text
 dispatch -> idle -> design -> specimen -> vision -> manipulation -> vision -> equipment -> analysis -> knowledge -> bo -> guardian -> (continue: design | stop: complete | error: error)

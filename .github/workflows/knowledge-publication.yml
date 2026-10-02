@@ -29,4 +29,4 @@ jobs:
           if [ -z "$EVENT_BASE" ] || [ "$EVENT_BASE" = "0000000000000000000000000000000000000000" ]; then
             EVENT_BASE=$(git hash-object -t tree -w --stdin </dev/null)
           fi
-          python scripts/verify_knowledge_publication.py --base "$EVENT_BASE" --head "$EVENT_HEAD"
+          python runtime/scripts/verify_knowledge_publication.py --repo . --base "$EVENT_BASE" --head "$EVENT_HEAD"

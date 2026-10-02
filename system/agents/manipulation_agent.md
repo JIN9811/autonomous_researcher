@@ -7,18 +7,18 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, manipulation, robotics, lerobot]
 summary: Manipulation-owned bounded LLM skill selection and post-Vision result judgment over existing robot executors.
 source_of_truth:
-  - agents/manipulation/agent.py
-  - agents/manipulation/decision.py
-  - agents/manipulation/startup_retry.py
-  - agents/manipulation/execution.py
-  - agents/manipulation/structure.py
-  - agents/manipulation/presentation.py
-  - agents/manipulation/frontend/live_report.js
-  - graphs/modules/manipulation/module.yaml
-  - device_bridges/lerobot/bridge.py
-  - packages/agents/manipulation/package.yaml
-  - app/main.py
-  - utils/utm_clear_cycle.py
+  - runtime/agents/manipulation/agent.py
+  - runtime/agents/manipulation/decision.py
+  - runtime/agents/manipulation/startup_retry.py
+  - runtime/agents/manipulation/execution.py
+  - runtime/agents/manipulation/structure.py
+  - runtime/agents/manipulation/presentation.py
+  - runtime/agents/manipulation/frontend/live_report.js
+  - runtime/graphs/modules/manipulation/module.yaml
+  - runtime/device_bridges/lerobot/bridge.py
+  - runtime/packages/agents/manipulation/package.yaml
+  - runtime/app/main.py
+  - runtime/utils/utm_clear_cycle.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -111,7 +111,7 @@ primary graph/sidecar handoffs.
 
 ## Installed Package and Executable Structure
 
-The installed [Manipulation Agent Package](../../packages/agents/manipulation/README.md)
+The installed [Manipulation Agent Package](../../runtime/packages/agents/manipulation/README.md)
 is a composition contract: `manipulation@1.0.0` binds the owner module and
 `lerobot@1.0.0`. Agent code, bounded LLM decisions, execution definitions, report
 projection and frontend composition live under `agents/manipulation/`.

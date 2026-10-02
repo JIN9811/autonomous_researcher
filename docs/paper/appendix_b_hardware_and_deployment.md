@@ -14,11 +14,11 @@ scope:
   - deployment
 summary: Defines ATR deployment roles, optional services, hardware boundaries, and the evidence needed to claim a validated topology.
 source_of_truth:
-  - app/bootstrap.py
-  - configs
-  - device_bridges
-  - Pyautogui_server_for_window
-  - web
+  - runtime/app/bootstrap.py
+  - runtime/configs
+  - runtime/device_bridges
+  - runtime/Pyautogui_server_for_window
+  - runtime/web
 last_verified: 2026-09-12
 verified_against: 5542ef2
 paper_section: appendix_hardware_and_deployment
@@ -138,7 +138,7 @@ tests, failure injection, and security review.
 ## Limitations and Known Gaps
 
 The repository has deployment manifests, including the managed
-[vLLM deployment](../../deploy/nemoclaw-vllm.yaml), but not a paper-certified
+[vLLM deployment](../../runtime/deploy/nemoclaw-vllm.yaml), but not a paper-certified
 portable deployment for every supported topology. The bounded September 7 live
 records identify their mixed-mode scope; they do not supply a complete physical
 equipment bill of materials, cross-topology compatibility certification, or

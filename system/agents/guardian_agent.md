@@ -7,19 +7,19 @@ audience: [researcher, reviewer, operator, developer, safety_reviewer]
 scope: [agents, guardian, safety_control_plane]
 summary: Current contract for graph-wide risk review, incidents, approvals, safety budgets, and continue/stop/error routing.
 source_of_truth:
-  - agents/core/guardian/agent.py
-  - agents/core/guardian/decision.py
-  - agents/core/guardian/execution.py
-  - agents/core/guardian/structure.py
-  - agents/core/guardian/plan.py
-  - agents/core/guardian/presentation.py
-  - agents/core/guardian/module.py
-  - agents/core/guardian/frontend/live_report.js
-  - graphs/modules/guardian/module.yaml
-  - graphs/modules/guardian/ui.yaml
-  - policies/guardian_gate.py
-  - app/controller.py
-  - app/main.py
+  - runtime/agents/core/guardian/agent.py
+  - runtime/agents/core/guardian/decision.py
+  - runtime/agents/core/guardian/execution.py
+  - runtime/agents/core/guardian/structure.py
+  - runtime/agents/core/guardian/plan.py
+  - runtime/agents/core/guardian/presentation.py
+  - runtime/agents/core/guardian/module.py
+  - runtime/agents/core/guardian/frontend/live_report.js
+  - runtime/graphs/modules/guardian/module.yaml
+  - runtime/graphs/modules/guardian/ui.yaml
+  - runtime/policies/guardian_gate.py
+  - runtime/app/controller.py
+  - runtime/app/main.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:

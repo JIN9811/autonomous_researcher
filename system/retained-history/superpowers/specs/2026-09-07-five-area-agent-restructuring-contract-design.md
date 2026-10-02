@@ -246,9 +246,9 @@ Analysis의 세 LLM 역할, 지표 유지·제거, 실험 기반 모델/방법 �
 
 #### Design 우선 재검토 — 구현 전 검토안
 
-검토 기준은 현재 [Design 코드](../../../../agents/design/agent.py),
-[모듈 정의](../../../../graphs/modules/design/module.yaml),
-[controller](../../../../app/controller.py), [기존 테스트](../../../../tests/unit/test_design_agent.py)다.
+검토 기준은 현재 [Design 코드](../../../../runtime/agents/design/agent.py),
+[모듈 정의](../../../../runtime/graphs/modules/design/module.yaml),
+[controller](../../../../runtime/app/controller.py), [기존 테스트](../../../../runtime/tests/unit/test_design_agent.py)다.
 아래는 현재 구현과 제안을 구분한 첫 적용 대상 검토이며, 구현 승인이 아니다.
 
 | 현재 확인한 지점 | 재구성에 주는 의미 |
@@ -679,7 +679,7 @@ evidence/image hash/error를 추가 기록하며 기존 검출 사실이나 time
 | 모드 | 실제 API/vLLM fixture와 명시적 비LLM TEST label 분리; mock은 visual acceptance 불가 |
 | 회귀 | 기존 detector threshold/좌표/모드, report/signal/handoff, Guardian, graph와 archive 유지 |
 
-[`scripts/verify_vision_multimodal.py --execute`](../../../../scripts/verify_vision_multimodal.py)로
+[`scripts/verify_vision_multimodal.py --execute`](../../../../runtime/scripts/verify_vision_multimodal.py)로
 등록 경로를 확인한 결과 8개 fixture 판단이 모두 accepted였다. API `gpt-5.5`는
 selection/upright/compressed/synthetic-empty에 각각 5.076/4.058/4.220/11.739초,
 vLLM `e4b`의 `gemma4:31b` fallback은 4.901/8.302/8.380/8.458초였다. 이 실행은

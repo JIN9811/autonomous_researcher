@@ -13,14 +13,14 @@ scope:
   - physical_recovery
 summary: Installation, operation, recovery, diagnostics, and pending physical-validation procedure for the Mitsubishi PLC safety bridge.
 source_of_truth:
-  - configs/plc.yaml
-  - device_bridges/plc_bridge.py
-  - utils/plc_safety_state.py
-  - utils/plc_bridge_service.py
-  - app/controller.py
-  - app/main.py
-  - web/templates/plc.html
-  - web/static/plc.js
+  - runtime/configs/plc.yaml
+  - runtime/device_bridges/plc_bridge.py
+  - runtime/utils/plc_safety_state.py
+  - runtime/utils/plc_bridge_service.py
+  - runtime/app/controller.py
+  - runtime/app/main.py
+  - runtime/web/templates/plc.html
+  - runtime/web/static/plc.js
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -36,7 +36,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # PLC Safety Bridge Operator Guide
 
-<img src="../../web/static/workspace_icons/plc.webp" width="96" alt="PLC Safety Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/plc.webp" width="96" alt="PLC Safety Workspace icon">
 
 Main GUI: **PLC Safety · Workspace** opens the PLC workspace in a separate window.
 
@@ -47,7 +47,7 @@ Main GUI: **PLC Safety · Workspace** opens the PLC workspace in a separate wind
 | Purpose | Supervisory PLC stop, recovery and status integration |
 | Connects | Controller ↔ PLC over MC Protocol Type 3E |
 | Effect | PLC writes and controller stop/recovery; not a hardwired safety replacement |
-| Implementation | [PLC implementation](../../device_bridges/plc_bridge.py) |
+| Implementation | [PLC implementation](../../runtime/device_bridges/plc_bridge.py) |
 | Verification | [Software-only checks](#software-only-verification); physical validation pending |
 
 ## Purpose And Safety Boundary

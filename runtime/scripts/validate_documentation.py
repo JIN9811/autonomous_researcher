@@ -1,0 +1,978 @@
+#!/usr/bin/env python3
+"""Validate governed ATR documentation without rewriting prose."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import re
+from collections import Counter
+from collections.abc import Sequence
+from typing import Any
+from urllib.parse import unquote
+
+import yaml
+
+
+DOCUMENT_SUBTYPES = {
+    "index": {"index"},
+    "standard": {"documentation", "repository", "safety", "contract"},
+    "reference": {"system", "runtime", "api", "schema", "current_snapshot"},
+    "guide": {"tutorial", "how_to", "operations_runbook", "troubleshooting"},
+    "design": {"feature", "architecture", "adr"},
+    "plan": {"implementation", "migration"},
+    "evidence": {"research", "audit", "test_report", "benchmark"},
+}
+DOCUMENT_STATUSES = {"draft", "review", "active", "superseded", "archived"}
+AUTHORITIES = {
+    "navigation",
+    "normative",
+    "descriptive",
+    "procedural",
+    "proposal",
+    "execution",
+    "evidentiary",
+}
+DESIGN_STATUSES = {"proposed", "approved", "rejected", "superseded"}
+PLAN_STATUSES = {"planned", "in_progress", "blocked", "completed", "cancelled"}
+REQUIRED_FIELDS = {
+    "doc_type",
+    "subtype",
+    "status",
+    "authority",
+    "audience",
+    "scope",
+    "summary",
+    "related_docs",
+    "supersedes",
+}
+PATH_FIELDS = {
+    "source_of_truth",
+    "related_docs",
+    "supersedes",
+    "superseded_by",
+    "governing_design",
+}
+SNAPSHOT_LABELS = {
+    "api_routes": "FastAPI APIRoute count",
+    "app_routes": "Total app.routes count",
+    "graph_nodes": "Graph nodes",
+    "graph_edges": "Graph edges",
+    "stage_dispatch_edges": "stage_dispatch edges",
+}
+AGENT_REFERENCE_PATHS = {
+    "orchestrator": "system/agents/orchestrator_agent.md",
+    "design": "system/agents/design_agent.md",
+    "specimen": "system/agents/specimen_agent.md",
+    "vision": "system/agents/vision_agent.md",
+    "manipulation": "system/agents/manipulation_agent.md",
+    "equipment": "system/agents/equipment_agent.md",
+    "analysis": "system/agents/analysis_agent.md",
+    "knowledge": "system/agents/knowledge_agent.md",
+    "bo": "system/agents/bo_agent.md",
+    "guardian": "system/agents/guardian_agent.md",
+}
+AGENT_REFERENCE_FIGURES = {
+    "orchestrator": (
+        "orchestrator_01_closed_loop_handoffs",
+        "orchestrator_02_execution_effect_boundary",
+        "orchestrator_03_api_connection_architecture",
+    ),
+    "design": (
+        "design_01_closed_loop_handoffs",
+        "design_02_execution_effect_boundary",
+        "design_03_api_connection_architecture",
+    ),
+    "specimen": (
+        "specimen_01_closed_loop_handoffs",
+        "specimen_02_execution_effect_boundary",
+        "specimen_03_api_connection_architecture",
+    ),
+    "vision": (
+        "vision_01_closed_loop_handoffs",
+        "vision_02_execution_effect_boundary",
+        "vision_03_api_connection_architecture",
+    ),
+    "manipulation": (
+        "manipulation_01_closed_loop_handoffs",
+        "manipulation_02_execution_effect_boundary",
+        "manipulation_03_api_connection_architecture",
+    ),
+    "equipment": (
+        "equipment_01_closed_loop_handoffs",
+        "equipment_02_execution_effect_boundary",
+        "equipment_03_api_connection_architecture",
+    ),
+    "analysis": (
+        "analysis_01_closed_loop_handoffs",
+        "analysis_02_execution_effect_boundary",
+        "analysis_03_api_connection_architecture",
+    ),
+    "knowledge": (
+        "knowledge_01_closed_loop_handoffs",
+        "knowledge_02_execution_effect_boundary",
+        "knowledge_03_api_connection_architecture",
+    ),
+    "bo": (
+        "bo_01_closed_loop_handoffs",
+        "bo_02_execution_effect_boundary",
+    ),
+    "guardian": (
+        "guardian_01_closed_loop_handoffs",
+        "guardian_02_execution_effect_boundary",
+    ),
+}
+AGENT_REFERENCE_TITLES = {
+    "orchestrator": "Orchestrator",
+    "design": "Design",
+    "specimen": "Specimen",
+    "vision": "Vision",
+    "manipulation": "Manipulation",
+    "equipment": "Equipment",
+    "analysis": "Analysis",
+    "knowledge": "Knowledge",
+    "bo": "BO",
+    "guardian": "Guardian",
+}
+DEVICE_BRIDGE_REFERENCE_PATHS = {
+    "printer_fleet": "system/device_bridges/printer_fleet_bridge.md",
+    "bambu_x2d": "system/device_bridges/bambu_x2d_bridge.md",
+    "prusa_mk4s": "system/device_bridges/prusa_mk4s_bridge.md",
+    "lerobot": "system/device_bridges/lerobot_bridge.md",
+    "windows_pyautogui": "system/device_bridges/windows_pyautogui_bridge.md",
+    "utm_vision": "system/device_bridges/utm_vision_bridge.md",
+    "base_simulator": "system/device_bridges/base_simulator_bridges.md",
+}
+DEVICE_BRIDGE_REFERENCE_TITLES = {
+    "printer_fleet": "Printer Fleet",
+    "bambu_x2d": "Bambu X2D",
+    "prusa_mk4s": "Prusa MK4S",
+    "lerobot": "LeRobot",
+    "windows_pyautogui": "Windows PyAutoGUI",
+    "utm_vision": "UTM Vision",
+    "base_simulator": "Base Simulator",
+}
+DEVICE_BRIDGE_REFERENCE_FIGURES = {
+    "printer_fleet": (
+        "printer_fleet_01_system_handoffs",
+        "printer_fleet_02_execution_effect_boundary",
+        "printer_fleet_03_api_connection_architecture",
+    ),
+    "bambu_x2d": (
+        "bambu_x2d_01_system_handoffs",
+        "bambu_x2d_02_execution_effect_boundary",
+        "bambu_x2d_03_api_connection_architecture",
+    ),
+    "prusa_mk4s": (
+        "prusa_mk4s_01_system_handoffs",
+        "prusa_mk4s_02_execution_effect_boundary",
+        "prusa_mk4s_03_api_connection_architecture",
+    ),
+    "lerobot": (
+        "lerobot_01_system_handoffs",
+        "lerobot_02_execution_effect_boundary",
+        "lerobot_03_api_connection_architecture",
+    ),
+    "windows_pyautogui": (
+        "windows_pyautogui_01_system_handoffs",
+        "windows_pyautogui_02_execution_effect_boundary",
+        "windows_pyautogui_03_api_connection_architecture",
+    ),
+    "utm_vision": (
+        "utm_vision_01_system_handoffs",
+        "utm_vision_02_execution_effect_boundary",
+        "utm_vision_03_api_connection_architecture",
+    ),
+    "base_simulator": (
+        "base_simulator_01_system_handoffs",
+        "base_simulator_02_execution_effect_boundary",
+        "base_simulator_03_api_connection_architecture",
+    ),
+}
+DEVICE_BRIDGE_REQUIRED_SECTIONS = (
+    "Summary",
+    "Scope",
+    "Source of Truth",
+    "Actual Role",
+    "System Position and Agent Handoffs",
+    "Inputs, Commands, and Outputs",
+    "Internal Execution",
+    "API Surface",
+    "Tools and Registry Integration",
+    "Connections and Protocols",
+    "Configuration and Secrets",
+    "State, Events, Artifacts, and Evidence",
+    "Runtime Modes and Fallbacks",
+    "Safety, Approval, and Effect Boundary",
+    "Errors, Timeouts, and Recovery",
+    "Operator and GUI Surfaces",
+    "Current Verification",
+    "Limitations and Known Gaps",
+    "Related Documents",
+)
+DEVICE_BRIDGE_SOURCE_CONTRACTS = {
+    "printer_fleet": (
+        ("runtime/mcp_tools/printer_tools.py", 'registry.register("printer.prepare"'),
+        ("runtime/app/main.py", '@app.get("/api/printer/fleet")'),
+    ),
+    "bambu_x2d": (
+        ("runtime/device_bridges/printer_fleet/bridge.py", "class PrinterDeviceBridgeManager:"),
+        ("runtime/app/main.py", '@app.post("/api/printer/bambu-prestart-check")'),
+    ),
+    "prusa_mk4s": (
+        ("runtime/device_bridges/printer_fleet/providers/prusa.py", "class PrinterAgenticWorkflow:"),
+        ("runtime/mcp_tools/printer_tools.py", 'selected_provider(normalized) == "prusa_mk4s"'),
+    ),
+    "lerobot": (
+        ("runtime/device_bridges/lerobot/tools.py", 'registry.register("lerobot.rollout.start"'),
+        ("runtime/app/main.py", '@app.post("/api/lerobot/rollout/start")'),
+    ),
+    "windows_pyautogui": (
+        ("runtime/device_bridges/windows_pyautogui/tools.py", 'registry.register("equipment.pyautogui.run"'),
+        ("runtime/app/main.py", '@app.post("/api/equipment/windows/run-program")'),
+    ),
+    "utm_vision": (
+        ("runtime/device_bridges/camera_vision/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
+        ("runtime/app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
+    ),
+    "base_simulator": (
+        ("runtime/device_bridges/base_bridge.py", "class BaseBridge(ABC):"),
+        ("runtime/device_bridges/simulator/printer_sim.py", "class PrinterSimulator(BaseBridge):"),
+    ),
+}
+RUNTIME_IDE_REFERENCE_PATH = "system/runtime/runtime_ide.md"
+RUNTIME_IDE_REQUIRED_SECTIONS = (
+    "Summary",
+    "Scope",
+    "Source of Truth",
+    "System Position and Authority Boundary",
+    "Operator Surface Map",
+    "Entry Paths and Context Handoffs",
+    "Graph Draft Editing",
+    "Module and Bridge Descriptor Editing",
+    "Validation, Compilation, and Dry-Run Gates",
+    "Versioning, Save, and Activation",
+    "Operator Workflow",
+    "Run Modes and Execution Effects",
+    "API and Connection Architecture",
+    "Runtime Events, Timeline, and Artifact Evidence",
+    "Approvals, Safety, and Stop Controls",
+    "Persistence and Configuration Ownership",
+    "Errors and Recovery",
+    "Verification",
+    "Limitations and Known Gaps",
+    "Related Documents",
+)
+RUNTIME_IDE_REFERENCE_FIGURES = (
+    "runtime_ide_01_system_boundaries",
+    "runtime_ide_02_config_activation_flow",
+    "runtime_ide_03_observability_evidence_flow",
+)
+RUNTIME_IDE_SOURCE_CONTRACTS = (
+    ("runtime/app/main.py", '@app.get("/ide", response_class=HTMLResponse)'),
+    ("runtime/app/main.py", '@app.put("/api/graphs/{graph_id}")'),
+    ("runtime/app/main.py", '@app.post("/api/graphs/{graph_id}/dry-run")'),
+    ("runtime/app/main.py", '@app.post("/api/graphs/{graph_id}/run")'),
+    (
+        "runtime/app/main.py",
+        '@app.post("/api/runs/{run_id}/approvals/{approval_id}/resolve")',
+    ),
+    (
+        "runtime/app/main.py",
+        '@app.get("/api/runs/{run_id}/artifact-file/{artifact_path:path}")',
+    ),
+    ("runtime/web/templates/runtime_ide.html", 'id="ide-run-live-confirm"'),
+    (
+        "runtime/web/static/runtime_ide.js",
+        'document.getElementById("ide-run-live-confirm")',
+    ),
+)
+RUNTIME_IDE_NAVIGATION_LINKS = {
+    "README.md": "system/runtime/runtime_ide.md",
+    "docs/README.ko.md": "../system/runtime/runtime_ide.md",
+    "docs/README.md": "../system/runtime/runtime_ide.md",
+    "system/runtime/langgraph_runtime.md": "runtime_ide.md",
+}
+
+
+def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
+    """Read YAML metadata, including the non-rendering public-doc carrier."""
+
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() not in {"---", "<!-- atr-doc"}:
+        raise ValueError("missing leading YAML front matter")
+
+    closing_marker = "-->" if lines[0].strip() == "<!-- atr-doc" else "---"
+
+    closing_index = next(
+        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == closing_marker),
+        None,
+    )
+    if closing_index is None:
+        raise ValueError("unterminated YAML front matter")
+
+    loaded = yaml.safe_load("".join(lines[1:closing_index])) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError("YAML front matter must be a mapping")
+    return loaded, "".join(lines[closing_index + 1 :])
+
+
+def _document_label(path: Path, root: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _is_non_empty_list(value: Any) -> bool:
+    return isinstance(value, list) and bool(value) and all(
+        isinstance(item, str) and item.strip() for item in value
+    )
+
+
+def _path_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def _validate_paths(
+    metadata: dict[str, Any], root: Path, label: str
+) -> list[str]:
+    errors: list[str] = []
+    resolved_root = root.resolve()
+    for field in PATH_FIELDS:
+        value = metadata.get(field)
+        if value is not None and not isinstance(value, (str, list)):
+            errors.append(f"{label}: {field} must be a path or list of paths")
+            continue
+        for item in _path_values(value):
+            candidate = Path(item)
+            if candidate.is_absolute():
+                errors.append(f"{label}: absolute {field} path is not allowed: {item}")
+                continue
+            resolved = (root / candidate).resolve()
+            try:
+                resolved.relative_to(resolved_root)
+            except ValueError:
+                errors.append(f"{label}: escaping {field} path is not allowed: {item}")
+                continue
+            if not resolved.exists():
+                errors.append(f"{label}: missing {field} path: {item}")
+    return errors
+
+
+def _markdown_link_targets(body: str) -> list[str]:
+    targets: list[str] = []
+    for match in re.finditer(r"!?\[[^\]]*\]\(([^)\n]+)\)", body):
+        raw = match.group(1).strip()
+        if raw.startswith("<") and ">" in raw:
+            target = raw[1 : raw.index(">")]
+        else:
+            target = raw.split(maxsplit=1)[0]
+        targets.append(unquote(target))
+    return targets
+
+
+def _validate_local_links(path: Path, body: str, root: Path, label: str) -> list[str]:
+    errors: list[str] = []
+    resolved_root = root.resolve()
+    for target in _markdown_link_targets(body):
+        if (
+            not target
+            or target.startswith(("#", "/"))
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target)
+        ):
+            continue
+        local_part = target.split("#", 1)[0].split("?", 1)[0]
+        if not local_part:
+            continue
+        resolved = (path.parent / local_part).resolve()
+        try:
+            resolved.relative_to(resolved_root)
+        except ValueError:
+            errors.append(f"{label}: escaping local link is not allowed: {target}")
+            continue
+        if not resolved.exists():
+            errors.append(f"{label}: missing local link: {target}")
+    return errors
+
+
+def _validate_agent_reference_figures(
+    path: Path, body: str, root: Path, label: str
+) -> list[str]:
+    """Return missing source, rendering, embedding, and caption defects."""
+
+    try:
+        relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    agent_id = next(
+        (
+            candidate
+            for candidate, expected_path in AGENT_REFERENCE_PATHS.items()
+            if relative_path == expected_path
+        ),
+        None,
+    )
+    if agent_id is None:
+        return []
+
+    errors: list[str] = []
+    targets = set(_markdown_link_targets(body))
+    title = AGENT_REFERENCE_TITLES[agent_id]
+    figure_root = root / "system/agents/assets/figures"
+    for index, stem in enumerate(AGENT_REFERENCE_FIGURES[agent_id], start=1):
+        source = figure_root / f"{stem}.dot"
+        rendering = figure_root / f"{stem}.svg"
+        link = f"assets/figures/{stem}.svg"
+        caption = f"**Figure {title}-{index}.**"
+        if not source.is_file():
+            errors.append(f"{label}: missing agent figure source: {source.relative_to(root)}")
+        if not rendering.is_file():
+            errors.append(
+                f"{label}: missing agent figure rendering: {rendering.relative_to(root)}"
+            )
+        if link not in targets:
+            errors.append(f"{label}: missing agent figure link: {link}")
+        if caption not in body:
+            errors.append(f"{label}: missing agent figure caption: {caption}")
+    return errors
+
+
+def _validate_device_bridge_reference(
+    path: Path, body: str, root: Path, label: str
+) -> list[str]:
+    """Validate the common outline and figure contract for one bridge Reference."""
+
+    try:
+        relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    bridge_id = next(
+        (
+            candidate
+            for candidate, expected_path in DEVICE_BRIDGE_REFERENCE_PATHS.items()
+            if relative_path == expected_path
+        ),
+        None,
+    )
+    if bridge_id is None:
+        return []
+
+    errors: list[str] = []
+    headings = re.findall(r"^##\s+(.+?)\s*$", body, re.MULTILINE)
+    heading_positions = {heading: headings.index(heading) for heading in headings}
+    previous_position = -1
+    for section in DEVICE_BRIDGE_REQUIRED_SECTIONS:
+        position = heading_positions.get(section)
+        if position is None:
+            errors.append(f"{label}: missing device bridge section: {section}")
+            continue
+        if position < previous_position:
+            errors.append(f"{label}: device bridge section out of order: {section}")
+        previous_position = max(previous_position, position)
+
+    targets = set(_markdown_link_targets(body))
+    title = DEVICE_BRIDGE_REFERENCE_TITLES[bridge_id]
+    figure_root = root / "system/device_bridges/assets/figures"
+    for index, stem in enumerate(DEVICE_BRIDGE_REFERENCE_FIGURES[bridge_id], start=1):
+        source = figure_root / f"{stem}.dot"
+        rendering = figure_root / f"{stem}.svg"
+        link = f"assets/figures/{stem}.svg"
+        caption = f"**Figure {title}-{index}.**"
+        if not source.is_file():
+            errors.append(
+                f"{label}: missing device bridge figure source: {source.relative_to(root)}"
+            )
+        if not rendering.is_file():
+            errors.append(
+                f"{label}: missing device bridge figure rendering: {rendering.relative_to(root)}"
+            )
+        if link not in targets:
+            errors.append(f"{label}: missing device bridge figure link: {link}")
+        if caption not in body:
+            errors.append(f"{label}: missing device bridge figure caption: {caption}")
+    for source_path, token in DEVICE_BRIDGE_SOURCE_CONTRACTS[bridge_id]:
+        source = root / source_path
+        try:
+            source_text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            source_text = ""
+        if token not in source_text:
+            errors.append(
+                f"{label}: missing device bridge source contract in {source_path}: {token}"
+            )
+    return errors
+
+
+def _validate_runtime_ide_reference(
+    path: Path, body: str, root: Path, label: str
+) -> list[str]:
+    """Validate the Runtime IDE outline, figures, and stable source anchors."""
+
+    try:
+        relative_path = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []
+    if relative_path != RUNTIME_IDE_REFERENCE_PATH:
+        return []
+
+    errors: list[str] = []
+    headings = re.findall(r"^##\s+(.+?)\s*$", body, re.MULTILINE)
+    heading_positions = {heading: headings.index(heading) for heading in headings}
+    previous_position = -1
+    for section in RUNTIME_IDE_REQUIRED_SECTIONS:
+        position = heading_positions.get(section)
+        if position is None:
+            errors.append(f"{label}: missing Runtime IDE section: {section}")
+            continue
+        if position < previous_position:
+            errors.append(f"{label}: Runtime IDE section out of order: {section}")
+        previous_position = max(previous_position, position)
+
+    targets = set(_markdown_link_targets(body))
+    figure_root = root / "system/runtime/assets/figures"
+    expected_stems = set(RUNTIME_IDE_REFERENCE_FIGURES)
+    for index, stem in enumerate(RUNTIME_IDE_REFERENCE_FIGURES, start=1):
+        source = figure_root / f"{stem}.dot"
+        rendering = figure_root / f"{stem}.svg"
+        link = f"assets/figures/{stem}.svg"
+        caption = f"**Figure Runtime IDE-{index}.**"
+        if not source.is_file():
+            errors.append(
+                f"{label}: missing Runtime IDE figure source: {source.relative_to(root)}"
+            )
+        if not rendering.is_file():
+            errors.append(
+                f"{label}: missing Runtime IDE figure rendering: {rendering.relative_to(root)}"
+            )
+        if link not in targets:
+            errors.append(f"{label}: missing Runtime IDE figure link: {link}")
+        if caption not in body:
+            errors.append(f"{label}: missing Runtime IDE figure caption: {caption}")
+    if figure_root.is_dir():
+        for source in sorted(figure_root.glob("runtime_ide_*.dot")):
+            if source.stem not in expected_stems:
+                errors.append(
+                    f"{label}: undeclared Runtime IDE figure source: "
+                    f"{source.relative_to(root)}"
+                )
+        for rendering in sorted(figure_root.glob("runtime_ide_*.svg")):
+            if rendering.stem not in expected_stems:
+                errors.append(
+                    f"{label}: undeclared Runtime IDE figure rendering: "
+                    f"{rendering.relative_to(root)}"
+                )
+    for source_path, token in RUNTIME_IDE_SOURCE_CONTRACTS:
+        source = root / source_path
+        try:
+            source_text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            source_text = ""
+        if token not in source_text:
+            errors.append(
+                f"{label}: missing Runtime IDE source contract in {source_path}: {token}"
+            )
+    return errors
+
+
+def validate_document(path: Path, root: Path) -> list[str]:
+    """Return all governance defects found in one Markdown document."""
+
+    label = _document_label(path, root)
+    try:
+        metadata, body = split_front_matter(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+        return [f"{label}: {exc}"]
+
+    # Immutable evidence/legal documents retain original navigation bytes.
+    # Validate their exact historical receipt, then project references only for
+    # governance checks; the full audit reports them separately from live links.
+    inventory_path = root / 'system/maintenance/repository_layout_manifest.json'
+    provenance_verified = False
+    if inventory_path.is_file():
+        from tools.repository_layout.checks import document_locations, historical_reference_errors
+        from tools.repository_layout.move_files import rewrite_document_references
+        inventory = json.loads(inventory_path.read_text())
+        locations = document_locations(inventory)
+        historical = next((old for old in inventory.get('historical_documents', {})
+                           if locations.get(old) == label), None)
+        if historical:
+            failures = historical_reference_errors(root, historical, label, inventory)
+            if failures:
+                return [f'{label}: {error}' for error in failures]
+            projected, _ = rewrite_document_references(path.read_text(), historical, label, locations)
+            metadata, body = split_front_matter(projected)
+        if '.git' in _path_values(metadata.get('source_of_truth')):
+            # Exact repository provenance sentinel: no .git mount is needed in
+            # a tracked-only snapshot whose inventory baseline was checked.
+            if re.fullmatch('[0-9a-f]{40}', inventory.get('baseline_commit', '')):
+                provenance_verified = True
+
+    errors: list[str] = []
+    for field in sorted(REQUIRED_FIELDS):
+        if field not in metadata:
+            errors.append(f"{label}: missing required field: {field}")
+
+    doc_type = metadata.get("doc_type")
+    subtype = metadata.get("subtype")
+    status = metadata.get("status")
+    authority = metadata.get("authority")
+
+    if doc_type not in DOCUMENT_SUBTYPES:
+        errors.append(f"{label}: invalid doc_type: {doc_type}")
+    elif subtype not in DOCUMENT_SUBTYPES[doc_type]:
+        errors.append(f"{label}: invalid subtype for {doc_type}: {subtype}")
+    if status not in DOCUMENT_STATUSES:
+        errors.append(f"{label}: invalid status: {status}")
+    if authority not in AUTHORITIES:
+        errors.append(f"{label}: invalid authority: {authority}")
+
+    for field in ("audience", "scope"):
+        if field in metadata and not _is_non_empty_list(metadata[field]):
+            errors.append(f"{label}: {field} must be a non-empty list of strings")
+    if "summary" in metadata and not (
+        isinstance(metadata["summary"], str) and metadata["summary"].strip()
+    ):
+        errors.append(f"{label}: summary must be a non-empty string")
+    for field in ("related_docs", "supersedes"):
+        if field in metadata and not isinstance(metadata[field], list):
+            errors.append(f"{label}: {field} must be a list")
+
+    if status == "active" and doc_type in {"reference", "guide"}:
+        if not _is_non_empty_list(metadata.get("source_of_truth")):
+            errors.append(f"{label}: active {doc_type} requires source_of_truth")
+        for field in ("last_verified", "verified_against"):
+            if not metadata.get(field):
+                errors.append(f"{label}: active {doc_type} requires {field}")
+
+    if doc_type == "design" and metadata.get("decision_status") not in DESIGN_STATUSES:
+        errors.append(f"{label}: design requires a valid decision_status")
+    if doc_type == "plan":
+        if metadata.get("execution_status") not in PLAN_STATUSES:
+            errors.append(f"{label}: plan requires a valid execution_status")
+        if not metadata.get("maintenance_plan") and not metadata.get("governing_design"):
+            errors.append(f"{label}: plan requires governing_design or maintenance_plan")
+    if doc_type == "evidence":
+        for field in ("evidence_date", "method"):
+            if not metadata.get(field):
+                errors.append(f"{label}: evidence requires {field}")
+    if status == "superseded" and not (
+        _path_values(metadata.get("supersedes"))
+        or _path_values(metadata.get("superseded_by"))
+    ):
+        errors.append(f"{label}: superseded document requires a replacement path")
+
+    path_metadata = metadata
+    if provenance_verified:
+        path_metadata = {**metadata, 'source_of_truth': [value for value in
+            _path_values(metadata['source_of_truth']) if value != '.git']}
+    errors.extend(_validate_paths(path_metadata, root, label))
+    errors.extend(_validate_local_links(path, body, root, label))
+    errors.extend(_validate_agent_reference_figures(path, body, root, label))
+    errors.extend(_validate_device_bridge_reference(path, body, root, label))
+    errors.extend(_validate_runtime_ide_reference(path, body, root, label))
+    return errors
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("manifest must be a YAML mapping")
+    return loaded
+
+
+def _safe_repository_path(root: Path, relative_path: str) -> Path | None:
+    candidate = Path(relative_path)
+    if candidate.is_absolute():
+        return None
+    resolved_root = root.resolve()
+    resolved = (root / candidate).resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError:
+        return None
+    return resolved
+
+
+def _validate_snapshot(
+    root: Path, snapshot: Any, manifest_label: str
+) -> list[str]:
+    if snapshot is None:
+        return []
+    if not isinstance(snapshot, dict):
+        return [f"{manifest_label}: snapshot must be a mapping"]
+
+    document = snapshot.get("document")
+    expected = snapshot.get("expected")
+    if not isinstance(document, str) or not document:
+        return [f"{manifest_label}: snapshot.document must be a path"]
+    if not isinstance(expected, dict):
+        return [f"{manifest_label}: snapshot.expected must be a mapping"]
+
+    document_path = _safe_repository_path(root, document)
+    if document_path is None:
+        return [f"{manifest_label}: unsafe snapshot document path: {document}"]
+    if not document_path.is_file():
+        return [f"{manifest_label}: missing snapshot document: {document}"]
+
+    body = document_path.read_text(encoding="utf-8")
+    errors: list[str] = []
+    for key, label in SNAPSHOT_LABELS.items():
+        wanted = expected.get(key)
+        if not isinstance(wanted, int):
+            errors.append(f"{manifest_label}: snapshot.expected.{key} must be an integer")
+            continue
+        match = re.search(rf"^{re.escape(label)}:\s*(\d+)\s*$", body, re.MULTILINE)
+        if match is None:
+            errors.append(f"{document}: missing snapshot label: {label}")
+            continue
+        found = int(match.group(1))
+        if found != wanted:
+            errors.append(f"{document}: {label}: expected {wanted}, found {found}")
+    return errors
+
+
+def _validate_root_agent_navigation(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Require root README links when the full canonical agent set is governed."""
+
+    required_paths = set(AGENT_REFERENCE_PATHS.values())
+    if not required_paths.issubset(set(documents)):
+        return []
+    readme = root / "README.md"
+    if not readme.is_file():
+        return [f"{manifest_label}: missing root README for agent navigation"]
+    try:
+        _, body = split_front_matter(readme.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+        return [f"{manifest_label}: cannot inspect root README agent navigation: {exc}"]
+    targets = set(_markdown_link_targets(body))
+    return [
+        f"{manifest_label}: missing root README agent link: {path}"
+        for path in AGENT_REFERENCE_PATHS.values()
+        if path not in targets
+    ]
+
+
+def _validate_device_bridge_navigation(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Require root and bridge-index links when canonical bridge docs are governed."""
+
+    required_paths = set(DEVICE_BRIDGE_REFERENCE_PATHS.values())
+    if not required_paths.issubset(set(documents)):
+        return []
+
+    errors: list[str] = []
+    readme = root / "README.md"
+    if not readme.is_file():
+        errors.append(f"{manifest_label}: missing root README for device bridge navigation")
+    else:
+        try:
+            _, root_body = split_front_matter(readme.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+            errors.append(
+                f"{manifest_label}: cannot inspect root README device bridge navigation: {exc}"
+            )
+        else:
+            root_targets = set(_markdown_link_targets(root_body))
+            errors.extend(
+                f"{manifest_label}: missing root README device bridge link: {path}"
+                for path in DEVICE_BRIDGE_REFERENCE_PATHS.values()
+                if path not in root_targets
+            )
+            section_match = re.search(
+                r"^## Device Bridge References\s*$\n(.*?)(?=^##\s|\Z)",
+                root_body,
+                re.MULTILINE | re.DOTALL,
+            )
+            section = section_match.group(1) if section_match else ""
+            table_rows = [
+                line
+                for line in section.splitlines()
+                if line.lstrip().startswith("|")
+                and any(
+                    f"]({path})" in line
+                    for path in DEVICE_BRIDGE_REFERENCE_PATHS.values()
+                )
+            ]
+            if len(table_rows) != len(DEVICE_BRIDGE_REFERENCE_PATHS):
+                errors.append(
+                    f"{manifest_label}: root README device bridge table must contain "
+                    f"exactly {len(DEVICE_BRIDGE_REFERENCE_PATHS)} rows; found {len(table_rows)}"
+                )
+
+    index_path = "system/device_bridges/README.md"
+    if index_path not in documents:
+        return errors
+    index = root / index_path
+    if not index.is_file():
+        errors.append(f"{manifest_label}: missing device bridge index")
+        return errors
+    try:
+        _, index_body = split_front_matter(index.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+        errors.append(f"{manifest_label}: cannot inspect device bridge index: {exc}")
+        return errors
+    index_targets = set(_markdown_link_targets(index_body))
+    for bridge_id, path in DEVICE_BRIDGE_REFERENCE_PATHS.items():
+        relative_reference = Path(path).name
+        if relative_reference not in index_targets:
+            errors.append(
+                f"{manifest_label}: missing device bridge index reference link: {relative_reference}"
+            )
+        for stem in DEVICE_BRIDGE_REFERENCE_FIGURES[bridge_id]:
+            figure_link = f"assets/figures/{stem}.svg"
+            if figure_link not in index_targets:
+                errors.append(
+                    f"{manifest_label}: missing device bridge index figure link: {figure_link}"
+                )
+    return errors
+
+
+def _validate_runtime_ide_navigation(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Require every approved active entry point to link the Runtime IDE Reference."""
+
+    if RUNTIME_IDE_REFERENCE_PATH not in documents:
+        return []
+
+    errors: list[str] = []
+    for document_path, required_target in RUNTIME_IDE_NAVIGATION_LINKS.items():
+        path = root / document_path
+        if not path.is_file():
+            errors.append(
+                f"{manifest_label}: missing Runtime IDE navigation document: {document_path}"
+            )
+            continue
+        try:
+            _, body = split_front_matter(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+            errors.append(
+                f"{manifest_label}: cannot inspect Runtime IDE navigation in "
+                f"{document_path}: {exc}"
+            )
+            continue
+        targets = set(_markdown_link_targets(body))
+        if required_target not in targets:
+            errors.append(
+                f"{manifest_label}: missing Runtime IDE navigation link: "
+                f"{document_path} -> {required_target}"
+            )
+    return errors
+
+
+def _validate_device_bridge_figure_inventory(
+    root: Path, documents: list[str], manifest_label: str
+) -> list[str]:
+    """Reject bridge figure assets outside the stable governed inventory."""
+
+    required_paths = set(DEVICE_BRIDGE_REFERENCE_PATHS.values())
+    if not required_paths.issubset(set(documents)):
+        return []
+    figure_root = root / "system/device_bridges/assets/figures"
+    if not figure_root.is_dir():
+        return []
+    expected = {
+        stem
+        for stems in DEVICE_BRIDGE_REFERENCE_FIGURES.values()
+        for stem in stems
+    }
+    errors: list[str] = []
+    for source in sorted(figure_root.glob("*.dot")):
+        if source.stem not in expected:
+            errors.append(
+                f"{manifest_label}: undeclared device bridge figure source: "
+                f"{source.relative_to(root)}"
+            )
+    for rendering in sorted(figure_root.glob("*.svg")):
+        if rendering.stem not in expected:
+            errors.append(
+                f"{manifest_label}: undeclared device bridge figure rendering: "
+                f"{rendering.relative_to(root)}"
+            )
+    return errors
+
+
+def validate_manifest(root: Path, manifest_path: Path) -> list[str]:
+    """Validate the governed document set declared by one manifest."""
+
+    label = _document_label(manifest_path, root)
+    try:
+        manifest = _load_yaml_mapping(manifest_path)
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
+        return [f"{label}: {exc}"]
+
+    errors: list[str] = []
+    if manifest.get("version") != 1:
+        errors.append(f"{label}: version must be 1")
+
+    documents = manifest.get("documents")
+    if not isinstance(documents, list) or not all(
+        isinstance(item, str) and item for item in documents
+    ):
+        errors.append(f"{label}: documents must be a list of repository paths")
+        documents = []
+
+    legacy_scope = manifest.get("legacy_scope")
+    if not isinstance(legacy_scope, dict) or legacy_scope.get("status") != "migration_debt":
+        errors.append(f"{label}: legacy_scope.status must be migration_debt")
+    elif not legacy_scope.get("note"):
+        errors.append(f"{label}: legacy_scope.note is required")
+
+    for item, count in Counter(documents).items():
+        if count > 1:
+            errors.append(f"{label}: duplicate document: {item}")
+
+    for item in dict.fromkeys(documents):
+        document_path = _safe_repository_path(root, item)
+        if document_path is None:
+            errors.append(f"{label}: unsafe manifest document path: {item}")
+        elif not document_path.is_file():
+            errors.append(f"{label}: missing manifest document: {item}")
+        else:
+            errors.extend(validate_document(document_path, root))
+
+    errors.extend(_validate_root_agent_navigation(root, documents, label))
+    errors.extend(_validate_device_bridge_navigation(root, documents, label))
+    errors.extend(_validate_device_bridge_figure_inventory(root, documents, label))
+    errors.extend(_validate_runtime_ide_navigation(root, documents, label))
+    errors.extend(_validate_snapshot(root, manifest.get("snapshot"), label))
+    return errors
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    default_root = Path(__file__).resolve().parents[2]
+    parser.add_argument("--root", type=Path, default=default_root)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("system/document_manifest.yaml"),
+    )
+    args = parser.parse_args(argv)
+
+    root = args.root.resolve()
+    manifest_path = args.manifest
+    if not manifest_path.is_absolute():
+        manifest_path = root / manifest_path
+    errors = validate_manifest(root, manifest_path)
+    if errors:
+        for error in errors:
+            print(error)
+        return 1
+    print("documentation validation passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

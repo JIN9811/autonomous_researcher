@@ -16,7 +16,7 @@ dock. Completed-session data; private values redacted.*
 | Purpose | Navigate the Main GUI, Live GUI and connected workspaces |
 | Entry points | `/` · `/live` · `/ide` |
 | Coverage | Run control, models, agent reports and device-workspace entry |
-| Implementation | [Main GUI](../../web/static/app.js) · [Live GUI](../../web/static/planning.js) |
+| Implementation | [Main GUI](../../runtime/web/static/app.js) · [Live GUI](../../runtime/web/static/planning.js) |
 | Execution boundary | Controls can invoke runtime/device actions; this guide is not execution evidence |
 > [Runtime Closed-Loop/페이지/에이전트 실행 레퍼런스](../../system/runtime/closed_loop_and_pages_reference.md)
 

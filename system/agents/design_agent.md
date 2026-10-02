@@ -7,18 +7,18 @@ audience: [researcher, developer, operator, reviewer]
 scope: [agents, design, experiment_specification, decision_tools]
 summary: Evidence-based design evaluation and a bounded LLM decision layer preserving existing experiment and device contracts.
 source_of_truth:
-  - agents/design/agent.py
-  - agents/design/decision.py
-  - agents/design/execution.py
-  - agents/design/structure.py
-  - agents/execution_graph.py
-  - agents/design/module.py
-  - agents/design/presentation.py
-  - agents/design/frontend/live_report.js
-  - graphs/modules/design/module.yaml
-  - backends/prompt_registry.py
-  - app/controller.py
-  - policies/validation_policy.py
+  - runtime/agents/design/agent.py
+  - runtime/agents/design/decision.py
+  - runtime/agents/design/execution.py
+  - runtime/agents/design/structure.py
+  - runtime/agents/execution_graph.py
+  - runtime/agents/design/module.py
+  - runtime/agents/design/presentation.py
+  - runtime/agents/design/frontend/live_report.js
+  - runtime/graphs/modules/design/module.yaml
+  - runtime/backends/prompt_registry.py
+  - runtime/app/controller.py
+  - runtime/policies/validation_policy.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -74,7 +74,7 @@ canonical-import regression coverage.
 
 | Boundary | Design owns | Existing host retained |
 |---|---|---|
-| Registration | [Code declaration](../../agents/design/module.py), factory and public metadata | `AgentRegistry`; [graph module](../../graphs/modules/design/module.yaml) remains the editable execution contract |
+| Registration | [Code declaration](../../runtime/agents/design/module.py), factory and public metadata | `AgentRegistry`; [graph module](../../runtime/graphs/modules/design/module.yaml) remains the editable execution contract |
 | Backend/API | Design report projection | `/api/agents/design/report`; module details and runtime manifests expose read-only `implementation` metadata |
 | Frontend | Dashboard/report factory, evidence, brief, material, manufacturability and handoff renderers | Common manifest-driven module host at `/live`; shared STL/capture/Specimen helpers are explicitly injected |
 | Configuration | Declared defaults and existing experiment/Orchestrator input sources | Graph/module configuration and run snapshots; no new editable Design Setup control or settings store |
@@ -185,7 +185,7 @@ Design's LLM still cannot rewrite the requested experiment point.
 ![Design five-area editable internal graph](assets/figures/design_control_areas.svg)
 
 The canvas, backend runner and this SVG share
-[`module.execution_graph`](../../graphs/modules/design/module.yaml). Its edges
+[`module.execution_graph`](../../runtime/graphs/modules/design/module.yaml). Its edges
 route actual registered operations: `prepare → decide`, then `accepted → finalize`
 or `blocked → owner_review`. Editing a valid route changes backend execution after
 activation; moving a node changes layout only. Five areas classify responsibility,
@@ -195,12 +195,12 @@ The **LLM call** operation sends context to the High decision and consumes its
 response through the existing composite suitability/tool loop. This denotes a
 call relationship, not a shared source file or an additional decision layer.
 Candidate preparation, result finalization and review reporting retain their
-existing functions in the [owner adapters](../../agents/design/execution.py).
+existing functions in the [owner adapters](../../runtime/agents/design/execution.py).
 Its actual LLM suitability and tool decisions appear in **High**. Candidate
 generation, inspection and deterministic handoff remain **Middle**, constraint
 and acceptance checks remain **Guardian / Safety**, and context, traces and
 reports remain **Knowledge / Evidence**. Design has no direct **Low** device work.
-The [owner structure](../../agents/design/structure.py) supplies these relationships
+The [owner structure](../../runtime/agents/design/structure.py) supplies these relationships
 through the existing catalog API. Dashed **CODE** boxes reference existing functions
 or inline tool branches; they do not add commands, editable inner-loop routes or
 independent completion states. Selecting one opens its owner and source references
@@ -210,7 +210,7 @@ validation remain outside this internal graph.
 The existing inspector edits allowlisted operations and outcome routes. Validate
 rejects unsupported handlers, missing dependencies and invalid routes before
 activation. Running definitions remain pinned; reload obtains backend changes
-without silently replacing a dirty draft. The [renderer](../../web/static/module_control_view.js)
+without silently replacing a dirty draft. The [renderer](../../runtime/web/static/module_control_view.js)
 uses explicit edge kinds and outcomes; regenerate with
 `python -m scripts.render_module_control_views`. The document SVG uses a white
 background and print-readable colors; the interactive IDE retains its own theme.
@@ -478,12 +478,12 @@ tracked in the linked verification records.
 
 ### Source of Truth and Related Documents
 
-- [Design implementation](../../agents/design/agent.py)
-- [Evaluation and local decision tools](../../agents/design/decision.py)
-- [Code module declaration](../../agents/design/module.py)
+- [Design implementation](../../runtime/agents/design/agent.py)
+- [Evaluation and local decision tools](../../runtime/agents/design/decision.py)
+- [Code module declaration](../../runtime/agents/design/module.py)
 - [Module implementation and verification](../retained-history/superpowers/plans/2026-09-13-design-agent-module.md)
-- [Module](../../graphs/modules/design/module.yaml)
-- [Controller](../../app/controller.py)
+- [Module](../../runtime/graphs/modules/design/module.yaml)
+- [Controller](../../runtime/app/controller.py)
 - [Implementation and verification plan](../retained-history/superpowers/plans/2026-09-07-design-decision-layer.md)
 - [Five-area contract](../retained-history/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)
 - [API and Connection Matrix](agent_api_connection_matrix.md)

@@ -266,7 +266,7 @@ Rules:
 For a ready 3DP specimen, Pi0.5 is the fallback only when no explicit strategy,
 policy/profile/path selects another supported execution path. Saved Manipulation
 defaults and explicit experiment overrides are resolved by
-[`ManipulationAgent._strategy` / `_policy_type`](../../agents/manipulation/agent.py);
+[`ManipulationAgent._strategy` / `_policy_type`](../../runtime/agents/manipulation/agent.py);
 generic LeRobot selections such as SmolVLA are not overwritten by this fallback.
 
 Rules when Pi0.5 is selected:
@@ -275,7 +275,7 @@ Rules when Pi0.5 is selected:
 - Test mode may use `policy_path=fake://pi05_policy`.
 - Live mode requires a real `policy_path`, `policy_checkpoint_path`, or `policy_repo_id`.
 - The LeRobot bridge runs Pi0.5 rollout in conda env `lerobot-pi05-torch211`.
-- The ordinary Pi0.5 rollout command uses `python scripts/lerobot_pi05_rollout_wrapper.py` in the resolved environment; mirror-enabled workflows may use the shared mirror wrapper. The exact arguments and RTC selection come from the saved/requested profile and [the bridge command builder](../../device_bridges/lerobot/bridge.py), not a universal `lerobot-rollout` command.
+- The ordinary Pi0.5 rollout command uses `python scripts/lerobot_pi05_rollout_wrapper.py` in the resolved environment; mirror-enabled workflows may use the shared mirror wrapper. The exact arguments and RTC selection come from the saved/requested profile and [the bridge command builder](../../runtime/device_bridges/lerobot/bridge.py), not a universal `lerobot-rollout` command.
 - On the ROBOTIS OMX-AI follower, Pi0.5 live rollout must pass
   `--robot.disable_torque_on_disconnect=false`. A successful rollout can
   otherwise be converted into a failed GUI session if a Dynamixel reports a

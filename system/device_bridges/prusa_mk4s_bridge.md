@@ -14,10 +14,10 @@ scope:
   - prusalink
 summary: Current Prusa MK4S provider contract for slicing, PrusaLink status/transfer/start, validation, and optional ejection.
 source_of_truth:
-  - device_bridges/printer_fleet/providers/prusa.py
-  - configs/devices.yaml
-  - mcp_tools/printer_tools.py
-  - app/main.py
+  - runtime/device_bridges/printer_fleet/providers/prusa.py
+  - runtime/configs/devices.yaml
+  - runtime/mcp_tools/printer_tools.py
+  - runtime/app/main.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -41,7 +41,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | Purpose | Slicing, PrusaLink transfer/start and optional ejection |
 | Connects | Specimen / 3D workspace ↔ selected Prusa provider |
 | Effect | Remote storage, heating and motion through enabled actions |
-| Implementation | [Prusa implementation](../../device_bridges/printer_fleet/providers/prusa.py) · [Requirements](../../device_bridges/printer_fleet/providers/prusa-requirements.txt) |
+| Implementation | [Prusa implementation](../../runtime/device_bridges/printer_fleet/providers/prusa.py) · [Requirements](../../runtime/device_bridges/printer_fleet/providers/prusa-requirements.txt) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
 
 ## Summary

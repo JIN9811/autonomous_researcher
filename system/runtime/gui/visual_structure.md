@@ -7,11 +7,11 @@ audience: [user, operator, developer, researcher]
 scope: [gui_structure, page_navigation, screenshot_reference]
 summary: Screenshot-backed map of the Main GUI, Live GUI, device workspaces, Runtime IDE, Knowledge and Replay.
 source_of_truth:
-  - app/main.py
-  - app/run_review_routes.py
-  - web/templates
-  - web/static
-  - agents
+  - runtime/app/main.py
+  - runtime/app/run_review_routes.py
+  - runtime/web/templates
+  - runtime/web/static
+  - runtime/agents
 last_verified: 2026-09-29
 verified_against: a787f2b
 related_docs:

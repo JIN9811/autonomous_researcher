@@ -7,10 +7,10 @@ audience: [operator, developer, maintainer]
 scope: [knowledge, markdown_memory, scoped_rag, ontology]
 summary: 기존 원본과 온톨로지를 보존하면서 Markdown 지식의 검색 범위, 출처, 수명주기와 후처리를 관리하는 절차.
 source_of_truth:
-  - knowledge/markdown_memory.py
-  - knowledge/markdown_runtime.py
-  - knowledge/http_api.py
-  - agents/core/knowledge/decision.py
+  - runtime/knowledge/markdown_memory.py
+  - runtime/knowledge/markdown_runtime.py
+  - runtime/knowledge/http_api.py
+  - runtime/agents/core/knowledge/decision.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:

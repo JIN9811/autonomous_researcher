@@ -7,30 +7,30 @@ audience: [researcher, reviewer, developer, operator, maintainer]
 scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, experiment_evidence, source_curation]
 summary: Ontology-guided Markdown knowledge, source-backed LLM curation, scoped retrieval and preserved research-memory contracts.
 source_of_truth:
-  - agents/core/knowledge/agent.py
-  - agents/core/knowledge/decision.py
-  - agents/core/knowledge/execution.py
-  - agents/core/knowledge/structure.py
-  - agents/core/knowledge/plan.py
-  - agents/core/knowledge/presentation.py
-  - agents/core/knowledge/module.py
-  - agents/core/knowledge/frontend/live_report.js
-  - knowledge/markdown_memory.py
-  - knowledge/markdown_runtime.py
-  - knowledge/http_api.py
-  - knowledge/source_library.py
-  - knowledge/source_extraction.py
-  - knowledge/source_runtime.py
-  - knowledge/source_api.py
-  - knowledge/context_service.py
-  - knowledge/workspace_api.py
-  - agents/core/knowledge/context.py
-  - agents/core/knowledge/source_curation.py
-  - mcp_tools/source_tools.py
-  - knowledge/ontology
-  - utils/agent_artifact_archive.py
-  - graphs/modules/knowledge/module.yaml
-  - graphs/modules/knowledge/ui.yaml
+  - runtime/agents/core/knowledge/agent.py
+  - runtime/agents/core/knowledge/decision.py
+  - runtime/agents/core/knowledge/execution.py
+  - runtime/agents/core/knowledge/structure.py
+  - runtime/agents/core/knowledge/plan.py
+  - runtime/agents/core/knowledge/presentation.py
+  - runtime/agents/core/knowledge/module.py
+  - runtime/agents/core/knowledge/frontend/live_report.js
+  - runtime/knowledge/markdown_memory.py
+  - runtime/knowledge/markdown_runtime.py
+  - runtime/knowledge/http_api.py
+  - runtime/knowledge/source_library.py
+  - runtime/knowledge/source_extraction.py
+  - runtime/knowledge/source_runtime.py
+  - runtime/knowledge/source_api.py
+  - runtime/knowledge/context_service.py
+  - runtime/knowledge/workspace_api.py
+  - runtime/agents/core/knowledge/context.py
+  - runtime/agents/core/knowledge/source_curation.py
+  - runtime/mcp_tools/source_tools.py
+  - runtime/knowledge/ontology
+  - runtime/utils/agent_artifact_archive.py
+  - runtime/graphs/modules/knowledge/module.yaml
+  - runtime/graphs/modules/knowledge/ui.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -53,7 +53,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # Knowledge Agent Reference
 
-<img src="../../web/static/workspace_icons/knowledge.webp" width="96" alt="Knowledge Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/knowledge.webp" width="96" alt="Knowledge Workspace icon">
 
 Main GUI: **Knowledge · Workspace** opens the knowledge workspace in a separate window.
 
@@ -466,7 +466,7 @@ responses and actual temporary Markdown operations; original synthetic values
 were unchanged. [Sanitized verification artifact](assets/verification/knowledge_decisions_2026-09-10.json)
 records models, action sequences, note/citation counts and limits.
 The executable provider probe is
-[`verify_knowledge_decisions.py`](../../scripts/verify_knowledge_decisions.py).
+[`verify_knowledge_decisions.py`](../../runtime/scripts/verify_knowledge_decisions.py).
 
 Tests exercise real temporary Markdown files, scoped reads, lifecycle/retries,
 archive preservation, retired legacy APIs, Knowledge/BO handoff,

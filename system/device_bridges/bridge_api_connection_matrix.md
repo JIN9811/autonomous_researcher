@@ -17,15 +17,15 @@ scope:
   - recovery
 summary: Cross-bridge matrix of ATR entry points, protocols, modes, external effects, evidence, and recovery rules.
 source_of_truth:
-  - device_bridges
-  - mcp_tools
-  - app/bootstrap.py
-  - app/main.py
-  - utils/equipment_runtime_service.py
-  - utils/plc_bridge_service.py
-  - configs/devices.yaml
-  - configs/lerobot.yaml
-  - graphs/configs/atr_closed_loop.yaml
+  - runtime/device_bridges
+  - runtime/mcp_tools
+  - runtime/app/bootstrap.py
+  - runtime/app/main.py
+  - runtime/utils/equipment_runtime_service.py
+  - runtime/utils/plc_bridge_service.py
+  - runtime/configs/devices.yaml
+  - runtime/configs/lerobot.yaml
+  - runtime/graphs/configs/atr_closed_loop.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:

@@ -7,11 +7,11 @@ audience: [user, operator, researcher]
 scope: [gui_tutorial, operator_workflow]
 summary: Screenshot-led first virtual run, evidence inspection and recovery checkpoints.
 source_of_truth:
-  - web/templates/index.html
-  - web/static/app.js
-  - web/templates/planning.html
-  - web/static/planning.js
-  - utils/test_mode_execution_profiles.py
+  - runtime/web/templates/index.html
+  - runtime/web/static/app.js
+  - runtime/web/templates/planning.html
+  - runtime/web/static/planning.js
+  - runtime/utils/test_mode_execution_profiles.py
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:

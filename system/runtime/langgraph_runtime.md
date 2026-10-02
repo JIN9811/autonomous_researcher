@@ -12,12 +12,12 @@ scope:
   - module_runtime
 summary: Current executable graph, module, runtime event, and Runtime IDE contracts.
 source_of_truth:
-  - graphs/configs/atr_closed_loop.yaml
-  - graphs/compiler.py
-  - graphs/registry.py
-  - orchestrator/langgraph_runtime.py
-  - app/main.py
-  - web/static/runtime_ide.js
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/graphs/compiler.py
+  - runtime/graphs/registry.py
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/app/main.py
+  - runtime/web/static/runtime_ide.js
 last_verified: 2026-08-08
 verified_against: 09bbe32
 related_docs:
@@ -366,7 +366,7 @@ Current installed owners use `module.execution_graph` and their registered opera
 catalogs. For migrated modules the runtime skips legacy `internal_graph` execution;
 the checkpoint/explicit-handler rules below apply only to unmigrated modules.
 See [the editable module contract](runtime_ide.md#five-area-editable-module-canvas)
-and [`_module_internal_steps`](../../orchestrator/langgraph_runtime.py).
+and [`_module_internal_steps`](../../runtime/orchestrator/langgraph_runtime.py).
 
 `LangGraphRunLoop` loads `graphs/modules/*/module.yaml` for every stage referenced by the active graph. The module file is not only a UI document: the runtime wraps `AgentContext` with a stage-scoped `ModuleRuntimeContext` before calling `BaseAgent.run(state, ctx)`.
 
@@ -428,7 +428,7 @@ The saved graph defaults are `specimen -> vision`, `manipulation -> vision`, and
 Active Cam approval; `next_stage:vision` retains rollout monitoring. Equipment
 and Vision also expose identity-scoped UTM-clearance routes before Analysis.
 `vision_verify` is a non-executable evidence overlay, not a replacement for the
-executable Vision stage. Inspect [the active YAML](../../graphs/configs/atr_closed_loop.yaml)
+executable Vision stage. Inspect [the active YAML](../../runtime/graphs/configs/atr_closed_loop.yaml)
 for defaults and conditional candidates; diagram arrows do not authorize work.
 
 ## Live GUI Planning Handoff

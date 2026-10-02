@@ -13,15 +13,15 @@ scope:
   - runtime_graph
 summary: Describes the current ATR system layers, executable graph, stage contracts, and control boundaries.
 source_of_truth:
-  - graphs/configs/atr_closed_loop.yaml
-  - orchestrator/graph.py
-  - orchestrator/langgraph_runtime.py
-  - orchestrator/supervisor.py
-  - app/controller.py
-  - policies/guardian_gate.py
-  - agents/core/knowledge/agent.py
-  - knowledge/markdown_runtime.py
-  - knowledge/source_api.py
+  - runtime/graphs/configs/atr_closed_loop.yaml
+  - runtime/orchestrator/graph.py
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/orchestrator/supervisor.py
+  - runtime/app/controller.py
+  - runtime/policies/guardian_gate.py
+  - runtime/agents/core/knowledge/agent.py
+  - runtime/knowledge/markdown_runtime.py
+  - runtime/knowledge/source_api.py
 last_verified: 2026-09-14
 verified_against: agent-canonical-import-cleanup
 paper_section: system_architecture

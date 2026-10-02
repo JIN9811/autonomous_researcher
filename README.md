@@ -75,7 +75,7 @@ supersedes: []
 | **[Device bridges](system/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
 | **[Runtime IDE](system/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
 | **[Results and evidence](docs/paper/06_evaluation_and_results.md)** | Demonstrated outcomes and their supporting artifacts. |
-| **[Setup and operation](install/README.md)** | Installation, configuration, and operator workflows. |
+| **[Setup and operation](runtime/install/README.md)** | Installation, configuration, and operator workflows. |
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
 
 </div>
@@ -255,7 +255,7 @@ at 1920 × 1080.
 | Reader | Start here |
 |---|---|
 | Researcher or reviewer | [Problem and contributions](docs/paper/01_problem_and_contributions.md) → [Results](docs/paper/06_evaluation_and_results.md) |
-| Operator | [Installation](install/README.md) → [First-run tutorial](docs/tutorials/first_autonomous_run.en.md) → [Device bridges](system/device_bridges/README.md) |
+| Operator | [Installation](runtime/install/README.md) → [First-run tutorial](docs/tutorials/first_autonomous_run.en.md) → [Device bridges](system/device_bridges/README.md) |
 | Developer | [Runtime reference](system/runtime/current_code_snapshot.md) → [Agent APIs](system/agents/agent_api_connection_matrix.md) |
 | Contributor | [Contributing](docs/project/CONTRIBUTING.md) → [Documentation rules](system/standards/documentation_standard.md) |
 

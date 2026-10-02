@@ -14,12 +14,12 @@ scope:
   - compatibility_stubs
 summary: Current abstract bridge and deterministic printer, camera, robot, and UTM test-substitute contracts, including their live-evidence limits.
 source_of_truth:
-  - device_bridges/base_bridge.py
-  - device_bridges/simulator
-  - device_bridges/robot_bridge.py
-  - device_bridges/utm_macro_bridge.py
-  - mcp_tools/mock_tools.py
-  - configs/devices.yaml
+  - runtime/device_bridges/base_bridge.py
+  - runtime/device_bridges/simulator
+  - runtime/device_bridges/robot_bridge.py
+  - runtime/device_bridges/utm_macro_bridge.py
+  - runtime/mcp_tools/mock_tools.py
+  - runtime/configs/devices.yaml
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -42,7 +42,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | Purpose | Abstract contracts and deterministic test substitutes |
 | Connects | Agents and tools ↔ simulated printer, camera, robot and instrument |
 | Effect | No physical device actuation |
-| Implementation | [Base contract](../../device_bridges/base_bridge.py) |
+| Implementation | [Base contract](../../runtime/device_bridges/base_bridge.py) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
 
 ## Summary

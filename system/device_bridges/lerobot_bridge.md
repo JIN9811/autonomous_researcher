@@ -14,16 +14,16 @@ scope:
   - isaac_sidecars
 summary: Current LeRobot bridge contract for profiles, devices, cameras, teleoperation, recording, training, rollout, visualization, and Isaac sidecars.
 source_of_truth:
-  - device_bridges/lerobot/bridge.py
-  - device_bridges/lerobot/module.py
-  - device_bridges/isaac_lab_synthetic.py
-  - device_bridges/isaac_lab_hdf5.py
-  - device_bridges/isaac_lab_joint_replay_mimic.py
-  - device_bridges/lerobot/tools.py
-  - configs/lerobot.yaml
-  - app/main.py
-  - scripts/lerobot_managed_replay.py
-  - utils/utm_clear_cycle.py
+  - runtime/device_bridges/lerobot/bridge.py
+  - runtime/device_bridges/lerobot/module.py
+  - runtime/device_bridges/isaac_lab_synthetic.py
+  - runtime/device_bridges/isaac_lab_hdf5.py
+  - runtime/device_bridges/isaac_lab_joint_replay_mimic.py
+  - runtime/device_bridges/lerobot/tools.py
+  - runtime/configs/lerobot.yaml
+  - runtime/app/main.py
+  - runtime/scripts/lerobot_managed_replay.py
+  - runtime/utils/utm_clear_cycle.py
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -41,7 +41,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 # LeRobot Bridge Reference
 
-<img src="../../web/static/workspace_icons/lerobot.webp" width="96" alt="Manipulation Workspace icon">
+<img src="../../runtime/web/static/workspace_icons/lerobot.webp" width="96" alt="Manipulation Workspace icon">
 
 Main GUI: **Manipulation · Workspace** opens the manipulation workspace in a separate window.
 
@@ -52,7 +52,7 @@ Main GUI: **Manipulation · Workspace** opens the manipulation workspace in a se
 | Purpose | Robot profiles, teleoperation, recording, training and rollout |
 | Connects | Manipulation / LeRobot workspace ↔ robot and camera stack |
 | Effect | Robot motion is possible through live executors |
-| Implementation | [LeRobot implementation](../../device_bridges/lerobot/bridge.py) |
+| Implementation | [LeRobot implementation](../../runtime/device_bridges/lerobot/bridge.py) |
 | Verification | 2026-09-13 package inspection and guarded software checks; [earlier physical scope and evidence](#current-verification) retained |
 
 ## Summary
@@ -73,10 +73,10 @@ Isaac sidecars, and visualization. These are components of one bridge, not separ
 devices or an agent execution pipeline.
 
 Canonical implementation and registration are
-[`device_bridges/lerobot/bridge.py`](../../device_bridges/lerobot/bridge.py) and
-[`device_bridges/lerobot/tools.py`](../../device_bridges/lerobot/tools.py).
+[`device_bridges/lerobot/bridge.py`](../../runtime/device_bridges/lerobot/bridge.py) and
+[`device_bridges/lerobot/tools.py`](../../runtime/device_bridges/lerobot/tools.py).
 Legacy `device_bridges.lerobot_bridge` and `mcp_tools.lerobot_tools` imports remain
-exact module aliases. The [bridge descriptor](../../device_bridges/lerobot/module.py)
+exact module aliases. The [bridge descriptor](../../runtime/device_bridges/lerobot/module.py)
 declares the existing `/lerobot` workspace, `/api/lerobot/*` services,
 `web/templates/lerobot.html`, `web/static/lerobot.js`, requirements, scripts and
 producer storage. Port memory, session logs, calibration, datasets, training

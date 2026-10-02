@@ -13,16 +13,16 @@ scope:
   - rollout_telemetry
 summary: Run, loop, agent, and invocation-scoped evidence storage with compatible legacy artifact access.
 source_of_truth:
-  - utils/agent_artifact_archive.py
-  - utils/rollout_artifact_stream.py
-  - agents
-  - app/bootstrap.py
-  - app/main.py
-  - mcp_tools/tool_registry.py
-  - orchestrator/langgraph_runtime.py
-  - device_bridges/lerobot_bridge.py
-  - web/static/runtime_ide.js
-  - web/static/planning.js
+  - runtime/utils/agent_artifact_archive.py
+  - runtime/utils/rollout_artifact_stream.py
+  - runtime/agents
+  - runtime/app/bootstrap.py
+  - runtime/app/main.py
+  - runtime/mcp_tools/tool_registry.py
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/device_bridges/lerobot_bridge.py
+  - runtime/web/static/runtime_ide.js
+  - runtime/web/static/planning.js
 last_verified: 2026-09-06
 verified_against: working-tree
 related_docs:

@@ -7,10 +7,10 @@ audience: [user, operator, researcher]
 scope: [gui_tutorial, operator_workflow]
 summary: Practical operator exercises for devices, evidence, recovery and read-only replay.
 source_of_truth:
-  - web/templates
-  - web/static
-  - app/main.py
-  - app/run_review_routes.py
+  - runtime/web/templates
+  - runtime/web/static
+  - runtime/app/main.py
+  - runtime/app/run_review_routes.py
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:

@@ -7,9 +7,9 @@ audience: [user, operator, researcher]
 scope: [gui_tutorial, operator_workflow]
 summary: Printer profile persistence, slicing-only verification and guarded physical execution.
 source_of_truth:
-  - web/templates/printer.html
-  - web/static/printer.js
-  - device_bridges/printer_fleet/bridge.py
+  - runtime/web/templates/printer.html
+  - runtime/web/static/printer.js
+  - runtime/device_bridges/printer_fleet/bridge.py
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:

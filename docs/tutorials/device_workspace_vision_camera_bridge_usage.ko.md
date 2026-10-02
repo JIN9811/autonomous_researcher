@@ -7,9 +7,9 @@ audience: [user, operator, researcher]
 scope: [gui_tutorial, operator_workflow]
 summary: Camera configuration, frame freshness, pose diagnostics and run-bound verification walkthrough.
 source_of_truth:
-  - web/templates/vision_utm_device_bridge.html
-  - web/static/vision_utm_device_bridge.js
-  - app/main.py
+  - runtime/web/templates/vision_utm_device_bridge.html
+  - runtime/web/static/vision_utm_device_bridge.js
+  - runtime/app/main.py
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:

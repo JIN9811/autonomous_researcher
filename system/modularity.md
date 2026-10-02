@@ -16,20 +16,20 @@ scope:
   - core_owner_plans
 summary: Reader-facing map of the implemented module, package, bridge, configuration, and core-owner plan boundaries.
 source_of_truth:
-  - agents/core
-  - agents/module_contract.py
-  - agents/module_discovery.py
-  - graphs/schema.py
-  - graphs/module_store.py
-  - packages
-  - app/main.py
-  - orchestrator/langgraph_runtime.py
-  - web/static/runtime_ide.js
-  - web/static/experimental_packages.js
+  - runtime/agents/core
+  - runtime/agents/module_contract.py
+  - runtime/agents/module_discovery.py
+  - runtime/graphs/schema.py
+  - runtime/graphs/module_store.py
+  - runtime/packages
+  - runtime/app/main.py
+  - runtime/orchestrator/langgraph_runtime.py
+  - runtime/web/static/runtime_ide.js
+  - runtime/web/static/experimental_packages.js
 last_verified: 2026-09-29
 verified_against: dd0d772472d5d44bfef690e6258fc62270192b96
 related_docs:
-  - packages/README.md
+  - runtime/packages/README.md
   - system/agents/README.md
   - system/device_bridges/README.md
   - system/runtime/runtime_ide.md
@@ -197,7 +197,7 @@ no physical calls. Exact commands and boundaries remain in the
 
 ## Related Documents
 
-- [Agent and Experimental Packages](../packages/README.md)
+- [Agent and Experimental Packages](../runtime/packages/README.md)
 - [Agent Reference Index](agents/README.md)
 - [Device Bridge Reference Index](device_bridges/README.md)
 - [Runtime IDE Reference](runtime/runtime_ide.md)

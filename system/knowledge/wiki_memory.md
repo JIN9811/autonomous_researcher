@@ -7,15 +7,15 @@ audience: [operator, developer, researcher, maintainer]
 scope: [knowledge, ax4lab_wiki, private_memory, agent_context]
 summary: Public Wiki and private memory contracts, ownership, and verification boundaries.
 source_of_truth:
-  - knowledge/context_service.py
-  - knowledge/private_memory.py
-  - knowledge/workspace_api.py
-  - knowledge/delivery.py
-  - agents/core/knowledge/context.py
-  - app/controller.py
-  - web/static/knowledge_workspace.js
-  - web/static/knowledge_live.js
-  - web/static/planning.js
+  - runtime/knowledge/context_service.py
+  - runtime/knowledge/private_memory.py
+  - runtime/knowledge/workspace_api.py
+  - runtime/knowledge/delivery.py
+  - runtime/agents/core/knowledge/context.py
+  - runtime/app/controller.py
+  - runtime/web/static/knowledge_workspace.js
+  - runtime/web/static/knowledge_live.js
+  - runtime/web/static/planning.js
 last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
@@ -205,7 +205,7 @@ existing LLM curation workflow and its execution handoffs.
 
 ## Verification Boundaries
 
-The opt-in [provider probe](../../scripts/verify_knowledge_workspace.py) uses
+The opt-in [provider probe](../../runtime/scripts/verify_knowledge_workspace.py) uses
 the registered backends and public Wiki plus synthetic fixtures. The recorded
 implementation check exercised ten agent decision entrypoints with matching and nonmatching
 references: 20 API (`gpt-5.5`) and 20 local vLLM (`gemma4:31b`) cases returned
