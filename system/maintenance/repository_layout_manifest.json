@@ -47338,6 +47338,40 @@
       }
     }
   },
+  "task12_phase": {
+    "source_commits": [
+      "74b4a5df3d7036a4c029525c660073b49224be8b",
+      "a707d691378cd0d0982ad3d2c93fc361f4f4109b"
+    ],
+    "integrated_commits": [
+      "ed668e1d4b66cff2193de62fd556137c7b028d6a",
+      "1c6e940a0f6852ec1c5e66ddf2807a8803b5e7be"
+    ],
+    "scope": "Non-activating explicit private-store copy/verification tooling and synthetic tests only; no real cutover",
+    "additions": {
+      "runtime/scripts/maintenance/migrate_private_state.py": {
+        "mode": "100644",
+        "git_blob": "0feb6864cb323425f71bfea250560bed3aeb1d54",
+        "sha256": "3e265a86741f0d22ed16953922f8e2df6ecc944eaedafa2d3a5055ece4a32130",
+        "size": 26961,
+        "destination": "runtime/scripts/maintenance/migrate_private_state.py",
+        "disposition": "keep",
+        "reason": "Task12 reviewed source-only tooling/test",
+        "distribution": "sdist"
+      },
+      "runtime/tests/unit/test_private_state_migration.py": {
+        "mode": "100644",
+        "git_blob": "d707b01087d59b87767450666bdbe0a8144d8390",
+        "sha256": "dff43c0149ad8004e8610a9b7932f0e52f0a08209cfd6453849cf3c9aeb9e202",
+        "size": 37997,
+        "destination": "runtime/tests/unit/test_private_state_migration.py",
+        "disposition": "keep",
+        "reason": "Task12 reviewed source-only tooling/test",
+        "distribution": "sdist"
+      }
+    },
+    "operational_status": "No production/private-state inventory, copy, activation, restart or resume performed"
+  },
   "task11_phase": {
     "accepted_checkpoint": "982b15adb1dd3bcdf94a4c26eda71a0cf3158fa4",
     "current_source_identities": {
@@ -47571,9 +47605,9 @@
       },
       "runtime/distribution-files.json": {
         "mode": "100644",
-        "git_blob": "75da6e76149c0fae9aeb788c840f2cbd14762c44",
-        "sha256": "0365620c18f9e21cdecfbe371937bc14ece3c0f4fd8769f5320704f1cc5d15d2",
-        "size": 86966
+        "git_blob": "817ac4d5091adea0a03b066695e56a3832859238",
+        "sha256": "1dcb4b2c27d36d7add5a85c27e2c83d37f5d9d53d7b74da04dd7bb9ac681c304",
+        "size": 87068
       },
       "runtime/install/README.md": {
         "mode": "100644",
@@ -47649,9 +47683,27 @@
       },
       "system/maintenance/repository_layout_cutover.md": {
         "mode": "100644",
-        "git_blob": "c2af8e8543584cd65200e514303cd0bbbfa035e4",
-        "sha256": "b9ba0cd891684738f9caccf1386143f8f43c200bef3d65d01f7cb2b281844171",
-        "size": 4889
+        "git_blob": "e638b079f74a3b7b8960047562a68b35397b7b91",
+        "sha256": "d472b8c45654e45464dcddd9cfa7407eedf98b7a82de30e523ea91668946a8c5",
+        "size": 8741
+      },
+      "system/plans/2026-10-01-repository-layout-migration.md": {
+        "mode": "100644",
+        "git_blob": "961d8e59f673224ebfd900d198d3f73dd943409f",
+        "sha256": "d5117dfe66c32cc8f3cd16164d2cd70bad20f280e1ef07a5493e8218e7de13de",
+        "size": 40726
+      },
+      "runtime/scripts/maintenance/migrate_private_state.py": {
+        "mode": "100644",
+        "git_blob": "0feb6864cb323425f71bfea250560bed3aeb1d54",
+        "sha256": "3e265a86741f0d22ed16953922f8e2df6ecc944eaedafa2d3a5055ece4a32130",
+        "size": 26961
+      },
+      "runtime/tests/unit/test_private_state_migration.py": {
+        "mode": "100644",
+        "git_blob": "d707b01087d59b87767450666bdbe0a8144d8390",
+        "sha256": "dff43c0149ad8004e8610a9b7932f0e52f0a08209cfd6453849cf3c9aeb9e202",
+        "size": 37997
       }
     },
     "base_revision": "a8486a3dd893cb5cd20804c9fe5ba5a4ebe3d4a3",

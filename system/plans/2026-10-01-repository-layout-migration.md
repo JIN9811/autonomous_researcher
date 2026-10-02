@@ -3,7 +3,7 @@ doc_type: plan
 subtype: migration
 status: review
 authority: proposal
-execution_status: planned
+execution_status: in_progress
 governing_design: system/specs/2026-10-01-repository-layout-design.md
 audience: [developer, maintainer, operator]
 scope: [repository_layout, runtime_paths, isolated_validation, documentation, historical_state]
@@ -17,6 +17,14 @@ supersedes: []
 -->
 
 # Repository Layout Migration Implementation Plan
+
+Implementation status (2026-10-03): Tasks1–10 source/layout work and reviews are
+accepted; Task11 software validation and Task12 reviewed synthetic-copy tooling
+are integrated, with final combined accounting/publication review pending.
+The checklist below retains unperformed operational steps: no operating source
+or private-state cutover, provider validation, device commissioning or automatic
+resume is claimed. See the [cutover runbook](../maintenance/repository_layout_cutover.md)
+for accepted evidence boundaries and remaining gates.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (the user's selected method) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

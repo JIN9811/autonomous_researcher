@@ -5,6 +5,31 @@ Software validation on the isolated branch neither starts production nor proves
 hardware, external providers or deployed native installations ready. Source and
 private-state cutovers each require an explicitly agreed stopped maintenance point.
 
+## Implementation status — 2026-10-03
+
+Tasks1–10 source/layout work and scoped reviews are accepted. Task11 software
+validation and Task12's reviewed synthetic private-copy tooling are integrated;
+final combined accounting/publication review is still required. The operating
+checkout, deployed services and real private stores have not been cut over.
+
+Actual migration failures found in source/fixture roots were corrected and
+independently reviewed. The evidence retains unrelated baseline test failures,
+skips and warning debt; it is not a full-suite-green claim. Default Runtime IDE
+geometry still fails three old audit assertions with unchanged UI bytes.
+Contained Firefox evidence separately covers actual routes, ten owner reports,
+Replay and Knowledge; unauthenticated401 and GPU-less WebGL limitations remain.
+The49 offline owner scenarios/84 accepted captures are injected-response
+evidence, not actual-provider, hardware or full cross-owner sequence evidence.
+External-provider validation awaits explicit credential/provider authorization;
+two original Playwright tests, unreleased long controller cases and native
+Windows/device operation remain unassessed. Temporary ROS rebuild evidence is
+not an installed production prefix.
+
+The previously recorded outgoing publication gate has32 textual findings
+(31 personal-path and1 credential-pattern finding). Their policy/identity
+decision remains pending; neither source review nor software tests authorize
+publishing them. Retain the final outgoing scan's exact result and revision.
+
 ## Before scheduling maintenance
 
 1. Obtain whole-branch review, including the later private-copy tooling and its
@@ -59,6 +84,40 @@ verify bytes/modes/identities and immutable checkpoint envelopes, then explicitl
 select the verified destination. Keep original evidence intact and recoverable.
 Do not move external caches/datasets/calibrations or merge unrelated worktrees.
 The synthetic rehearsal is not evidence that real private stores were migrated.
+
+The reviewed helper `runtime/scripts/maintenance/migrate_private_state.py`
+offers `plan`, `copy`, `verify` and `propose-bindings`, all with explicit inputs
+and exclusive private0600 output manifests. It never activates bindings,
+restarts/resumes, discovers stores, operates devices or rewrites checkpoints.
+Inputs must contain all seven canonical absolute normalized
+`atr.path_bindings.v1` store roots; this is deliberately stricter than the
+unchanged runtime loader. Keep manifests/proposals outside all selected stores
+and public Git. Destination roots may be absent or empty, but their parents
+must already exist; prepare parents only during approved maintenance.
+
+Before copy the operator explicitly asserts every writer is quiescent. Changed
+snapshots, populated destinations, symlinks, unsupported entries or permission/
+integrity/durability failures block verification. Copy preserves bytes and mode
+bits, not ownership, ACLs or xattrs; resolve any additional filesystem needs
+before use. No native Windows copy support is claimed. Partial outputs remain
+recoverable and must not be retried by merging/overwriting; originals and newer
+destination records are never deleted. Only tool-owned temporary link names
+are removed. This is not transactional rollback or automatic cleanup.
+
+Typed historical reference requests identify exact schema/field/run/kind/source
+and, where required, exact source run directory. Targets derive only from
+verified copied entries; empty requests do not prove historical completeness.
+Supply a reviewed map explicitly to read-only readers, never as resume authority.
+`ready_for_activation` and `resume_certified` remain false after verification.
+
+Explicit printer `connection_memory_path` selections remain repository-relative
+authorities even if named memory moves; omitted fields use named-root defaults,
+and absolute overrides remain external. Record retain/change decisions without
+dropping default-looking values or changing Prusa defaults. The two deferred
+manual PDFs retain separate frozen-move, private inbox and registry-reference
+accounting. Copying an inbox alone does not complete registry/root cleanup;
+retain original references until a separately approved transition. Do not read,
+publish or relabel their bytes merely to finish development accounting.
 
 ## Rollback and operator handoff
 
