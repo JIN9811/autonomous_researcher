@@ -404,7 +404,7 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
     locations = document_locations(manifest)
     anchor_cache = {}
 
-    def inspect(label, target, base, *, metadata=False, provenance=False):
+    def inspect(label, target, base, *, metadata=False, provenance=False, filesystem=False):
         if not isinstance(target, str):
             result['metadata_errors'].append({'document': label, 'reference': repr(target), 'reason': 'non-string path'})
             return
@@ -416,14 +416,15 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
             else:
                 result['metadata_errors'].append({'document': label, 'reference': target, 'reason': 'Missing pinned Git provenance'})
             return
-        parts = urlsplit(html.unescape(target))
+        # Typed registry values must match the unchanged Path-based consumer.
+        parts = urlsplit('') if filesystem else urlsplit(html.unescape(target))
         if parts.scheme or parts.netloc or target.startswith('/'):
             if metadata:
                 result['metadata_errors'].append({'document': label, 'reference': target, 'reason': 'Repository metadata is not a relative path'})
                 return
             result['external_urls'] += 1
             return
-        path = unquote(parts.path)
+        path = target if filesystem else unquote(parts.path)
         candidate = (base / path).resolve() if path else (root / label).resolve()
         issue = {'document': label, 'reference': target}
         if not candidate.is_relative_to(root):
@@ -480,7 +481,7 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
                         inspect(current, metadata['snapshot']['document'], root, metadata=True)
                 elif current.endswith('knowledge/manuals/registry.yaml'):
                     for source in metadata.get('sources', []):
-                        inspect(current, source.get('path'), path.parent, metadata=True)
+                        inspect(current, source.get('path'), path.parent, metadata=True, filesystem=True)
                 elif current.endswith('paper/artifact_manifest.yaml'):
                     for record in metadata.get('evidence', []):
                         for value in record.get('inputs', []):

@@ -304,6 +304,35 @@ def test_audit_separates_missing_files_fragments_escapes_and_metadata(tmp_path):
     assert result['external_urls'] == 1
 
 
+def test_registry_rewrite_retains_literal_filesystem_path(tmp_path):
+    import yaml
+    from tools.repository_layout.move_files import rewrite_document_references
+    source = 'docs/knowledge/manuals/sources/Indicator Manual.pdf'
+    old_registry = 'docs/knowledge/manuals/registry.yaml'
+    new_registry = 'system/knowledge/manuals/registry.yaml'
+    put(tmp_path, source, b'synthetic manual; no ingestion')
+    original = 'sources:\n  - path: sources/Indicator Manual.pdf\n'
+    rewritten, _ = rewrite_document_references(original, old_registry, new_registry,
+                                               {old_registry: new_registry, source: source})
+    put(tmp_path, new_registry, rewritten.encode())
+    value = yaml.safe_load(rewritten)['sources'][0]['path']
+    assert value == '../../../docs/knowledge/manuals/sources/Indicator Manual.pdf'
+    assert (tmp_path / new_registry).parent.joinpath(value).resolve() == tmp_path / source
+    assert (tmp_path / new_registry).parent.joinpath(value).is_file()
+
+
+def test_registry_audit_does_not_decode_percent_as_filesystem_space(tmp_path):
+    registry = 'system/knowledge/manuals/registry.yaml'
+    source = 'docs/knowledge/manuals/sources/Indicator Manual.pdf'
+    put(tmp_path, registry, b'sources:\n  - path: ../../../docs/knowledge/manuals/sources/Indicator%20Manual.pdf\n')
+    put(tmp_path, source, b'synthetic manual; no ingestion')
+    manifest = {'entries': {registry: {'destination': registry, 'disposition': 'keep'},
+                            source: {'destination': source, 'disposition': 'keep'}}}
+    result = audit(tmp_path, manifest)
+    assert len(result['metadata_errors']) == 1
+    assert result['metadata_errors'][0]['reference'].endswith('Indicator%20Manual.pdf')
+
+
 def test_audit_uses_exact_phase_destinations_and_declared_registry_base(tmp_path):
     put(tmp_path, 'system/knowledge/manuals/registry.yaml', b'''schema: manual_source_registry.v1
 sources:

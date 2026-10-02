@@ -61,16 +61,17 @@ They are not current file counts or a replacement for the new reference audit.
 `oldversion/2026-09-14-retired-computation/README.md` was non-distributed local-only
 historical material; no public Git recovery URL is asserted for it.
 
-## Wiki provenance checkpoint
+## Reviewed Wiki migration provenance
 
 The 23 topic identities, original reviewed timestamps and literal execution
 excerpts remain unchanged. Reference-only edits to their 21 source documents
-are recorded with exact before/after identities. Original source digests remain
-in place during the review checkpoint, so the unchanged freshness filter
-correctly marks affected topics stale. This intermediate state is not final
-Task 8 acceptance. Rebinding only previously fresh references requires an
-independent review of the exact edit ledger; substantive or already-stale
-sources must remain stale. No query, filtering or ingestion policy changes.
+are recorded with exact before/after identities. Independent checkpoint review
+verified reference-only edits before the controller authorized the exact 47
+topic/source digest rebindings across these 23 previously fresh pages. Original
+verified_at and semantic review fields are preserved. Separate migration
+provenance is recorded in `repository_layout_reference_provenance.json`;
+already-stale or substantively changed sources are not refreshed. The existing
+freshness filter remains unchanged. No query, filtering or ingestion policy changes.
 
 ## Cutover runbook handoff: raw manual sources
 

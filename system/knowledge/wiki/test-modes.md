@@ -1,5 +1,5 @@
 ---
-{"topic_id":"test-modes","owner":"documentation","source_refs":["system/runtime/test_mode.md","system/agents/specimen_agent.md"],"source_revision":{"system/runtime/test_mode.md":"f6e5109e07172362432ee823adf82a580dfdf51186b9e4590ca7a12ca281dbd6","system/agents/specimen_agent.md":"d72dc520dcca1475e03b5ff7dcafa477f2935e1461a903b03ab8813db7dda232"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: test-modes","status":"reviewed"}
+{"topic_id":"test-modes","owner":"documentation","source_refs":["system/runtime/test_mode.md","system/agents/specimen_agent.md"],"source_revision":{"system/runtime/test_mode.md":"4a525fdc1da418bb7ed17c8e2a0d0659ee8a7e976a71a5595348e00d297b4270","system/agents/specimen_agent.md":"e8a62e812dc9a3d2f821a4294bc874005478fc10faa3892ffa233e8d40c4ca22"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: test-modes","status":"reviewed"}
 ---
 
 # Test Modes — Scenarios and Physical Effects

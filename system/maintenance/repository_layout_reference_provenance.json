@@ -1,0 +1,1009 @@
+{
+  "schema": "repository_layout_reference_provenance.v1",
+  "reviewed_checkpoint": "acbd615527677a93d607652a5409f9ba684a54d0",
+  "proof_sha256": "18b63964a6e01325ef660fe0a15098be1077765349004dbd4dae34646e27a052",
+  "baseline_projection_sha256": "f26cedbab914a303552fae793dccdc59b25435921f3a34ab62a041cc2be3b9eb",
+  "review_sha256": "3b60ff26eb75aa88fa41681deda0853cd8dda31a0eab61e9b0ed0eb9fa8068ac",
+  "authorization": "Controller authorized exact independently reviewed reference-only digest rebinding and unchanged relocation approvals. verified_at and semantic review fields unchanged. No already-stale/substantively edited source is refreshed.",
+  "source_rebindings": [
+    {
+      "topic_id": "agent-contracts",
+      "source": "docs/agents/agent_api_connection_matrix.md",
+      "current_source": "system/agents/agent_api_connection_matrix.md",
+      "old_sha256": "a5d1cfca58b130b986cf65aa80d65e332533555ea51325bcaf2a3b7b87737c08",
+      "new_sha256": "973e2e0c531d18485b1044e0113fdc06aa4e3b8263862c6740cd1283f70194ef",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "agent-contracts",
+      "source": "docs/runtime/three_level_control_model.md",
+      "current_source": "system/runtime/three_level_control_model.md",
+      "old_sha256": "e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4",
+      "new_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "agent-contracts",
+      "source": "docs/modularity.md",
+      "current_source": "system/modularity.md",
+      "old_sha256": "f73b0dc4867aed165801d21a319d63daf5f0ab1e1e9909046d4ab13dca2926a2",
+      "new_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "analysis-role",
+      "source": "docs/agents/analysis_agent.md",
+      "current_source": "system/agents/analysis_agent.md",
+      "old_sha256": "708ad6643bc4055b589b48237b69e4948412af8293d0eec918cf12aef5f71516",
+      "new_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "artifacts",
+      "source": "docs/runtime/loop_artifact_archiving.md",
+      "current_source": "system/runtime/loop_artifact_archiving.md",
+      "old_sha256": "02a8b3081a3ddae0e9565004215abd165cbfcba158b2b27e1ee49440fec68080",
+      "new_sha256": "96868e8b3e73bc37373a9b3bf279c4b7a30a09c4081aabc589a2dccf2bd4e25f",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "artifacts",
+      "source": "docs/knowledge/publication.md",
+      "current_source": "system/knowledge/publication.md",
+      "old_sha256": "61f17ba92f6bedb7a5f3cc1b7181b45c82a602205d54bf0d29e520e500a7aa7a",
+      "new_sha256": "45d6b053ad1f4632f089b80bec6e0729783d2ed1d4328170a992c23fba52ffe4",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "bo-role",
+      "source": "docs/agents/bo_agent.md",
+      "current_source": "system/agents/bo_agent.md",
+      "old_sha256": "1ba8c389239b02ff03943b167d01eba7f50f196a3c36a3a6b0f273cf7d371d33",
+      "new_sha256": "19b5aa92d2356bb70995b60925e727afcc13445e3a87da836a842f4d7c14abf7",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "bo-visualization",
+      "source": "docs/agents/bo_agent.md",
+      "current_source": "system/agents/bo_agent.md",
+      "old_sha256": "1ba8c389239b02ff03943b167d01eba7f50f196a3c36a3a6b0f273cf7d371d33",
+      "new_sha256": "19b5aa92d2356bb70995b60925e727afcc13445e3a87da836a842f4d7c14abf7",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "bo-visualization",
+      "source": "docs/agents/analysis_agent.md",
+      "current_source": "system/agents/analysis_agent.md",
+      "old_sha256": "708ad6643bc4055b589b48237b69e4948412af8293d0eec918cf12aef5f71516",
+      "new_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "closed-loop",
+      "source": "docs/agents/agent_api_connection_matrix.md",
+      "current_source": "system/agents/agent_api_connection_matrix.md",
+      "old_sha256": "a5d1cfca58b130b986cf65aa80d65e332533555ea51325bcaf2a3b7b87737c08",
+      "new_sha256": "973e2e0c531d18485b1044e0113fdc06aa4e3b8263862c6740cd1283f70194ef",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "closed-loop",
+      "source": "docs/agents/equipment_agent.md",
+      "current_source": "system/agents/equipment_agent.md",
+      "old_sha256": "44e2fa04db045e5b54a7580fca7674f3862409eb5103fc4d281bcd95975511ca",
+      "new_sha256": "21de8d0387ce55d54c666d687dcddbc443ced70cfcdaade3f0687f12fc63a396",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "closed-loop",
+      "source": "docs/agents/bo_agent.md",
+      "current_source": "system/agents/bo_agent.md",
+      "old_sha256": "1ba8c389239b02ff03943b167d01eba7f50f196a3c36a3a6b0f273cf7d371d33",
+      "new_sha256": "19b5aa92d2356bb70995b60925e727afcc13445e3a87da836a842f4d7c14abf7",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "closed-loop",
+      "source": "docs/agents/orchestrator_agent.md",
+      "current_source": "system/agents/orchestrator_agent.md",
+      "old_sha256": "760edc6b269c1c35dacfece350d325186db98a55c47224bfcef102ee5a5f7d0c",
+      "new_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "control-levels",
+      "source": "docs/runtime/three_level_control_model.md",
+      "current_source": "system/runtime/three_level_control_model.md",
+      "old_sha256": "e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4",
+      "new_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "design-role",
+      "source": "docs/agents/design_agent.md",
+      "current_source": "system/agents/design_agent.md",
+      "old_sha256": "c111a5b6578359d7de2d6f504b9416a4c9173f04d5934ecfdb16f4885736aa3f",
+      "new_sha256": "408309ea34dc7300ab380203765788ea1ef38348df2ef760e1cd1ebfe1603333",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "design-role",
+      "source": "docs/runtime/three_level_control_model.md",
+      "current_source": "system/runtime/three_level_control_model.md",
+      "old_sha256": "e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4",
+      "new_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "equipment-role",
+      "source": "docs/agents/equipment_agent.md",
+      "current_source": "system/agents/equipment_agent.md",
+      "old_sha256": "44e2fa04db045e5b54a7580fca7674f3862409eb5103fc4d281bcd95975511ca",
+      "new_sha256": "21de8d0387ce55d54c666d687dcddbc443ced70cfcdaade3f0687f12fc63a396",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "experimental-setup",
+      "source": "docs/agents/orchestrator_agent.md",
+      "current_source": "system/agents/orchestrator_agent.md",
+      "old_sha256": "760edc6b269c1c35dacfece350d325186db98a55c47224bfcef102ee5a5f7d0c",
+      "new_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "experimental-setup",
+      "source": "docs/modularity.md",
+      "current_source": "system/modularity.md",
+      "old_sha256": "f73b0dc4867aed165801d21a319d63daf5f0ab1e1e9909046d4ab13dca2926a2",
+      "new_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "guardian-role",
+      "source": "docs/agents/guardian_agent.md",
+      "current_source": "system/agents/guardian_agent.md",
+      "old_sha256": "2892f284bed592d0d1c3cfe097fb0fb38ea2cc1266df3986a4f6e23cfae39e6b",
+      "new_sha256": "504b83dfd169884d5d34177667fac9b947bcc2ef3cf3c0aa46988690f9a46249",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "guardian-role",
+      "source": "docs/device_bridges/plc_safety_bridge.md",
+      "current_source": "system/device_bridges/plc_safety_bridge.md",
+      "old_sha256": "b1d27bf8f94e18d31c8e67a323cb6ee0aecc74ebdc55289ebb3378d8a47fefbf",
+      "new_sha256": "06805f23d8f066b175e9e9b9a63e1c356ea9547b73adf48b233f005c9e8e7e4f",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "knowledge-agent",
+      "source": "docs/knowledge/wiki_memory.md",
+      "current_source": "system/knowledge/wiki_memory.md",
+      "old_sha256": "fc555dfc74bd8a383c2b86cfdd60d31f84ee2f53ef02b7aa4ac852cc12f81fdf",
+      "new_sha256": "278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "knowledge-agent",
+      "source": "docs/knowledge/publication.md",
+      "current_source": "system/knowledge/publication.md",
+      "old_sha256": "61f17ba92f6bedb7a5f3cc1b7181b45c82a602205d54bf0d29e520e500a7aa7a",
+      "new_sha256": "45d6b053ad1f4632f089b80bec6e0729783d2ed1d4328170a992c23fba52ffe4",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "knowledge-agent",
+      "source": "docs/agents/knowledge_agent.md",
+      "current_source": "system/agents/knowledge_agent.md",
+      "old_sha256": "2f265e264737f33f64acace7ac37f82879dadf1fcd74b94d89de8eeca9192bce",
+      "new_sha256": "798b165b781d85a3197d1b8888b618fea9610928aa15b8765bb7afae21196890",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "knowledge-role",
+      "source": "docs/agents/knowledge_agent.md",
+      "current_source": "system/agents/knowledge_agent.md",
+      "old_sha256": "2f265e264737f33f64acace7ac37f82879dadf1fcd74b94d89de8eeca9192bce",
+      "new_sha256": "798b165b781d85a3197d1b8888b618fea9610928aa15b8765bb7afae21196890",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "knowledge-role",
+      "source": "docs/knowledge/wiki_memory.md",
+      "current_source": "system/knowledge/wiki_memory.md",
+      "old_sha256": "fc555dfc74bd8a383c2b86cfdd60d31f84ee2f53ef02b7aa4ac852cc12f81fdf",
+      "new_sha256": "278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "manipulation-role",
+      "source": "docs/agents/manipulation_agent.md",
+      "current_source": "system/agents/manipulation_agent.md",
+      "old_sha256": "409d2424cfb34e7ca6de7407f2479f47e64ab9e9150abc5da591cd7019b0b1c6",
+      "new_sha256": "123be74169a6d93766d1f00ba7205dd4f61939a931e17b6070c48c0b6d766740",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "measurement-metrics",
+      "source": "docs/agents/analysis_agent.md",
+      "current_source": "system/agents/analysis_agent.md",
+      "old_sha256": "708ad6643bc4055b589b48237b69e4948412af8293d0eec918cf12aef5f71516",
+      "new_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "orchestrator-role",
+      "source": "docs/agents/orchestrator_agent.md",
+      "current_source": "system/agents/orchestrator_agent.md",
+      "old_sha256": "760edc6b269c1c35dacfece350d325186db98a55c47224bfcef102ee5a5f7d0c",
+      "new_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "orchestrator-role",
+      "source": "docs/runtime/test_mode.md",
+      "current_source": "system/runtime/test_mode.md",
+      "old_sha256": "f6e5109e07172362432ee823adf82a580dfdf51186b9e4590ca7a12ca281dbd6",
+      "new_sha256": "4a525fdc1da418bb7ed17c8e2a0d0659ee8a7e976a71a5595348e00d297b4270",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "packages-and-plans",
+      "source": "docs/modularity.md",
+      "current_source": "system/modularity.md",
+      "old_sha256": "f73b0dc4867aed165801d21a319d63daf5f0ab1e1e9909046d4ab13dca2926a2",
+      "new_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "platform-overview",
+      "source": "docs/README.md",
+      "current_source": "docs/README.md",
+      "old_sha256": "6a4451a034d01173e57cfa2f69727c2fbfb1e094079ba661a2c79746cc5ec995",
+      "new_sha256": "78af2a5d31db8bef7e1506c3678b079d5c965d0221a1517a70978a05ee268417",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "platform-overview",
+      "source": "docs/modularity.md",
+      "current_source": "system/modularity.md",
+      "old_sha256": "f73b0dc4867aed165801d21a319d63daf5f0ab1e1e9909046d4ab13dca2926a2",
+      "new_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "platform-overview",
+      "source": "docs/runtime/three_level_control_model.md",
+      "current_source": "system/runtime/three_level_control_model.md",
+      "old_sha256": "e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4",
+      "new_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "recovery",
+      "source": "docs/agents/equipment_agent.md",
+      "current_source": "system/agents/equipment_agent.md",
+      "old_sha256": "44e2fa04db045e5b54a7580fca7674f3862409eb5103fc4d281bcd95975511ca",
+      "new_sha256": "21de8d0387ce55d54c666d687dcddbc443ced70cfcdaade3f0687f12fc63a396",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "recovery",
+      "source": "docs/agents/vision_agent.md",
+      "current_source": "system/agents/vision_agent.md",
+      "old_sha256": "56f0d6b4aff9ea2d58b06a7d374ab09ad43675e780916a446158450be2fd24ec",
+      "new_sha256": "ad04cfe9bcc0c0f76a8dae75658d5ee2e101cfb1074b6c87a732626ca7bc9946",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "recovery",
+      "source": "docs/agents/analysis_agent.md",
+      "current_source": "system/agents/analysis_agent.md",
+      "old_sha256": "708ad6643bc4055b589b48237b69e4948412af8293d0eec918cf12aef5f71516",
+      "new_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "recovery",
+      "source": "docs/device_bridges/plc_safety_bridge.md",
+      "current_source": "system/device_bridges/plc_safety_bridge.md",
+      "old_sha256": "b1d27bf8f94e18d31c8e67a323cb6ee0aecc74ebdc55289ebb3378d8a47fefbf",
+      "new_sha256": "06805f23d8f066b175e9e9b9a63e1c356ea9547b73adf48b233f005c9e8e7e4f",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "specimen-role",
+      "source": "docs/agents/specimen_agent.md",
+      "current_source": "system/agents/specimen_agent.md",
+      "old_sha256": "d72dc520dcca1475e03b5ff7dcafa477f2935e1461a903b03ab8813db7dda232",
+      "new_sha256": "e8a62e812dc9a3d2f821a4294bc874005478fc10faa3892ffa233e8d40c4ca22",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "specimen-role",
+      "source": "docs/runtime/test_mode.md",
+      "current_source": "system/runtime/test_mode.md",
+      "old_sha256": "f6e5109e07172362432ee823adf82a580dfdf51186b9e4590ca7a12ca281dbd6",
+      "new_sha256": "4a525fdc1da418bb7ed17c8e2a0d0659ee8a7e976a71a5595348e00d297b4270",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "test-modes",
+      "source": "docs/runtime/test_mode.md",
+      "current_source": "system/runtime/test_mode.md",
+      "old_sha256": "f6e5109e07172362432ee823adf82a580dfdf51186b9e4590ca7a12ca281dbd6",
+      "new_sha256": "4a525fdc1da418bb7ed17c8e2a0d0659ee8a7e976a71a5595348e00d297b4270",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "test-modes",
+      "source": "docs/agents/specimen_agent.md",
+      "current_source": "system/agents/specimen_agent.md",
+      "old_sha256": "d72dc520dcca1475e03b5ff7dcafa477f2935e1461a903b03ab8813db7dda232",
+      "new_sha256": "e8a62e812dc9a3d2f821a4294bc874005478fc10faa3892ffa233e8d40c4ca22",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "vision-role",
+      "source": "docs/agents/vision_agent.md",
+      "current_source": "system/agents/vision_agent.md",
+      "old_sha256": "56f0d6b4aff9ea2d58b06a7d374ab09ad43675e780916a446158450be2fd24ec",
+      "new_sha256": "ad04cfe9bcc0c0f76a8dae75658d5ee2e101cfb1074b6c87a732626ca7bc9946",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "workspaces",
+      "source": "docs/runtime/runtime_ide.md",
+      "current_source": "system/runtime/runtime_ide.md",
+      "old_sha256": "db356c87f7118bdde62e5f67fa65c26d46e671032a9d5f26295822be11acaa04",
+      "new_sha256": "a891a20f0e99a15633ee75837bfa35a4c80755677fb7fbe52132392250186a24",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "workspaces",
+      "source": "docs/device_bridges/README.md",
+      "current_source": "system/device_bridges/README.md",
+      "old_sha256": "2354ef0475e1e54389d8876200f5b2f1204c17fa5e40be17ecc2f798f1879d53",
+      "new_sha256": "726e0ab41a968da898d8549f26bf618dc29568423d6241b1195d8861437e7c49",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "workspaces",
+      "source": "docs/knowledge/wiki_memory.md",
+      "current_source": "system/knowledge/wiki_memory.md",
+      "old_sha256": "fc555dfc74bd8a383c2b86cfdd60d31f84ee2f53ef02b7aa4ac852cc12f81fdf",
+      "new_sha256": "278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    },
+    {
+      "topic_id": "workspaces",
+      "source": "docs/agents/orchestrator_agent.md",
+      "current_source": "system/agents/orchestrator_agent.md",
+      "old_sha256": "760edc6b269c1c35dacfece350d325186db98a55c47224bfcef102ee5a5f7d0c",
+      "new_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+      "verified_at_preserved": "2026-09-29T00:00:00+09:00"
+    }
+  ],
+  "wiki_pages": [
+    {
+      "path": "system/knowledge/wiki/agent-contracts.md",
+      "before_sha256": "11b85d771331ab012fc2e61b98ebf5f7b5ebdc7b00e9647da61fef7e3c55c178",
+      "after_sha256": "d91bacffdc1692d122be440c448074d1c002ce296ea2cedb00cc17242cd0e4e8"
+    },
+    {
+      "path": "system/knowledge/wiki/analysis-role.md",
+      "before_sha256": "5ba880cad9a08317ab4768d466a47467e3dabe33ead93de5315f4bf985f96372",
+      "after_sha256": "5bdfd67ff3642c625fc2a97cd4db40424b3e64fbe1f9a16ee10d842062dcb67e"
+    },
+    {
+      "path": "system/knowledge/wiki/artifacts.md",
+      "before_sha256": "8dd93bcf425e886eb73b1d06117961bb189fdbbb687d3b3b80d2dea1a003d57c",
+      "after_sha256": "db58a50be811ef5449b72a7b6879cd5946a602c7d197f4b343de1b50c92248f6"
+    },
+    {
+      "path": "system/knowledge/wiki/bo-role.md",
+      "before_sha256": "d3d2322cc42747dcfe1d3f210a54798c77d0ae0bf12444f26842c8572a54f1b7",
+      "after_sha256": "1590ef44c1e32df6e70b87a6e9fdeb145538bd6d9e9fc1f255535036c8ed3a45"
+    },
+    {
+      "path": "system/knowledge/wiki/bo-visualization.md",
+      "before_sha256": "c7dc7ac7c959b3e1c2795f52c75488f0f485e05f3ff3f45912cd00672ed04668",
+      "after_sha256": "ad7ca9bfb69eddf4275567aad9256e7e13afc367d2b1e00556bb0e73b3233855"
+    },
+    {
+      "path": "system/knowledge/wiki/closed-loop.md",
+      "before_sha256": "20780dad0d34b1bae297169e7030f7969ce0bd63e0c83e1cf3a3d2c8a4c31f93",
+      "after_sha256": "02227ceddaeb2b2439c67a35cd6dfd59f2d49f89a3498ec852f5ee34a0e9c7a5"
+    },
+    {
+      "path": "system/knowledge/wiki/control-levels.md",
+      "before_sha256": "b00769a698cbfab7439cfea45b6b63bd918bf00cf7ed572d0111205e1376aeee",
+      "after_sha256": "5b19eb18724a9021f591b01de404a6a29d00869857d7f0924cdcd1900dd67812"
+    },
+    {
+      "path": "system/knowledge/wiki/design-role.md",
+      "before_sha256": "85bd018b999574a814446a4feabd6a36cd5d24ad1c11275cdd1e601b6dc1e1ef",
+      "after_sha256": "2af9b2a5fc8dc5243570b89c9b1e358cf81cefbd713fa7eeb98168fc193be4f8"
+    },
+    {
+      "path": "system/knowledge/wiki/equipment-role.md",
+      "before_sha256": "ebbbc55e944363a7e194b3efbbb196fb8c0b8815866e9da5e0f59c6f130bd8e4",
+      "after_sha256": "92b21078e1f1266f855e2d519a6bf9f0bd73b0ebdea24a475cda93d9708d0751"
+    },
+    {
+      "path": "system/knowledge/wiki/experimental-setup.md",
+      "before_sha256": "6ffc60278ab094eb69bb03fece98603c27231a5cc66cd9d51d079ec195086086",
+      "after_sha256": "f2a8bc47b111a940ab6d52dfd92b48e6f7d7060777cc892c61c02619fe49790e"
+    },
+    {
+      "path": "system/knowledge/wiki/guardian-role.md",
+      "before_sha256": "1cb6f1e1f931d96fa2268bbe8ae37c86ae4c273b74a9307970574c77e5ca0d1c",
+      "after_sha256": "a370640eaf6c862c7fd3f0ec60ac3c2e32e703f95baba2f922ec62775e06f07f"
+    },
+    {
+      "path": "system/knowledge/wiki/knowledge-agent.md",
+      "before_sha256": "6fa0ed084a98839abe6d89f2c8ccbb1a9bc523dfb5d7f7b1ffb71f707a302123",
+      "after_sha256": "36e71e5d99a7b1f9b8ce089dbf67ad1cdaf95090e2425928e22e0e8ab4fb2abe"
+    },
+    {
+      "path": "system/knowledge/wiki/knowledge-role.md",
+      "before_sha256": "5d045165e2a190191a8b2801c59cede781528fd711108f197d5fce9ae706ac20",
+      "after_sha256": "ffefc55c9974506211cc286827a261d5ff8e5328c46a5d9e2604c74af6e9fd0e"
+    },
+    {
+      "path": "system/knowledge/wiki/manipulation-role.md",
+      "before_sha256": "82b9b8ccc373d69de2c904c5f9671153976c6d42642357075fa945c9b6da9fb9",
+      "after_sha256": "740c1a5773886347435374c836f201adfe898f4a60df0a8f4cf7c67402ba869e"
+    },
+    {
+      "path": "system/knowledge/wiki/measurement-metrics.md",
+      "before_sha256": "56f7c0e39308c13fb7616fb3043313a0d4a036def4ac6f8e4ac3ed532839f80c",
+      "after_sha256": "fb41dd899c98b881c60fb3aec441834b014556d79baa3d0db0a4d5c1103687c7"
+    },
+    {
+      "path": "system/knowledge/wiki/orchestrator-role.md",
+      "before_sha256": "d0da7f730aec3c2d7f70ce9e889ebee914e389d8121a6d9301e348e23e2a17e6",
+      "after_sha256": "346bbd88f1178d871dd6ec9f36d72584c49392937bf153567d88ec397aa518e0"
+    },
+    {
+      "path": "system/knowledge/wiki/packages-and-plans.md",
+      "before_sha256": "dd9118ac63daceb2a3bdd90148160c762b6675560ac106c42f3068a4adafaa2c",
+      "after_sha256": "15ba06493cb26c93ac8bf4214b1e68b7a54e9e923f32fb46ae50d4e85b7bc228"
+    },
+    {
+      "path": "system/knowledge/wiki/platform-overview.md",
+      "before_sha256": "cde5a0efa76138b3f1566bf955747ad7c114d2d0b2d7cea8a8f375054f315a5f",
+      "after_sha256": "f3a856e1496558a8fe25aeea88b0907a1092d6f9c5cb04fa15c2b485d4520330"
+    },
+    {
+      "path": "system/knowledge/wiki/recovery.md",
+      "before_sha256": "138bee694265b4ad877f3e1ccd058c45da9c081779ae68ce7c406d226956c083",
+      "after_sha256": "9823b48f73265d620e3531e71b8c4d89a9d567d1735e62ee2605f92692531c34"
+    },
+    {
+      "path": "system/knowledge/wiki/specimen-role.md",
+      "before_sha256": "d06ae5358c491837ae22a602b42ae5eaef5c34dfeaf462aa5b4cf4422f7c1935",
+      "after_sha256": "318d1b4102f0d6530462daf1cdd4cd0be4bd3270a990a5620f1fd1063111eb3f"
+    },
+    {
+      "path": "system/knowledge/wiki/test-modes.md",
+      "before_sha256": "f88446b43da260fc42653e62f28107310559ee26abe12178559d9c2a649b50e3",
+      "after_sha256": "cead2542c1e85606a3002925523cf097096a3f0e2c5657cfddee84e2973cd2f3"
+    },
+    {
+      "path": "system/knowledge/wiki/vision-role.md",
+      "before_sha256": "d218e58b83f9d7b8530f3f68984304f6a91c1a87b4339f90bc21802f395425b9",
+      "after_sha256": "d83283dfe7b013cdc70e576203fd878a675f4fee389884939a59af440b93e996"
+    },
+    {
+      "path": "system/knowledge/wiki/workspaces.md",
+      "before_sha256": "af622d87495fac0259f6c65db415d10e6401b73d5ae66342f0fa7b4585d3f077",
+      "after_sha256": "7a9adbdb21f90a99ce44c3b15d38463e38ff4696acc2d8ddcb911bf3a7f2e13a"
+    }
+  ],
+  "publication_relocations": [
+    {
+      "source": "docs/agents/assets/figures/bo-overview.webp",
+      "destination": "system/agents/assets/figures/bo-overview.webp",
+      "sha256": "18ca08051b4130dd11a97db185ee9db5bf4e9fe76b8ab1ecf1fc1c32898ef75b",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/design-overview.webp",
+      "destination": "system/agents/assets/figures/design-overview.webp",
+      "sha256": "856ab61dabf65df0b9a91960aa21eae4e873db1cbfa3f9be7e4fec4153d26669",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/equipment-overview.webp",
+      "destination": "system/agents/assets/figures/equipment-overview.webp",
+      "sha256": "7c0c66bcff24887da356295a21096c41e5a1f102e62dc6c91948c6a47582494d",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/guardian-overview.webp",
+      "destination": "system/agents/assets/figures/guardian-overview.webp",
+      "sha256": "702cb5c54c0c3758111908d7ec1b028297be5ae36a37c2ccf0c362b6ef4d4fd5",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/knowledge-overview.webp",
+      "destination": "system/agents/assets/figures/knowledge-overview.webp",
+      "sha256": "c78be46fadcb57e36aebb3c9c90956763d7c1d5d5d021212b1941a7818426296",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/manipulation-overview.webp",
+      "destination": "system/agents/assets/figures/manipulation-overview.webp",
+      "sha256": "3209bda65295875d218b3d61d53758b56fd2ede6c60bdfd9962a3e62f780d306",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/orchestrator-overview.webp",
+      "destination": "system/agents/assets/figures/orchestrator-overview.webp",
+      "sha256": "0a3b4d1d38d79491d9427c2d75220901cfb6219659374e67dc7cc1611cc29899",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/specimen-overview.webp",
+      "destination": "system/agents/assets/figures/specimen-overview.webp",
+      "sha256": "2588b96d1cd3ccc1dc03430a73dbb0168b3722d5de25f9917c22907dc3b74cbd",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/agents/assets/figures/vision-overview.webp",
+      "destination": "system/agents/assets/figures/vision-overview.webp",
+      "sha256": "caef670bc0091ca134207bb16359164882d6c67126ecd8fb37e13f8af3bbc3bb",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/00_system_architecture.png",
+      "destination": "system/assets/presentation/rendered/00_system_architecture.png",
+      "sha256": "5139017609cf4ce25fb2bca8d6e6fa54e24744762a77e53e6ff83ebd0ddb13d4",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/01_orchestrator_agent.png",
+      "destination": "system/assets/presentation/rendered/01_orchestrator_agent.png",
+      "sha256": "4aa1d3524f217c5ced52e030297534983776ed8433cbd5fb2721e5396137e61f",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/02_design_agent.png",
+      "destination": "system/assets/presentation/rendered/02_design_agent.png",
+      "sha256": "a97c3c86d6d2060c6fdac783af1583fc6618ac84af6100035dfb0e6153b8bb1b",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/03_specimen_making_agent.png",
+      "destination": "system/assets/presentation/rendered/03_specimen_making_agent.png",
+      "sha256": "dd5af0e3e5370e6c7642a9b12ccd150b019de6ce702d26cc68eac5e46bd7e7f8",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/04_vision_agent.png",
+      "destination": "system/assets/presentation/rendered/04_vision_agent.png",
+      "sha256": "3fce48c606df19ba76671ab19e05a1e391821f8567ee9a7f034d49dd0c2f2dcb",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/05_manipulation_agent.png",
+      "destination": "system/assets/presentation/rendered/05_manipulation_agent.png",
+      "sha256": "d1b6bfbc71c480c040ab13d6d809624b7de94c0caedc83f478c8618266f1f477",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/06_lab_equipment_agent.png",
+      "destination": "system/assets/presentation/rendered/06_lab_equipment_agent.png",
+      "sha256": "9c14ef1c334b482c8415f47394a90b905f2bbb4314d20d8ad633f1b431109f4c",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/07_analysis_agent.png",
+      "destination": "system/assets/presentation/rendered/07_analysis_agent.png",
+      "sha256": "c18e2e375c2f3882b958aab02f4e6d8209340c341381055251947b7ee72a5a70",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/08_knowledge_agent.png",
+      "destination": "system/assets/presentation/rendered/08_knowledge_agent.png",
+      "sha256": "13d73d15debdb85425cf209a2ed6cc88a930bb8baae9f70eb9bd9a45e98319ba",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/09_guardian_agent.png",
+      "destination": "system/assets/presentation/rendered/09_guardian_agent.png",
+      "sha256": "22af07aec710ac212bea27ce25109243a75f17a4aacaca60b9f115099d6afdd2",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "image/rendered/contact_sheet.png",
+      "destination": "system/assets/presentation/rendered/contact_sheet.png",
+      "sha256": "dcfc5ccca9b95764d11498732bc4433158855a668806fcb357f0a9c077f2a71f",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/device_bridges/assets/figures/device-bridge-overview.webp",
+      "destination": "system/device_bridges/assets/figures/device-bridge-overview.webp",
+      "sha256": "d92d66c9ef10160e179cbef834a03c01b04ebda146510dad67caca1bc4298fee",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/maintenance/code_documentation_audit_20260928.md",
+      "destination": "system/maintenance/code_documentation_audit_20260928.md",
+      "sha256": "359f26f9774a6900984cf3e5a3af1f2e4e537a04eb74c268cb8f0b8664af1d2d",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/01_manual_entry_height_120mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/01_manual_entry_height_120mm.png",
+      "sha256": "ca6bbb2055b4dabb4ffbcbe3c9cddbb61ff9df31f778db20159914e49593825e",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/02_pretest_height_30_5mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/02_pretest_height_30_5mm.png",
+      "sha256": "37f6ceef3b97f8c99c02f41f9d8adc813d8bc4edea713bbb2b5c8d23f4898890",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/02_pretest_height_31mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/02_pretest_height_31mm.png",
+      "sha256": "539acd33b8b441a6aea72a5911575163422e51489fdef02e0fa51ae00dcf791b",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/02_pretest_height_32mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/02_pretest_height_32mm.png",
+      "sha256": "5ea59a3af5f1968800834c6341668a664bd92efee61458e189a4de9c6b86c789",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/03_testing_early.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/03_testing_early.png",
+      "sha256": "9f4bbcac6a7bbe2bc830768b84bc7620d6d99d6c89914b2222acd425e9353464",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/04_testing_progress.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/04_testing_progress.png",
+      "sha256": "3ead8be85b63a62ec0ab9fc2170f68eb765da0c48a2ed698eafc1ef692abd66d",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/05_tests_completed.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/05_tests_completed.png",
+      "sha256": "b823227ef807d7fc7bfd44c619c2b0702c28c2e9311b529b2bdc1d107f178246",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/06_auto_return_height_30_5mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/06_auto_return_height_30_5mm.png",
+      "sha256": "3cd3b0f4e8fe103cbc5240f74573eceaacd59ead0e5119a97455cc9fac5f650a",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/06_auto_return_height_31mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/06_auto_return_height_31mm.png",
+      "sha256": "2e99ee5a2dd374e4956daada1d2d0d65a04bbd170cc26d947b4bd229ba331dc3",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/06_auto_return_height_32mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/06_auto_return_height_32mm.png",
+      "sha256": "343a3368d524981f1efc303990a29259399eebc143d115e78d07a7d6f4204602",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/07_next_cycle_height_120mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/07_next_cycle_height_120mm.png",
+      "sha256": "f774e38ca143b18b30c62076305a40a1ce147a19ea84dc39c0a02f73a82e89ed",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/08_live_entry_height_150mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/08_live_entry_height_150mm.png",
+      "sha256": "e749abd752dd2f885ee9792dc2b2665175417e66ba9fd3cab539878c95469edd",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/confirm_crosshead_movement_dialog.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/confirm_crosshead_movement_dialog.png",
+      "sha256": "505ce797b5315613c46293f542519d4d07112c5575f7ae26c3ff2c371cc0fabb",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/confirm_crosshead_movement_ok.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/confirm_crosshead_movement_ok.png",
+      "sha256": "3790d6f778651cf8fec21d55e949cedbaa7737ed9b2de705c76ef995e7723fd1",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/confirm_crosshead_movement_ok_focused.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/confirm_crosshead_movement_ok_focused.png",
+      "sha256": "0d81364b1eb29646a95a9dd44e2f2ba1b90b7a5d4f2c6f6b92e1a61c669f9de8",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/entry_height_120mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/entry_height_120mm.png",
+      "sha256": "5d2bbe9934fa9d2e5e37eea8c1a1c4ecfc0ff031bdef0300ad3d5e491daedb11",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/entry_height_150mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/entry_height_150mm.png",
+      "sha256": "8dab9762f7229a050631ddbe4ef51dcbf69f3c576a5589d65017d1e510f578b9",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/export_and_next_test_controls.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/export_and_next_test_controls.png",
+      "sha256": "3ba37f886b699bb7c7e7efb5e26aacb6a83cfe1f2edcf0c3669b658ca8252b12",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/jig_distance_moving_state.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/jig_distance_moving_state.png",
+      "sha256": "343ee8a390401039e794472491bde86c549a56f3340e522ab1660fc6a118f20e",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/jig_motion_controls.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/jig_motion_controls.png",
+      "sha256": "ae033e83ff4e44ab38233fa9253a55015cfaa126427a137e0515ce3cc7383d04",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/loading_main_screen_state.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/loading_main_screen_state.png",
+      "sha256": "4e5531a665ccefa8bf5ddbd38e5130ca22918d4f477205cd05fe79d34d517af0",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/next_test_ready_loaded.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/next_test_ready_loaded.png",
+      "sha256": "b652f60de22d7b2027d280fc04c7cb257a5d10522588670f93c2aad23430b3ee",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/position_zero_reset_dialog.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/position_zero_reset_dialog.png",
+      "sha256": "6b34382ae008848699cb6d55504d40147f596b3a9b8ff0508e0133b675956d56",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/position_zero_reset_ok.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/position_zero_reset_ok.png",
+      "sha256": "3790d6f778651cf8fec21d55e949cedbaa7737ed9b2de705c76ef995e7723fd1",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/position_zero_reset_yes.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/position_zero_reset_yes.png",
+      "sha256": "551c597b5241e674a4b983f522669734bd40a5550576a111ee7592f8a51e75ed",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/restore_confirm_crosshead_movement_dialog.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/restore_confirm_crosshead_movement_dialog.png",
+      "sha256": "01c585bf8bcd06d727b7bb482a4a8d6134d38b7f8738534490cc32e6184c7d25",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/restore_confirm_crosshead_movement_ok.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/restore_confirm_crosshead_movement_ok.png",
+      "sha256": "ab6e5b418add6af7fb3ae17d118b6a4422d351d72a0c652c1029234da870d1a4",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/save_current_file_no.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/save_current_file_no.png",
+      "sha256": "9036db6a4b7cfbf56fb0e019bd1b55716a8d7a5c0e9b86ee5db0623b6a792e6a",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/sensor_readouts.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/sensor_readouts.png",
+      "sha256": "8116ab5face25883895796880aff0ba172f6aeef5ea59986c7f886d691d30716",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/start_height_31mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/start_height_31mm.png",
+      "sha256": "a6ab40d0d63c78af7d1c9a7a31445e04be10fcf7216d4300cf3f1a5c85a652cf",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/start_height_32mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/start_height_32mm.png",
+      "sha256": "ee162108103259b8663baa7a38610455053539d080cc690574bc1269d2f020ec",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/start_test_ready.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/start_test_ready.png",
+      "sha256": "b45f6f4600a4f593785bb198d271954ff532574e0475b1ce7946e7f2a2a361dd",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_150mm.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_150mm.png",
+      "sha256": "c6ff825018a17f713879ca29b80e35c10b3fcc94e0f8692a2dd9021f3d774a4e",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_dialog.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_dialog.png",
+      "sha256": "7f3a48e1a5a0433283598e0efb6304b207e30f51776f926985beb865519bc6e8",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_ok.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_ok.png",
+      "sha256": "8eba20ed363c411af9f6efa88adbdbba3d9853dcd905f93d16dc0c0a8f7ff2d5",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_ok_focused.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/target_inter_jig_distance_ok_focused.png",
+      "sha256": "45a7c9861cdff20e86387f876069c248f2b590bc4b7060b081ce5b8b6a7d404a",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/testing_state.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/testing_state.png",
+      "sha256": "c12e050434c2b1926ea9061db2a4fbc40340680adddb51269ed8f8a499d7d1ba",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/tests_completed_state.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/tests_completed_state.png",
+      "sha256": "b562fbb5ab5531aa313ebd373e898bfa3271aa9c542c259fba7be010c4a81e26",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/toolbar_completed_controls.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/toolbar_completed_controls.png",
+      "sha256": "118f08008d5062ada5d2a5a8abc72bd9afdd203841bb3396fc7d31232e5bf626",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/toolbar_ready_after_next_test.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/toolbar_ready_after_next_test.png",
+      "sha256": "7c886217089383152c981246215b124e16e8f7c69e517e1a790355da40612003",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/locators/toolbar_testing_controls.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/locators/toolbar_testing_controls.png",
+      "sha256": "7ec67ce87d8955693973ea775fe9dfe17c353552b1a3ea56fedc901f680e02d5",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/01_prepare_before_robot_clearance.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/01_prepare_before_robot_clearance.png",
+      "sha256": "ddd0c5fb07dd28c7e21b6e5c6bb1ddbcbacad8221739209092f94f0267cba4d1",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/02_prepare_jig_distance_moving.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/02_prepare_jig_distance_moving.png",
+      "sha256": "8fde2a3b2949ab2bbfa5cc1dd35055b5ed28c2391847edcf525ee94593e27c5b",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/03_prepare_test_ready.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/03_prepare_test_ready.png",
+      "sha256": "97c884a15b323212895be6082427c61164d3048cd340a02c250e7f217db4f121",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/04_next_test_before_completed.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/04_next_test_before_completed.png",
+      "sha256": "6c0180c1f4b5bce2a2df837752357d9ac116dce55a95b04dee34d22e8f97b5fe",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/05_next_test_loading_main_screen.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/05_next_test_loading_main_screen.png",
+      "sha256": "780d850b44dd71749db3f4f7f06bf252396434243653c13c23eba1d3b6e2651c",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/06_next_test_ready.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/06_next_test_ready.png",
+      "sha256": "033cbeb0449fb38a456cbec399d8ea6e73809d68040193305d050621a58f4a74",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/07_open_for_robot_before.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/07_open_for_robot_before.png",
+      "sha256": "2cafaa952d88d460618ee8a3a5413c2cf99937dc93c0d475b25f92e61c6d3fd3",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/08_open_for_robot_moving.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/08_open_for_robot_moving.png",
+      "sha256": "0349d18587e8698b17e01ef2aac78ae24d78cefe9e5a3bd8d15f77be308b0e47",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "references/trapeziumx_v_equipment_agent/images/transitions/09_confirm_crosshead_movement_dialog.png",
+      "destination": "system/references/trapeziumx_v_equipment_agent/images/transitions/09_confirm_crosshead_movement_dialog.png",
+      "sha256": "9bf74cbfe1b418cbf7d96a5c1fe797ff20d7d0d86cf283eea073a86bdce9799c",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/00_autonomous_researcher_overview.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/00_autonomous_researcher_overview.png",
+      "sha256": "e09444a2140e0a854af4f3033212f0084c503ba7195d410430a43e7eb2aa3cf7",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/01_design_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/01_design_agent_schematic.png",
+      "sha256": "a6c33c81e4a379ae3519800fb947282ea8bff86bdf13a6d33d0f8ef7f80a8fb0",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/02_specimen_making_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/02_specimen_making_agent_schematic.png",
+      "sha256": "da5d2907d0e5f8e2e8afd84094ecf3676bb2e75ef76a9442b9813d789c7cb7c4",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/03_vision_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/03_vision_agent_schematic.png",
+      "sha256": "f94833f61e1b3308d191266972c236afa1d633cf97dae9532fa0bcd8241c1358",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/04_manipulation_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/04_manipulation_agent_schematic.png",
+      "sha256": "e98bb8f2970f437b4ce1beaf959877c9a9098c9ea96ad3ff5c655e94841e7d40",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/05_lab_equipment_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/05_lab_equipment_agent_schematic.png",
+      "sha256": "d9ecc00d677cf4c81772a4ec339294574e66ee16c060a14dd3281eb0d5c4722d",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/06_analysis_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/06_analysis_agent_schematic.png",
+      "sha256": "0506f0d4e2bea75986e4b49b70d26ff3d4397fed33612839878c17a385c958ec",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/07_bo_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/07_bo_agent_schematic.png",
+      "sha256": "c3fd8d0c59b265b618e636cfa3c9e62065b849e15de1adee16534df67cf254d2",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/08_knowledge_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/08_knowledge_agent_schematic.png",
+      "sha256": "ded7907b93626fd54771f8f36e7ecc89ce975fa2678263ccac102ba644ad8b8a",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/09_guardian_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/09_guardian_agent_schematic.png",
+      "sha256": "e19f95607c144f0f65c3383a4a205965ba7cd18e65c365f6848d2c79e02691fb",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/10_orchestration_agent_schematic.png",
+      "destination": "system/retained-history/github_docs_image/autonomous_researcher_gpt_image_schematics/images_16x9_png/10_orchestration_agent_schematic.png",
+      "sha256": "6b31f06b4084ee92443eed6c358019ee5569e94b0051226c9b877237c7d1538f",
+      "unchanged_pre_move": true
+    },
+    {
+      "source": "docs/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md",
+      "destination": "system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md",
+      "sha256": "8a79c5458f6ef8a8428971bbdf1005cb30173493e80869e59a0e5e58c8b59508",
+      "unchanged_pre_move": true
+    }
+  ]
+}

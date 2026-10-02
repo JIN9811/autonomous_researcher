@@ -7,7 +7,7 @@ sources:
     product: QM100T
     version: ""
     language: ko
-    path: ../../../docs/knowledge/manuals/sources/Indicator%20Manual.pdf
+    path: ../../../docs/knowledge/manuals/sources/Indicator Manual.pdf
   - source_id: qmesys-utm-software-manual
     equipment_type: utm
     source_kind: equipment_software
@@ -15,4 +15,4 @@ sources:
     product: Qm_Tester
     version: 17.7.0
     language: ko
-    path: ../../../docs/knowledge/manuals/sources/Software%20Manual.pdf
+    path: ../../../docs/knowledge/manuals/sources/Software Manual.pdf

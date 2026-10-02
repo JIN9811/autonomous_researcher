@@ -1041,14 +1041,25 @@
   },
   "move_revision": "616636ad1a0e88448ff94bea0a4903717231f935",
   "additions": {
+    "system/maintenance/repository_layout_reference_provenance.json": {
+      "destination": "system/maintenance/repository_layout_reference_provenance.json",
+      "disposition": "keep",
+      "reason": "Controller-authorized exact reviewed Wiki reference-only rebindings and unchanged relocation approval provenance",
+      "mode": "100644",
+      "git_blob": "2d6a2298af6d1c53e222831c225fc6993446a37c",
+      "sha256": "6abd958cef6098db8309526f85f98db2989ed6626156b9479b36a1c7f343491a",
+      "size": 53519,
+      "approved_content_changes": [],
+      "introduced_during": "task8-reviewed-finalization"
+    },
     "system/maintenance/repository_layout_reference_index.md": {
       "destination": "system/maintenance/repository_layout_reference_index.md",
       "disposition": "keep",
       "reason": "Task8 current navigation, evidence provenance and private-state runbook handoff; new checkpoint-reviewed document",
       "mode": "100644",
-      "git_blob": "30142580651555fe43cd03a574ba45a6c285d95a",
-      "sha256": "864f5e50b8b395e3d78bcae4372e82498b5c1a68425eb247ddf51ad2de8365b1",
-      "size": 4981,
+      "git_blob": "fd11e475c64f1499f0ab063925c3748d770e7912",
+      "sha256": "6cec8cc112b50f9f8216a738945371f34b414013cec6b63a25de671e5707ea32",
+      "size": 5081,
       "approved_content_changes": [],
       "introduced_during": "task8-reference-checkpoint"
     },

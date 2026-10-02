@@ -1,5 +1,5 @@
 ---
-{"topic_id":"artifacts","owner":"documentation","source_refs":["system/runtime/loop_artifact_archiving.md","system/knowledge/publication.md"],"source_revision":{"system/runtime/loop_artifact_archiving.md":"02a8b3081a3ddae0e9565004215abd165cbfcba158b2b27e1ee49440fec68080","system/knowledge/publication.md":"61f17ba92f6bedb7a5f3cc1b7181b45c82a602205d54bf0d29e520e500a7aa7a"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: artifacts","status":"reviewed"}
+{"topic_id":"artifacts","owner":"documentation","source_refs":["system/runtime/loop_artifact_archiving.md","system/knowledge/publication.md"],"source_revision":{"system/runtime/loop_artifact_archiving.md":"96868e8b3e73bc37373a9b3bf279c4b7a30a09c4081aabc589a2dccf2bd4e25f","system/knowledge/publication.md":"45d6b053ad1f4632f089b80bec6e0729783d2ed1d4328170a992c23fba52ffe4"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: artifacts","status":"reviewed"}
 ---
 
 # Artifacts — Run Outputs and Records

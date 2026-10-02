@@ -272,7 +272,14 @@ def rewrite_document_references(text: str, old_path: str, new_path: str,
         if not isinstance(node, yaml.ScalarNode):
             return
         old = node.value
-        new = relative(old) if kind == 'relative' else mapped(old)
+        if kind == 'filesystem-relative':
+            # Registry consumers use Path(parent / value), not URL decoding.
+            if Path(old).is_absolute():
+                raise ValueError('Registry source must be a relative filesystem path')
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(old_path), old))
+            new = posixpath.relpath(mapped(target), posixpath.dirname(new_path) or '.')
+        else:
+            new = relative(old) if kind == 'relative' else mapped(old)
         if new == old:
             return
         start, end = offset + node.start_mark.index, offset + node.end_mark.index
@@ -305,7 +312,7 @@ def rewrite_document_references(text: str, old_path: str, new_path: str,
             scalar(snapshot['document'])
     elif old_path.endswith('knowledge/manuals/registry.yaml'):
         for source in data['sources'].value:
-            scalar(fields(source)['path'], 'relative')
+            scalar(fields(source)['path'], 'filesystem-relative')
     elif old_path.endswith('knowledge/publication_allowlist.json'):
         for key, _ in data['approved_assets'].value:
             scalar(key)
