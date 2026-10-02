@@ -5,7 +5,7 @@ Unit tests for model router task selection.
 from backends.model_router import ModelRouter
 from backends.llm_lease import LLMLeaseCoordinator
 from utils.config_loader import load_yaml
-from utils.paths import resolve_path
+from utils.runtime_paths import resolve_runtime_path
 
 
 def test_model_router_selects_task_role() -> None:
@@ -21,7 +21,7 @@ def test_model_router_selects_task_role() -> None:
 
 
 def test_vllm_orchestrator_defaults_to_31b() -> None:
-    cfg = load_yaml(resolve_path("configs/models.yaml"))
+    cfg = load_yaml(resolve_runtime_path("configs/models.yaml"))
     vllm_cfg = dict(cfg)
     vllm_cfg["models"] = dict(cfg["backend_models"]["vllm"])
     router = ModelRouter(vllm_cfg)
@@ -33,7 +33,7 @@ def test_vllm_orchestrator_defaults_to_31b() -> None:
 
 
 def test_backend_fallback_defaults_to_openai() -> None:
-    cfg = load_yaml(resolve_path("configs/models.yaml"))
+    cfg = load_yaml(resolve_runtime_path("configs/models.yaml"))
 
     assert cfg["backend"]["default"] == "vllm"
     assert cfg["backend"]["fallback"] == "openai"

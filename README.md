@@ -247,6 +247,13 @@ requires integration and validation.
 
 ## Getting Started
 
+Executable source is under `runtime/`; maintained internal references are under
+`system/`, and public documentation is under `docs/`. Git, `.env` and the main
+`.venv` remain at the outer repository root. Private stores use explicit runtime
+path bindings; moving source does not migrate or activate existing state.
+Existing deployments must use the separately approved stopped-maintenance
+[layout cutover runbook](system/maintenance/repository_layout_cutover.md).
+
 For a screenshot-based tour of the existing application, see
 [GUI Structure and Screen Reference](system/runtime/gui/visual_structure.md):
 Main/Live navigation, agent reports, device workspaces, Runtime IDE and Replay

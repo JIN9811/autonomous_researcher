@@ -4,6 +4,7 @@ import base64
 import asyncio
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -538,12 +539,8 @@ def test_workflow_locator_source_and_manual_target_crop_are_saved_atomically(mon
             "full_frame_sha256": hashlib.sha256(frame_raw).hexdigest(),
         }
     )
-    original_resolve = main_module.resolve_path
-    monkeypatch.setattr(
-        main_module,
-        "resolve_path",
-        lambda value: artifact_root if str(value) == "artifacts/equipment" else original_resolve(value),
-    )
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, artifact_root=artifact_root.parent))
     client = _client(monkeypatch, tmp_path)
     client.post(
         "/api/equipment/skills/drafts",
@@ -926,12 +923,8 @@ def test_skill_authoring_storyboard_preview_is_paginated_and_hides_server_paths(
         target_profile="local_program1",
         bridge_id="windows-lab-1",
     )
-    original_resolve = main_module.resolve_path
-    monkeypatch.setattr(
-        main_module,
-        "resolve_path",
-        lambda value: artifact_root if str(value) == "artifacts/equipment" else original_resolve(value),
-    )
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, artifact_root=artifact_root.parent))
 
     response = client.get(
         f"/api/equipment/skill-authoring/jobs/{job['job_id']}/storyboards",
@@ -1381,12 +1374,8 @@ def test_full_timeline_skill_path_imports_annotates_deploys_and_executes(monkeyp
             "fallback_allowed": False,
         },
     )
-    original_resolve = main_module.resolve_path
-    monkeypatch.setattr(
-        main_module,
-        "resolve_path",
-        lambda value: artifact_root if str(value) == "artifacts/equipment" else original_resolve(value),
-    )
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, artifact_root=artifact_root.parent))
     monkeypatch.setattr(
         main_module,
         "_manual_knowledge_context",
@@ -1499,12 +1488,8 @@ def test_selected_skill_annotation_backend_receives_pre_click_frame_and_returns_
             "fallback_allowed": False,
         },
     )
-    original_resolve = main_module.resolve_path
-    monkeypatch.setattr(
-        main_module,
-        "resolve_path",
-        lambda value: artifact_root if str(value) == "artifacts/equipment" else original_resolve(value),
-    )
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, artifact_root=artifact_root.parent))
     monkeypatch.setattr(
         main_module,
         "_manual_knowledge_context",
@@ -1634,12 +1619,8 @@ def test_selected_skill_annotation_backend_reads_every_temporal_storyboard_befor
             "fallback_allowed": False,
         },
     )
-    original_resolve = main_module.resolve_path
-    monkeypatch.setattr(
-        main_module,
-        "resolve_path",
-        lambda value: artifact_root if str(value) == "artifacts/equipment" else original_resolve(value),
-    )
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, artifact_root=artifact_root.parent))
     monkeypatch.setattr(
         main_module,
         "_manual_knowledge_context",
@@ -1887,12 +1868,8 @@ def test_selected_skill_annotation_stops_after_persisting_the_current_timeline_c
             "fallback_allowed": False,
         },
     )
-    original_resolve = main_module.resolve_path
-    monkeypatch.setattr(
-        main_module,
-        "resolve_path",
-        lambda value: artifact_root if str(value) == "artifacts/equipment" else original_resolve(value),
-    )
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, artifact_root=artifact_root.parent))
     monkeypatch.setattr(
         main_module,
         "_manual_knowledge_context",

@@ -176,6 +176,7 @@ def printer_io(controller, monkeypatch, tmp_path, guard):
 
 
 def equipment_io(controller, monkeypatch, tmp_path, guard):
+    from utils.runtime_paths import current_paths
     from agents.equipment.agent import LabEquipmentAgent
     from mcp_tools.equipment_tools import register_equipment_tools
     from utils.equipment_utm_skills import stage_utm_skill_packages, bind_deployed_utm_skills, UTM_SKILL_BINDINGS
@@ -193,7 +194,7 @@ def equipment_io(controller, monkeypatch, tmp_path, guard):
         "windows_pyautogui": {"connection_memory_path": str(root / "connection.json"),
             "artifact_dir": str(root / "artifacts"), "utm_profile_memory_path": str(root / "profile.json")}}}}, repo_root=root)
     packages = stage_utm_skill_packages(registry_root=skills,
-        reference_root=Path(__file__).resolve().parents[2] / "references/trapeziumx_v_equipment_agent")
+        reference_root=current_paths().system_root / "references/trapeziumx_v_equipment_agent")
     registry = EquipmentSkillRegistry(skills)
     guard.allowed_tools.update({"equipment.pyautogui.register_program", "equipment.pyautogui.run",
         "vision.equipment_cross_check", "equipment.pyautogui.screenshot"})

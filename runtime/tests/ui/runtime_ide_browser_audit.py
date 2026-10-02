@@ -26,11 +26,16 @@ WEBDRIVER_HTTP_TIMEOUT_S = float(os.environ.get("ATR_WEBDRIVER_HTTP_TIMEOUT_S", 
 
 
 class WebDriverAudit:
-    def __init__(self, webdriver_url: str, *, width: int, height: int) -> None:
+    def __init__(self, webdriver_url: str, *, width: int, height: int,
+                 binary: str | None = None, inner_viewport: bool = False, bidi: bool = False) -> None:
         self.webdriver_url = webdriver_url.rstrip("/")
         self.width = width
         self.height = height
         self.session_id = ""
+        self.binary = binary
+        self.inner_viewport = inner_viewport
+        self.bidi = bidi
+        self.capabilities: dict[str, Any] = {}
 
     def request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -45,20 +50,32 @@ class WebDriverAudit:
         return json.loads(data)["value"]
 
     def start(self) -> None:
+        options: dict[str, Any] = {"args": ["-headless"]}
+        if self.binary:
+            options["binary"] = self.binary
+        capabilities: dict[str, Any] = {"browserName": "firefox", "moz:firefoxOptions": options}
+        if self.bidi:
+            capabilities["webSocketUrl"] = True
         value = self.request(
             "POST",
             "/session",
             {
                 "capabilities": {
-                    "alwaysMatch": {
-                        "browserName": "firefox",
-                        "moz:firefoxOptions": {"args": ["-headless"]},
-                    }
+                    "alwaysMatch": capabilities
                 }
             },
         )
         self.session_id = value["sessionId"]
+        self.capabilities = value.get("capabilities", {})
         self.request("POST", f"/session/{self.session_id}/window/rect", {"width": self.width, "height": self.height, "x": 0, "y": 0})
+        if self.inner_viewport:
+            dimensions = self.js("return [innerWidth, innerHeight, outerWidth, outerHeight]")
+            self.request("POST", f"/session/{self.session_id}/window/rect", {
+                "width": self.width + dimensions[2] - dimensions[0],
+                "height": self.height + dimensions[3] - dimensions[1], "x": 0, "y": 0})
+            actual = self.js("return [innerWidth, innerHeight, outerWidth, outerHeight]")
+            if actual[:2] != [self.width, self.height]:
+                raise RuntimeError(f"Unexpected browser inner viewport: {actual[:2]}")
 
     def stop(self) -> None:
         if not self.session_id:

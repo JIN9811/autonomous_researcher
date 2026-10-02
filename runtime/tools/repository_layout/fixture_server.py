@@ -23,7 +23,7 @@ MODES = {"import_only", "fake_services"}
 
 
 @contextmanager
-def fixture_application(lifespan_mode: str):
+def fixture_application(lifespan_mode: str, *, isolated_authoring: bool = False):
     if lifespan_mode not in MODES:
         raise ValueError("lifespan_mode must be import_only or fake_services")
     require_boundary()
@@ -144,6 +144,17 @@ def fixture_application(lifespan_mode: str):
         stack.enter_context(patch.object(LeRobotBridge, "shutdown", lambda self: None))
         stack.enter_context(patch.object(UTMRuntimeProcessManager, "shutdown", lambda self: None))
         module = importlib.import_module("app.main")
+        if isolated_authoring:
+            # Exercise real authoring routes without mutating exported source evidence.
+            import shutil
+            graph_root = fixture_root / "authoring/graphs"
+            shutil.copytree(fixture_paths.runtime_root / "graphs", graph_root)
+            stack.enter_context(patch.object(module, "RUNTIME_GRAPH_CONFIG_ROOT", graph_root / "configs"))
+            stack.enter_context(patch.object(module, "RUNTIME_GRAPH_CONFIG_PATH",
+                graph_root / "configs" / f"{module.PRIMARY_RUNTIME_GRAPH_ID}.yaml"))
+            stack.enter_context(patch.object(module, "RUNTIME_MODULE_ROOT", graph_root / "modules"))
+            stack.enter_context(patch.object(module.controller, "_active_graph_config_path",
+                module.RUNTIME_GRAPH_CONFIG_PATH))
         from dataclasses import asdict
         module._layout_fixture_evidence = {'roots': {key: str(value) for key, value in asdict(fixture_paths).items()},
                                           'effects': effects, 'writes': writes}

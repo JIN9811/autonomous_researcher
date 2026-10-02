@@ -443,6 +443,14 @@ sources:
     assert all(result[key] == [] for key in ('missing_files', 'missing_anchors', 'escaping_references', 'metadata_errors'))
 
 
+def test_audit_includes_explicit_later_validation_document_additions(tmp_path):
+    path = 'system/maintenance/repository_layout_cutover.md'
+    put(tmp_path, path, b'[missing](missing.md)')
+    result = audit(tmp_path, {'entries': {}, 'task11_phase': {'additions': {
+        path: {'destination': path, 'disposition': 'retain'}}}})
+    assert result['missing_files'] == [{'document': path, 'reference': 'missing.md'}]
+
+
 @pytest.mark.parametrize('representation', ['pointer', 'smudged', 'mismatch', 'missing-attribute'])
 def test_lfs_preserves_verified_representation_without_running_lfs(repository, representation):
     root, _ = repository

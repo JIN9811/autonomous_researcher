@@ -1396,6 +1396,7 @@
     "tests/integration/test_plc_workspace_entry.py",
     "tests/integration/test_printer_gui_api.py",
     "tests/integration/test_printer_placement_gui.py",
+    "tests/integration/test_repository_layout_equivalence.py",
     "tests/integration/test_printer_workflow_modes.py",
     "tests/integration/test_report_read_performance.py",
     "tests/integration/test_rtc_queue_alignment.py",

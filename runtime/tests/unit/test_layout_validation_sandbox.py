@@ -137,6 +137,27 @@ def test_real_route_receipt_has_roots_origins_and_effect_counters(mode):
     assert result['unexpected_effects'] == []
 
 
+def test_browser_driver_uses_explicit_binary_and_exact_inner_viewport():
+    from tests.ui.runtime_ide_browser_audit import WebDriverAudit
+    class Driver(WebDriverAudit):
+        calls = []
+        def request(self, method, path, payload=None):
+            self.calls.append((method, path, payload))
+            if path == '/session':
+                return {'sessionId': 'fixture', 'capabilities': {'browserVersion': 'fixture'}}
+            if path.endswith('/execute/sync'):
+                return [1920, 1080 if len(self.calls) > 3 else 960, 1920, 1080]
+            return {}
+    driver = Driver('http://127.0.0.1:14448', width=1920, height=1080,
+                    binary='/deps/validation-tools/firefox/firefox', inner_viewport=True, bidi=True)
+    driver.start()
+    capabilities = driver.calls[0][2]['capabilities']['alwaysMatch']
+    assert capabilities['moz:firefoxOptions']['binary'] == '/deps/validation-tools/firefox/firefox'
+    assert capabilities['webSocketUrl'] is True
+    assert driver.calls[3][2]['height'] == 1200
+    assert driver.capabilities == {'browserVersion': 'fixture'}
+
+
 @pytest.mark.parametrize("already_imported", [False, True], ids=["fresh-parent", "collected-app-in-parent"])
 def test_real_routes_inside_fixture_import_mode(monkeypatch, already_imported):
     if already_imported:

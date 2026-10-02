@@ -246,7 +246,8 @@ def document_locations(manifest: dict) -> dict[str, str]:
     deferred = manifest.get('phase_deferrals', {})
     phase = manifest.get('runtime_phase', {})
     rows = {**manifest['entries'], **manifest.get('additions', {}),
-            **phase.get('additions', {}), **phase.get('post_move_additions', {})}
+            **phase.get('additions', {}), **phase.get('post_move_additions', {}),
+            **manifest.get('task11_phase', {}).get('additions', {})}
     locations = {source: deferred[source]['current_location'] if source in deferred else
             row['destination'] if document_move(source, row) else source
             for source, row in rows.items()}

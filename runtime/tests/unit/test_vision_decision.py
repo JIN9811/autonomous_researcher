@@ -83,11 +83,13 @@ async def test_empty_clearance_box_does_not_weaken_invalid_evidence_checks(state
 
 @pytest.mark.asyncio
 async def test_vision_references_are_scoped_before_delivery(state, capture, tmp_path):
-    from pathlib import Path
+    from utils.runtime_paths import current_paths
     from knowledge.context_service import KnowledgeContextService
     from agents.vision.decision import review_visual_evidence
     model = Model()
-    model.knowledge_service = KnowledgeContextService(Path(__file__).resolve().parents[2], tmp_path)
+    paths = current_paths()
+    model.knowledge_service = KnowledgeContextService(paths.repository_root, tmp_path,
+        wiki_corpus_root=paths.system_root / 'knowledge/wiki', wiki_source_root=paths.repository_root)
     state.active_goal = "Maximize SEA BO posterior specimen printing measurement"
     result = await review_visual_evidence(state, model, capture, "active_cam")
     context = json.loads(model.inputs[0][1].split("\nCONTEXT:\n")[1])

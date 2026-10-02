@@ -20,14 +20,13 @@ def _write_minimal_bambu_gcode_3mf(path: Path, *, plate_id: int = 1, gcode: str 
 
 @pytest.fixture(autouse=True)
 def _isolated_operator_print_settings(tmp_path, monkeypatch):
+    from dataclasses import replace
     from utils import printer_profile
-    from device_bridges import bambu_bridge
     profile_path = tmp_path / "memory/prusa_print_profile.json"
-    priority_file = tmp_path / "operator-material-priority.json"
+    monkeypatch.setattr(app_main, "RUNTIME_PATHS", replace(app_main.RUNTIME_PATHS,
+                                                        memory_root=tmp_path / "memory"))
     monkeypatch.setattr(printer_profile, "PRUSA_PRINT_PROFILE_PATH", profile_path)
     monkeypatch.setattr(app_main, "PRUSA_PRINT_PROFILE_PATH", profile_path)
-    monkeypatch.setattr(app_main, "priority_path", lambda *args: priority_file)
-    monkeypatch.setattr(bambu_bridge, "priority_path", lambda *args: priority_file)
 
 
 def _save_ready_manipulation_consumer(tmp_path: Path, monkeypatch) -> Path:
@@ -2610,7 +2609,7 @@ def test_printer_profile_api_uses_bambu_autoejection_config_not_profile_checkbox
     monkeypatch.setattr(
         app_main,
         "load_prusa_print_profile",
-        lambda: {
+        lambda **kwargs: {
             "printer_model": "Bambu Lab X2D",
             "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
             "storage": "ftps",

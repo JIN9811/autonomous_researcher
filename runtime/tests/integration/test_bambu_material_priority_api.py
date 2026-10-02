@@ -9,6 +9,10 @@ import pytest
 
 @pytest.fixture
 def printer(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from app import main
+    monkeypatch.setattr(main, "RUNTIME_PATHS", replace(main.RUNTIME_PATHS,
+        repository_root=tmp_path, memory_root=tmp_path / "memory", artifact_root=tmp_path / "artifacts"))
     from device_bridges.bambu_bridge import PrinterDeviceBridgeManager, BambuConnectionMemory
     from utils.bambu_material_priority import save_priority, priority_path
     manager = PrinterDeviceBridgeManager.from_devices_config({"devices": {"printer": {

@@ -14,11 +14,16 @@ from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from utils.config_loader import load_all_configs
 import utils.lerobot_rollout_profile as rollout_profile_module
 import utils.manipulation_profile as manipulation_profile_module
-from utils.paths import resolve_path
+from utils.runtime_paths import resolve_runtime_path
 
 
 def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any) -> None:
-    cfg = copy.deepcopy(load_all_configs(resolve_path("configs")).get("lerobot", {}))
+    from dataclasses import replace
+    monkeypatch.setattr(main_module, "RUNTIME_PATHS",
+        replace(main_module.RUNTIME_PATHS, memory_root=tmp_path / "memory"))
+    monkeypatch.setattr(main_module.controller, "_paths", main_module.RUNTIME_PATHS)
+    monkeypatch.setattr(main_module.controller._deps.agent_context, "paths", main_module.RUNTIME_PATHS)
+    cfg = copy.deepcopy(load_all_configs(resolve_runtime_path("configs")).get("lerobot", {}))
     cfg["device_memory_path"] = str(tmp_path / "memory" / "lerobot_device_ports.json")
     cfg["fake_dataset_root"] = str(tmp_path / "fake_datasets")
     cfg["fake_checkpoint_root"] = str(tmp_path / "fake_checkpoints")
@@ -713,7 +718,7 @@ def test_device_workspace_manipulation_request_preserves_plc_stop_checkbox() -> 
 
 
 def test_lerobot_resume_checkboxes_pin_auto_generated_names() -> None:
-    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+    script = resolve_runtime_path("web/static/lerobot.js").read_text(encoding="utf-8")
 
     assert "function resumeDatasetRequested()" in script
     assert "function resumeTrainingRequested()" in script
@@ -724,7 +729,7 @@ def test_lerobot_resume_checkboxes_pin_auto_generated_names() -> None:
 
 
 def test_lerobot_train_output_name_includes_policy_type_suffix() -> None:
-    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+    script = resolve_runtime_path("web/static/lerobot.js").read_text(encoding="utf-8")
 
     assert "function currentTrainPolicySuffix()" in script
     assert 'String(policyTypeInput.value || "smolvla")' in script
@@ -733,7 +738,7 @@ def test_lerobot_train_output_name_includes_policy_type_suffix() -> None:
 
 
 def test_lerobot_active_robot_cam_payload_fields_are_wired() -> None:
-    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+    script = resolve_runtime_path("web/static/lerobot.js").read_text(encoding="utf-8")
 
     assert 'const activeRobotCamEnabledInput = $("lerobot-active-robot-cam-enabled-input");' in script
     assert "active_robot_cam_enabled: boolValue(activeRobotCamEnabledInput)" in script
@@ -800,8 +805,8 @@ def test_lerobot_gui_api_preserves_isaac_augmentation_options() -> None:
 
 
 def test_lerobot_gui_isaac_augmentation_camera_default_is_top_front_right() -> None:
-    page = resolve_path("web/templates/lerobot.html").read_text(encoding="utf-8")
-    script = resolve_path("web/static/lerobot.js").read_text(encoding="utf-8")
+    page = resolve_runtime_path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = resolve_runtime_path("web/static/lerobot.js").read_text(encoding="utf-8")
 
     assert 'id="lerobot-isaac-augment-cameras-input" type="text" value="top,front,right"' in page
     assert 'top,front,right' in script

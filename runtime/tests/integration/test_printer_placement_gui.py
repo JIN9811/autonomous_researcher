@@ -37,7 +37,7 @@ def test_slice_api_uses_saved_placement_unless_operator_overrides(monkeypatch):
         fleet_selection=lambda: (SimpleNamespace(provider="bambulab_x2d"), "fixture"),
         _selected_printer_payload=lambda *args: {})
     monkeypatch.setattr(main, "_printer_bridge_manager", lambda: manager)
-    monkeypatch.setattr(main, "load_prusa_print_profile", lambda: {"specimen_placement": {
+    monkeypatch.setattr(main, "load_prusa_print_profile", lambda **kwargs: {"specimen_placement": {
         "mode": "custom", "center_x_mm": 110, "center_y_mm": 145}})
 
     class Runner:
@@ -65,8 +65,10 @@ def test_controller_defaults_keep_placement_for_design_handoff(monkeypatch):
     from utils.printer_profile import DEFAULT_PRUSA_PRINT_PROFILE
     from orchestrator.state import Mode
     placement = {"mode": "custom", "center_x_mm": 110, "center_y_mm": 145}
-    monkeypatch.setattr(controller, "load_prusa_print_profile", lambda: {**DEFAULT_PRUSA_PRINT_PROFILE, "specimen_placement": placement})
+    monkeypatch.setattr(controller, "load_prusa_print_profile", lambda *args, **kwargs: {**DEFAULT_PRUSA_PRINT_PROFILE, "specimen_placement": placement})
     obj = object.__new__(controller.MainController)
+    from utils.runtime_paths import current_paths
+    obj._paths = current_paths()
     obj._state = SimpleNamespace(loop_count=0, run_id="placement-fixture", mode=Mode.TEST)
     assert obj._validated_printer_defaults()["specimen_placement"] == placement
     assert obj._default_test_constraints({})["specimen_placement"] == placement

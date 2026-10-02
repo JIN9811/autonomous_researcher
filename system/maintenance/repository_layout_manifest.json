@@ -47505,9 +47505,9 @@
       },
       "runtime/tests/unit/test_layout_validation_sandbox.py": {
         "mode": "100644",
-        "git_blob": "e78f3c1f3537fb3c16f7097df4d8c7524c996b6b",
-        "sha256": "d447de286c000a140980e23e5681d5b88357c702cf9362190aadf3e7fc3a2db7",
-        "size": 8754
+        "git_blob": "083f6d6cf6cc89fb1a9522f9c032f09a752ba2e0",
+        "sha256": "e0279117598bb5f740a7e7056ce9ee105ed1bb474923d1956cac1646dc1c2149",
+        "size": 9857
       },
       "runtime/tests/unit/test_orchestrator_checkpoint.py": {
         "mode": "100644",
@@ -47535,15 +47535,15 @@
       },
       "runtime/tools/repository_layout/checks.py": {
         "mode": "100644",
-        "git_blob": "3b1f2eab5d7afc6b436b9f20b31d0a059f9800f1",
-        "sha256": "36ed874521be397b5555cd0c3392fc0c16e2a28021e56fdcd9e9df2b091f450c",
-        "size": 40298
+        "git_blob": "d057063e9c3cbc55eb29e5822deda85de6720394",
+        "sha256": "6058de2f71edaf17e3fcb7a195c9add2f4b9754958f0bb685bab07a9b0db1f9d",
+        "size": 40367
       },
       "runtime/tools/repository_layout/fixture_server.py": {
         "mode": "100644",
-        "git_blob": "d9cb4a9843debee335be6c4000b8f1be3782e5d9",
-        "sha256": "151d01162435a38167fb6e9505c5719a21a414b92728c57d553d21c5fdf0aae9",
-        "size": 12691
+        "git_blob": "046680622ec9d00be91c48d1dd6dd6e9c696ac95",
+        "sha256": "95456ed0eaa344cb2e8e3fb20bbfe7672e137c2e84bf2a7810a435d21c6c640d",
+        "size": 13530
       },
       "runtime/tools/repository_layout/sandbox.py": {
         "mode": "100644",
@@ -47562,6 +47562,96 @@
         "git_blob": "6fb83d01a00054b9868a3075fd7976b838e5f848",
         "sha256": "cc99ff91a53e16ea1b3331ba4ab5ced93fe8ba7c5d4245be94b7e548931998da",
         "size": 8802
+      },
+      "README.md": {
+        "mode": "100644",
+        "git_blob": "a99c093a56a88a156effd1637d91b14e56653bd1",
+        "sha256": "1c364baba42a41c4589b174373ee241b7f0b1a79bbf6df428126096f220a2d4f",
+        "size": 15872
+      },
+      "runtime/distribution-files.json": {
+        "mode": "100644",
+        "git_blob": "75da6e76149c0fae9aeb788c840f2cbd14762c44",
+        "sha256": "0365620c18f9e21cdecfbe371937bc14ece3c0f4fd8769f5320704f1cc5d15d2",
+        "size": 86966
+      },
+      "runtime/install/README.md": {
+        "mode": "100644",
+        "git_blob": "32fcf4d832fae60ae3570155c6edaaddfa0f5728",
+        "sha256": "241d28fbc4110f251762a9059c3d32ab3877af0d95c992d51e269bbe3e4bd3ab",
+        "size": 19411
+      },
+      "runtime/tests/integration/orchestrator_setup_fixtures.py": {
+        "mode": "100644",
+        "git_blob": "451331fce6361f0b433d34602232a809af1dc16e",
+        "sha256": "51f47497532c30a1eefaa2febc13679bd90fdd373066434d4110ccb0edc4a447",
+        "size": 18152
+      },
+      "runtime/tests/integration/test_bambu_material_priority_api.py": {
+        "mode": "100644",
+        "git_blob": "01840aeaf65a75c483f4a61a02ca30a55be8eba8",
+        "sha256": "0988e0e13cbb4658df708fb94682a6df42e28fa74c4ff80576dc0197d3506ae4",
+        "size": 6741
+      },
+      "runtime/tests/integration/test_equipment_skill_api.py": {
+        "mode": "100644",
+        "git_blob": "7924ed24a94955b1b1d85c7d56149e6a76419b83",
+        "sha256": "863aa0f6e0386fcfda3d1c71f8f8c817f9f964c151987e39b7a9e8ac32efe373",
+        "size": 72702
+      },
+      "runtime/tests/integration/test_lerobot_gui_api.py": {
+        "mode": "100644",
+        "git_blob": "86ec4bf8c1918514752ea00b3d5d1ef605192d2e",
+        "sha256": "2ae46dc102821be740981902854c8f5e2b2b83e41d4efa7f2635a9c7b8088369",
+        "size": 37525
+      },
+      "runtime/tests/integration/test_printer_gui_api.py": {
+        "mode": "100644",
+        "git_blob": "dd69106b4c9a4d4d4c44ad0b6fb8c1233c3f40dd",
+        "sha256": "f57ccf3280f1c69d5cb82f52f07b943eb6d40e9a5a3abf04dd4887347198a500",
+        "size": 179765
+      },
+      "runtime/tests/integration/test_printer_placement_gui.py": {
+        "mode": "100644",
+        "git_blob": "f38b396787348369fc29f6c296aaad1fdbc888fa",
+        "sha256": "6c02f34b7f4a7cd76eb83e574a711fbb4929265e0b12a29b64285095255a0fea",
+        "size": 4550
+      },
+      "runtime/tests/integration/test_repository_layout_equivalence.py": {
+        "mode": "100644",
+        "git_blob": "73f2a03520c600811adad3fbc22cc908810e8331",
+        "sha256": "74f90eed95057ef50ae98e8fa7b273e90e4925b2e76cc96a8f022872985174a4",
+        "size": 5253
+      },
+      "runtime/tests/ui/runtime_ide_browser_audit.py": {
+        "mode": "100755",
+        "git_blob": "d7192ed306859043dc4694ab44df966d22d6f786",
+        "sha256": "a05e7bbf8de6791586a3402e6c6f27f3f8cd5f3fec894cfad63311453e08d9e9",
+        "size": 93157
+      },
+      "runtime/tests/unit/test_document_relocation.py": {
+        "mode": "100644",
+        "git_blob": "bb8ba54592207e6aac3f9a67202b2c98789d4974",
+        "sha256": "0dc746e313f088a7e78b46a82098c73c1f7da1cc6c99305c9c89db0a83cb4d46",
+        "size": 28288
+      },
+      "runtime/tests/unit/test_model_router.py": {
+        "mode": "100644",
+        "git_blob": "e0385ece8a6b808edbb80d9745be205c65b6699b",
+        "sha256": "f3b9fdaf9b51db2600ef0dcba5c3aa78b2d9d0da0313f851e0938f5bee73b228",
+        "size": 9043
+      },
+      "runtime/tests/unit/test_vision_decision.py": {
+        "mode": "100644",
+        "git_blob": "d06bd241c562434bdd61398fc48b81344f4904e3",
+        "sha256": "7394ed2bda6907af70ca9bdf9122a42e85804aa85a2593ff63de4979e3ef7a33",
+        "size": 28180
+      },
+      "system/maintenance/repository_layout_cutover.md": {
+        "mode": "100644",
+        "git_blob": "c2af8e8543584cd65200e514303cd0bbbfa035e4",
+        "sha256": "b9ba0cd891684738f9caccf1386143f8f43c200bef3d65d01f7cb2b281844171",
+        "size": 4889
       }
     },
     "base_revision": "a8486a3dd893cb5cd20804c9fe5ba5a4ebe3d4a3",
@@ -47635,7 +47725,26 @@
         "size": 18430
       }
     },
-    "additions": {},
+    "additions": {
+      "runtime/tests/integration/test_repository_layout_equivalence.py": {
+        "mode": "100644",
+        "git_blob": "73f2a03520c600811adad3fbc22cc908810e8331",
+        "sha256": "74f90eed95057ef50ae98e8fa7b273e90e4925b2e76cc96a8f022872985174a4",
+        "size": 5253,
+        "destination": "runtime/tests/integration/test_repository_layout_equivalence.py",
+        "disposition": "retain",
+        "classification": "Explicit validation-only sdist member; no wheel member"
+      },
+      "system/maintenance/repository_layout_cutover.md": {
+        "mode": "100644",
+        "git_blob": "c2af8e8543584cd65200e514303cd0bbbfa035e4",
+        "sha256": "b9ba0cd891684738f9caccf1386143f8f43c200bef3d65d01f7cb2b281844171",
+        "size": 4889,
+        "destination": "system/maintenance/repository_layout_cutover.md",
+        "disposition": "retain",
+        "classification": "Internal maintenance runbook; not a runtime package member"
+      }
+    },
     "preservation": "All prior phase fields and identities remain frozen; latest explicit phase overlays identify current bytes"
   },
   "task10_phase": {

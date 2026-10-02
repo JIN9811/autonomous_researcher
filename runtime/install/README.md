@@ -7,6 +7,20 @@ Source audit: 2026-09-29 against `dd0d772`; this review did not install software
 restart services, or commission hardware. Host-specific verification below is
 retained evidence rather than a new test result.
 
+## Source layout and existing deployments
+
+Commands below that install the main environment run from the outer repository
+root. Executable source, configuration and installers are under `runtime/`;
+`.venv` and `.env` remain at the outer root. Direct Python module launches run
+with `runtime/` as their working directory, using the activated outer environment.
+Paths such as `configs/...` describe runtime-relative configuration; private
+`memory`, run and artifact stores are selected through explicit RuntimePaths
+bindings, not by the presence of a similarly named directory.
+
+Do not bootstrap or restart an active installation to apply this layout change.
+Follow the [stopped-maintenance cutover runbook](../../system/maintenance/repository_layout_cutover.md),
+including the separate private-state approval and deployed ROS rebuild gates.
+
 ATR supports two inference modes:
 
 - Local-first: use `vllm`, `ollama`, or `nemoclaw` first, then fall back to the
@@ -35,7 +49,7 @@ Linux/WSL default:
 ```bash
 git clone <private-repo-url> autonomous_researcher
 cd autonomous_researcher
-bash install/bootstrap_linux.sh
+bash runtime/install/bootstrap_linux.sh
 atr doctor
 atr up
 ```
@@ -45,7 +59,9 @@ Windows supported path:
 ```powershell
 git clone <private-repo-url> autonomous_researcher
 cd autonomous_researcher
-powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
+powershell -ExecutionPolicy Bypass -File .\runtime\install\bootstrap_windows.ps1
+.\.venv\Scripts\Activate.ps1
+Set-Location runtime
 python -m app.serve
 ```
 
@@ -74,7 +90,7 @@ atr doctor --json
 Before installing `atr`, run the same check directly:
 
 ```bash
-.venv/bin/python scripts/doctor.py
+.venv/bin/python runtime/scripts/doctor.py
 ```
 
 Supported distribution model:
@@ -84,8 +100,8 @@ Supported distribution model:
   discovery does not accidentally include runtime artifacts, but the generated
   wheel is not the primary deployment artifact for the full GUI/device system.
 - Do not delete the source checkout after installing dependencies; runtime
-  config, web templates, graph YAML, install helpers, and local memory folders
-  are expected to remain under the repository root.
+  config, web templates, graph YAML and install helpers remain under `runtime/`.
+  Existing private stores must retain their explicitly selected bindings.
 
 ## Windows Quick Start (API Key, No Local AI)
 
@@ -117,7 +133,7 @@ cd "$env:USERPROFILE\Documents\autonomous_researcher"
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+pip install -r runtime/requirements.txt
 ```
 
 If your Python command is not `py -3.11`, use the installed Python 3.11+ path.
@@ -159,8 +175,11 @@ used only after those fail.
 
 ### 4. Start the Server on Windows
 
+From the outer repository root:
+
 ```powershell
 .\.venv\Scripts\Activate.ps1
+Set-Location runtime
 python -m app.serve
 ```
 
@@ -249,7 +268,7 @@ cd /path/to/autonomous_researcher
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+pip install -r runtime/requirements.txt
 cp .env.example .env
 ```
 
@@ -257,13 +276,16 @@ For API-only operation:
 
 ```bash
 printf '\nAUTONOMOUS_BACKEND=openai\nOPENAI_API_KEY=<your-api-key>\n' >> .env
+cd runtime
 python -m app.serve
 ```
 
-For local-first operation with OpenAI as final fallback:
+Alternatively, from the outer repository root, for local-first operation with
+OpenAI as final fallback:
 
 ```bash
 printf '\nAUTONOMOUS_BACKEND=vllm\nOPENAI_API_KEY=<your-api-key>\n' >> .env
+cd runtime
 python -m app.serve
 ```
 
@@ -274,7 +296,7 @@ Install the optional `atr` terminal launcher only on Linux, WSL, or Git Bash:
 Run from the repository root:
 
 ```bash
-bash install/install_cli.sh
+bash runtime/install/install_cli.sh
 ```
 
 The installer creates:
@@ -458,7 +480,7 @@ LeRobot recording voice cues use ATR-packaged Piper English TTS by default.
 Install or repair the local runtime and voice model from the repository root:
 
 ```bash
-bash install/install_piper_tts.sh
+bash runtime/install/install_piper_tts.sh
 ```
 
 This installs `piper-tts` into `.venv`, downloads the `en_US-lessac-medium`
@@ -488,7 +510,7 @@ Recommended Linux setup:
 
 ```bash
 export BAMBU_STUDIO_EXECUTABLE=/absolute/path/to/bambu-studio
-install/bambustudio/bambu-studio-wrapper --help
+runtime/install/bambustudio/bambu-studio-wrapper --help
 atr doctor
 ```
 
@@ -504,7 +526,7 @@ The Prusa MK4S printer bridge can use a Dockerized PrusaSlicer when host-native 
 Build the image from the repository root:
 
 ```bash
-docker build -t atr-prusa-slicer:ubuntu24.04 install/prusaslicer
+docker build -t atr-prusa-slicer:ubuntu24.04 runtime/install/prusaslicer
 ```
 
 The wrapper is:
@@ -540,7 +562,7 @@ patches/lerobot/spark_realsense_d405_rsusb.patch
 Apply it to the external LeRobot checkout with:
 
 ```bash
-bash install/apply_lerobot_d405_patch.sh ~/lerobot
+bash runtime/install/apply_lerobot_d405_patch.sh ~/lerobot
 ```
 
 The apply script runs `git apply --check` first and stops without changing the
@@ -577,7 +599,7 @@ The generated `atr` command stores the repository path from install time.
 If you move the repository, reinstall:
 
 ```bash
-bash install/install_cli.sh
+bash runtime/install/install_cli.sh
 ```
 
 ## Existing `atr` Command Conflict
@@ -586,5 +608,5 @@ The installer refuses to overwrite another `atr` found outside `~/.local/bin/atr
 Force install only if you know the existing command is safe to replace:
 
 ```bash
-ATR_FORCE_INSTALL=1 bash install/install_cli.sh
+ATR_FORCE_INSTALL=1 bash runtime/install/install_cli.sh
 ```
