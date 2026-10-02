@@ -43,7 +43,8 @@ def test_runtime_move_targets_match_exact_phase_identities():
     assert set(phase['files']) == set(phase['moves'])
     # Later phases are explicit overlays, never refreshed earlier proof hashes.
     subsequent = {**manifest.get('task10_phase', {}).get('files', {}),
-                  **manifest.get('task11_phase', {}).get('files', {})}
+                  **manifest.get('task11_phase', {}).get('files', {}),
+                  **manifest.get('task11_phase', {}).get('current_source_identities', {})}
     for source, record in phase['files'].items():
         record = subsequent.get(phase['moves'][source], record)
         path = outer / phase['moves'][source]
@@ -58,7 +59,8 @@ def test_runtime_move_targets_match_exact_phase_identities():
     for source, record in manifest.get('task10_phase', {}).get('additions', {}).items():
         record = subsequent.get(source, record)
         assert hashlib.sha256((outer / source).read_bytes()).hexdigest() == record['sha256'], source
-    for source, record in manifest.get('task11_phase', {}).get('files', {}).items():
+    for source, record in {**manifest.get('task11_phase', {}).get('files', {}),
+                           **manifest.get('task11_phase', {}).get('current_source_identities', {})}.items():
         path = outer / source
         assert path.is_file() and not path.is_symlink(), source
         data = path.read_bytes()

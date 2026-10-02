@@ -40,6 +40,7 @@ def fixture_application(lifespan_mode: str):
         stack.enter_context(patch.object(subprocess, "check_output", fixture_fontconfig))
         guard = stack.enter_context(VerificationGuard())
         audit_active = [True]
+        writes = set()
         def audit_writes(event, args):
             if not audit_active[0]:
                 return
@@ -55,6 +56,7 @@ def fixture_application(lifespan_mode: str):
             for path in paths:
                 if isinstance(path, (str, bytes, os.PathLike)):
                     resolved = Path(os.fsdecode(path)).resolve()
+                    writes.add(str(resolved))
                     if str(resolved) != "/dev/null" and not any(resolved.is_relative_to(root) for root in (Path("/snapshot"), Path("/tmp"))):
                         guard.deny()
         sys.addaudithook(audit_writes)
@@ -74,6 +76,13 @@ def fixture_application(lifespan_mode: str):
         stack.enter_context(patch.object(os, "killpg", guard.deny))
         import app.bootstrap as bootstrap
         from backends.mock_llm import MockLLMBackend
+        effects = dict(model_calls=0, plc_start=0, plc_stop=0, compute_configure=0,
+                       compute_close=0, recorder_start=0, recorder_stop=0,
+                       ingestion_start=0, ingestion_stop=0)
+        class FixtureBackend(MockLLMBackend):
+            async def complete(self, **kwargs):
+                effects['model_calls'] += 1
+                return await super().complete(**kwargs)
         synthetic = {"system": {"system": {"inference_backend": "ollama",
                      "force_real_llm_in_test": False, "allow_mock_fallback": True}},
                      "models": {"models": {"e4b": {"primary": "fixture-only"},
@@ -93,7 +102,7 @@ def fixture_application(lifespan_mode: str):
             log_root=fixture_root / "logs")
         original_load_runtime = bootstrap.load_runtime
         stack.enter_context(patch.object(bootstrap, "load_runtime", lambda: original_load_runtime(paths=fixture_paths)))
-        stack.enter_context(patch.object(bootstrap, "_build_backend", lambda *a, **kw: MockLLMBackend()))
+        stack.enter_context(patch.object(bootstrap, "_build_backend", lambda *a, **kw: FixtureBackend()))
 
         from utils import plc_bridge_service, artifact_preservation, run_review, compute_pool
         lifecycle = {"started": False, "stopped": False}
@@ -101,16 +110,18 @@ def fixture_application(lifespan_mode: str):
         class FixturePLC(plc_bridge_service.PLCBridgeService):
             async def start(self):
                 lifecycle["started"] = True
+                effects['plc_start'] += 1
 
             async def shutdown(self):
                 lifecycle["stopped"] = True
+                effects['plc_stop'] += 1
 
         class FixtureRecorder:
             def __init__(self, *args, **kwargs):
                 self.thread = SimpleNamespace(join=lambda *a: None)
 
-            def start(self): pass
-            def stop(self): pass
+            def start(self): effects['recorder_start'] += 1
+            def stop(self): effects['recorder_stop'] += 1
             def close(self): pass
             def offer(self, *args, **kwargs): pass
 
@@ -119,25 +130,42 @@ def fixture_application(lifespan_mode: str):
         stack.enter_context(patch.object(run_review, "RunReviewRecorder", FixtureRecorder))
         def fixture_compute(workers=3, *, paths=None):
             assert paths is fixture_paths
+            effects['compute_configure'] += 1
         stack.enter_context(patch.object(compute_pool, "configure_compute_pool", fixture_compute))
-        stack.enter_context(patch.object(compute_pool, "close_compute_pool", lambda: None))
+        stack.enter_context(patch.object(compute_pool, "close_compute_pool",
+            lambda: effects.__setitem__('compute_close', effects['compute_close'] + 1)))
         from knowledge.source_runtime import SourceIngestionService
-        async def no_background(self): pass
-        stack.enter_context(patch.object(SourceIngestionService, "start", no_background))
-        stack.enter_context(patch.object(SourceIngestionService, "shutdown", no_background))
+        async def no_background_start(self): effects['ingestion_start'] += 1
+        async def no_background_stop(self): effects['ingestion_stop'] += 1
+        stack.enter_context(patch.object(SourceIngestionService, "start", no_background_start))
+        stack.enter_context(patch.object(SourceIngestionService, "shutdown", no_background_stop))
         from device_bridges.lerobot_bridge import LeRobotBridge
         from device_bridges.utm_runtime_bridge import UTMRuntimeProcessManager
         stack.enter_context(patch.object(LeRobotBridge, "shutdown", lambda self: None))
         stack.enter_context(patch.object(UTMRuntimeProcessManager, "shutdown", lambda self: None))
         module = importlib.import_module("app.main")
+        from dataclasses import asdict
+        module._layout_fixture_evidence = {'roots': {key: str(value) for key, value in asdict(fixture_paths).items()},
+                                          'effects': effects, 'writes': writes}
         yield module, guard, lifecycle
 
 
-def _origins() -> list[str]:
+def _import_origins() -> dict[str, str]:
     prefixes = {"app", "agents", "graphs", "utils", "knowledge", "memory", "device_bridges", "orchestrator"}
-    return [name for name, module in tuple(sys.modules.items())
+    return {name: str(Path(module.__file__).resolve()) for name, module in tuple(sys.modules.items())
             if name.split(".")[0] in prefixes and getattr(module, "__file__", None)
-            and not Path(module.__file__).resolve().is_relative_to(Path("/snapshot"))]
+            }
+
+
+def fixture_evidence(module, guard, lifecycle) -> dict:
+    origins = _import_origins()
+    evidence = module._layout_fixture_evidence
+    return {'roots': evidence['roots'], 'effects': dict(evidence['effects']),
+            'writes': sorted(evidence['writes']), 'import_origins': origins,
+            'outside_imports': [name for name, path in origins.items()
+                                if not Path(path).is_relative_to(evidence['roots']['runtime_root'])],
+            'unexpected_effects': guard.denied, 'lifespan_started': lifecycle['started'],
+            'lifespan_stopped': lifecycle['stopped'], 'evidence': 'software-only synthetic services'}
 
 
 def verify_routes(*, lifespan_mode: str) -> dict:
@@ -156,15 +184,17 @@ def verify_routes(*, lifespan_mode: str) -> dict:
         try:
             if not server.started:
                 raise AssertionError("Fixture server failed to start")
-            paths = ["/api/state", "/api/packages", "/api/modules/knowledge", "/static/favicon.svg"]
+            paths = ["/", "/ide", "/live", "/knowledge", "/api/graphs", "/api/modules",
+                     "/api/docs/agent-baseline", "/api/docs/agent-baseline.md",
+                     "/api/state", "/api/packages", "/api/modules/knowledge", "/static/favicon.svg"]
             assets = []
             registry = module.controller._deps.agent_registry
             for installed in registry.modules():
                 frontend = getattr(installed, "frontend_root", None)
                 if frontend and installed.agent_name in registry.active_names():
                     candidates = sorted(p for p in frontend.rglob("*") if p.is_file() and p.suffix in {".js", ".css"})
-                    if candidates:
-                        assets.append(f"/module-assets/{installed.module_id}/{candidates[0].relative_to(frontend)}")
+                    assets.extend(f"/module-assets/{installed.module_id}/{candidate.relative_to(frontend)}"
+                                  for candidate in candidates)
             if not assets:
                 raise AssertionError("No active module assets discovered")
             for path in paths + assets:
@@ -177,9 +207,7 @@ def verify_routes(*, lifespan_mode: str) -> dict:
             thread.join(15)
             if thread.is_alive():
                 raise AssertionError("Fixture server failed bounded teardown")
-        result = {"routes": routes, "module_assets": len(assets), "unexpected_effects": guard.denied,
-                  "outside_imports": _origins(), "lifespan_started": lifecycle["started"],
-                  "lifespan_stopped": lifecycle["stopped"], "evidence": "software-only synthetic services"}
+        result = {"routes": routes, "module_assets": len(assets), **fixture_evidence(module, guard, lifecycle)}
         assert result["unexpected_effects"] == [], result
         assert result["outside_imports"] == [], result
         if lifespan_mode == "fake_services":

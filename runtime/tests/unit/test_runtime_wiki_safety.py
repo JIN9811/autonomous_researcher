@@ -13,7 +13,10 @@ from knowledge.context_service import KnowledgeContextService, KnowledgePrincipa
 
 @pytest.fixture
 def ctx(tmp_path):
-    return SimpleNamespace(knowledge_service=KnowledgeContextService(Path(__file__).resolve().parents[2], tmp_path),
+    from utils.runtime_paths import current_paths
+    paths = current_paths()
+    return SimpleNamespace(knowledge_service=KnowledgeContextService(paths.repository_root, tmp_path,
+        wiki_corpus_root=paths.system_root / 'knowledge/wiki', wiki_source_root=paths.repository_root),
         active_backend='vllm', backend_fallbacks={})
 
 

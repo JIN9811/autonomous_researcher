@@ -51,9 +51,10 @@ def test_bo_descriptor_and_package_name_existing_services_without_a_bridge():
         descriptor["backend"]["execution"],
         descriptor["backend"]["structure"],
         descriptor["backend"]["presentation"],
-        descriptor["documentation"],
     ):
         assert (root / path).is_file(), path
+    from utils.runtime_paths import current_paths
+    assert (current_paths().repository_root / descriptor["documentation"]).is_file()
 
     package = yaml.safe_load((root / "packages/agents/bo/package.yaml").read_text())
     assert package == {

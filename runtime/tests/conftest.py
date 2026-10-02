@@ -78,6 +78,12 @@ def handoff_no_external(monkeypatch, tmp_path):
     monkeypatch.setattr(socket.socket, "connect", deny)
     monkeypatch.setattr(socket.socket, "connect_ex", deny)
     monkeypatch.setattr(subprocess, "Popen", deny)
+    original_check_output = subprocess.check_output
+    def without_fontconfig(command, *args, **kwargs):
+        if command == ["fc-list", "--help"] or command == ["fc-list", "--format=%{file}\\n"]:
+            raise FileNotFoundError("fontconfig intentionally absent in fixture")
+        return original_check_output(command, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "check_output", without_fontconfig)
     monkeypatch.setattr(os, "system", deny)
     original_open = os.open
     def device_open(path, *args, **kwargs):

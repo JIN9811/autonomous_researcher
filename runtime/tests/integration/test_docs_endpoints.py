@@ -13,7 +13,9 @@ def test_agent_baseline_json_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["name"] == "agent_program_baseline"
-    assert payload["path"].endswith("docs/runtime/agent_program_baseline.md")
+    from pathlib import Path
+    from utils.runtime_paths import current_paths
+    assert Path(payload["path"]) == current_paths().system_root / "runtime/agent_program_baseline.md"
     assert "Agent Program Integration Baseline" in payload["content"]
 
 

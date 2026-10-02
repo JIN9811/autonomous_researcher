@@ -377,6 +377,8 @@ def test_controller_configured_route_uses_clear_context():
     state = state_with_placement()
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
     controller = MainController.__new__(MainController)
+    from utils.runtime_paths import current_paths
+    controller._paths = current_paths()
     controller._state = state
     controller._active_graph_config_path = None
     assert controller._next_configured_stage_after(Stage.EQUIPMENT) == Stage.MANIPULATION
@@ -663,6 +665,8 @@ async def test_full_controller_tail_waits_for_replay_beyond_step_budget(tmp_path
     registry.register(ResultAgent("bo_agent", {"bo_result": {"ok": True}}))
     registry.register(ResultAgent("guardian_agent", {"guardian": {"decision": "continue", "action": "continue"}}))
     controller = MainController.__new__(MainController)
+    from utils.runtime_paths import current_paths
+    controller._paths = current_paths()
     controller._state = state
     controller._active_graph_config_path = None
     controller._active_graph_id = "atr_closed_loop"

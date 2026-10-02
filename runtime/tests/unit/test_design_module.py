@@ -77,14 +77,16 @@ def test_public_description_is_detached_from_registered_contract():
 
 
 def test_module_frontend_is_declared_as_python_package_data():
-    import tomllib
+    import json
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
-    config = tomllib.loads((root / "pyproject.toml").read_text())
-    patterns = config["tool"]["setuptools"]["package-data"]["agents.design"]
-    assets = {path for pattern in patterns for path in (root / "agents/design").glob(pattern)}
-    assert root / "agents/design/frontend/live_report.js" in assets
+    selection = json.loads((root / "distribution-files.json").read_text())
+    asset = "agents/design/frontend/live_report.js"
+    assert "agents.design" in selection["packages"]
+    assert asset in selection["wheel"]
+    assert asset in selection["sdist"]
+    assert (root / asset).is_file()
 
 
 def test_legacy_replacement_does_not_leave_a_stale_module_binding():

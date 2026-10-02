@@ -54,7 +54,8 @@ def test_equipment_repository_paths_and_module_ownership_stay_local():
     assert descriptor["configuration"]["source"] == "graphs/modules/equipment/module.yaml"
     assert descriptor["storage"]["new_settings_store"] is False
     for key in ("documentation",):
-        assert (root / descriptor[key]).is_file()
+        from utils.runtime_paths import current_paths
+        assert (current_paths().repository_root / descriptor[key]).is_file()
 
 
 def test_equipment_report_metadata_precedence_keys_and_isolation():

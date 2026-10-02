@@ -121,6 +121,22 @@ def test_successful_fixture_child_diagnostics_are_retained(monkeypatch, capsys):
     assert captured.err == result.stderr
 
 
+@pytest.mark.parametrize('mode', ['import_only', 'fake_services'])
+def test_real_route_receipt_has_roots_origins_and_effect_counters(mode):
+    result = _verify_fixture_process(mode)
+    for route in ('/', '/ide', '/live', '/knowledge', '/api/graphs', '/api/modules', '/api/docs/agent-baseline'):
+        assert result['routes'][route] == 200
+    assert result['roots']['runtime_root'] == '/snapshot/runtime'
+    assert result['roots']['repository_root'] == '/snapshot'
+    assert result['roots']['system_root'] == '/snapshot/system'
+    assert result['roots']['memory_root'].startswith('/tmp/atr-fixture-')
+    assert result['import_origins']['app.main'] == '/snapshot/runtime/app/main.py'
+    assert result['effects']['model_calls'] == 0
+    assert result['effects']['plc_start'] == (1 if mode == 'fake_services' else 0)
+    assert result['effects']['plc_stop'] == (1 if mode == 'fake_services' else 0)
+    assert result['unexpected_effects'] == []
+
+
 @pytest.mark.parametrize("already_imported", [False, True], ids=["fresh-parent", "collected-app-in-parent"])
 def test_real_routes_inside_fixture_import_mode(monkeypatch, already_imported):
     if already_imported:

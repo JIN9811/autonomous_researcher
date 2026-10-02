@@ -15,6 +15,12 @@ def deny_external(monkeypatch):
         raise AssertionError("Unlisted external effect in checkpoint tests")
     monkeypatch.setattr(socket.socket, "connect", deny)
     monkeypatch.setattr(subprocess, "Popen", deny)
+    original_check_output = subprocess.check_output
+    def without_fontconfig(command, *args, **kwargs):
+        if command == ["fc-list", "--help"] or command == ["fc-list", "--format=%{file}\\n"]:
+            raise FileNotFoundError("fontconfig intentionally absent in fixture")
+        return original_check_output(command, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "check_output", without_fontconfig)
 
 
 def test_consumption_is_once_and_payload_is_detached():
@@ -634,6 +640,8 @@ def test_controller_pins_decision_settings_with_owner_catalog(monkeypatch):
     registry = AgentRegistry()
     registry.register(OrchestratorAgent())
     controller = MainController.__new__(MainController)
+    from utils.runtime_paths import current_paths
+    controller._paths = current_paths()
     controller._deps = SimpleNamespace(agent_registry=registry, agent_context=object(), orchestrator_agent_name="orchestrator_agent")
     controller._state = OrchestratorState(run_id="settings", experiment_id="exp")
     controller._active_graph_config_path = None

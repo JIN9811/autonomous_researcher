@@ -104,6 +104,48 @@ def test_checks_reject_unknown_task_without_importing_application():
     assert rejected.value.code != 0
 
 
+def test_task11_requires_literal_selection_before_inventory():
+    from tools.repository_layout.checks import main
+    with pytest.raises(SystemExit) as rejected:
+        main(["check", "11"])
+    assert rejected.value.code == 2
+
+
+def test_literal_selection_rejects_unbounded_or_ambiguous_batches():
+    from tools.repository_layout.checks import literal_selection
+    payload = {"id": "fixture-01", "timeout": 30,
+               "command": ["/deps/bin/python3", "-S", "-m", "pytest", "-v", "tests/unit/test_example.py"]}
+    assert literal_selection(payload) == payload
+    for update in ({"timeout": 0}, {"timeout": 1201}, {"command": []},
+                   {"id": "../escape"}, {"command": ["node", "--test", "tests/js"]},
+                   {"command": ["python", "-m", "pytest", "tests"]},
+                   {"command": ["python", "-m", "pytest", "tests/unit/*.py"]},
+                   {"command": ["python", "-m", "pytest"]}):
+        with pytest.raises(ValueError):
+            literal_selection({**payload, **update})
+
+
+def test_receipt_directory_is_exclusive(tmp_path):
+    from tools.repository_layout.checks import receipt_directory
+    output = receipt_directory(tmp_path, "fixture-01")
+    (output / "prior.log").write_text("immutable")
+    with pytest.raises(FileExistsError):
+        receipt_directory(tmp_path, "fixture-01")
+    assert (output / "prior.log").read_text() == "immutable"
+
+
+def test_bounded_log_preserves_success_stdout_and_stderr(tmp_path):
+    from tools.repository_layout.sandbox import run_bounded
+    output = tmp_path / "raw.log"
+    result = run_bounded([sys.executable, "-S", "-c",
+        "import sys; print('success-output',flush=True); print('success-warning',file=sys.stderr)"],
+        timeout=10, output_path=output)
+    assert result.returncode == 0
+    assert result.stdout == output.read_text() == "success-output\nsuccess-warning\n"
+    with pytest.raises(FileExistsError):
+        run_bounded([sys.executable, "-V"], timeout=10, output_path=output)
+
+
 def test_document_manifest_moves_to_system_root(tmp_path):
     from tools.repository_layout.manifest import build_manifest, validate_manifest
     root = repository(tmp_path)

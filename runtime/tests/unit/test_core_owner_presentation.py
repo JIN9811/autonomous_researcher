@@ -105,7 +105,10 @@ def test_core_frontends_own_composition_without_pollers_or_event_registration():
 def test_reviewed_core_owner_wiki_pages_match_current_source_revisions():
     from knowledge.wiki import WikiCatalog
 
-    catalog = WikiCatalog(Path(__file__).resolve().parents[2])
+    from utils.runtime_paths import current_paths
+    paths = current_paths()
+    catalog = WikiCatalog(corpus_root=paths.system_root / "knowledge/wiki",
+                          source_root=paths.repository_root)
     for topic in ("knowledge-agent", "knowledge-role", "guardian-role", "agent-contracts"):
         document = catalog.read(topic)
         assert document is not None

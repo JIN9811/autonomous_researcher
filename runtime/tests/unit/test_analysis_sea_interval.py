@@ -92,8 +92,8 @@ async def test_sea_interval_reaches_report_bo_knowledge_and_saved_artifacts(end,
 
 
 def test_current_utm_reference_separates_method_stop_from_analysis_interval():
-    root = Path(__file__).resolve().parents[2]
-    reference = root / "references/trapeziumx_v_equipment_agent"
+    from utils.runtime_paths import current_paths
+    reference = current_paths().system_root / "references/trapeziumx_v_equipment_agent"
     values = json.loads((reference / "manifest.json").read_text())["current_method_values"]
     assert values["contact_detection_load"]["value"] == 10
     endpoint = values["compression_endpoint"]

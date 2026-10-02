@@ -47339,6 +47339,141 @@
     }
   },
   "task11_phase": {
+    "accepted_checkpoint": "982b15adb1dd3bcdf94a4c26eda71a0cf3158fa4",
+    "current_source_identities": {
+      "runtime/tests/integration/test_all_agent_loop_archives.py": {
+        "mode": "100644",
+        "git_blob": "107badd685b16da86f460e706da62c7e4f799298",
+        "sha256": "cd978560b78e7522b71e79df043c098a3967d35447f2cdf66767fb4832efc6af",
+        "size": 2757
+      },
+      "runtime/tests/conftest.py": {
+        "mode": "100644",
+        "git_blob": "7b7da2e83baf5ce6de316e2185a69e90def63f82",
+        "sha256": "ca68d1369cea2341e7628d997696850b3eb82fadf84c951f495f41a6cc20ff4d",
+        "size": 5710
+      },
+      "runtime/tests/integration/test_docs_endpoints.py": {
+        "mode": "100644",
+        "git_blob": "0bfb847f27f48dc91b02004000066261c5f55c1c",
+        "sha256": "4a84070a675379aec7df7f67b6591b23878b7f8eb5c58b25c3afd5469ff9b235",
+        "size": 889
+      },
+      "runtime/tests/unit/test_agent_knowledge_delivery.py": {
+        "mode": "100644",
+        "git_blob": "239bb6e40947ef9bca392818bcd23d7dfaa90398",
+        "sha256": "bc2c22d7a91cbb4a66aed6cbf65e821666c00cefab02d78bf6142165efd5bb55",
+        "size": 13169
+      },
+      "runtime/tests/unit/test_analysis_module_contract.py": {
+        "mode": "100644",
+        "git_blob": "2696e1e49f7f2c7bd83d3e8a89826c0760d3fc7d",
+        "sha256": "94e782081996adc7fc906593aa01260db7ed2f1455686bb1ac3d09e2f9edf123",
+        "size": 8218
+      },
+      "runtime/tests/unit/test_analysis_sea_interval.py": {
+        "mode": "100644",
+        "git_blob": "062fbf4f2af2a68f2f05046e4ba0996c4f94ff0c",
+        "sha256": "ff85e931b6a7c782d9a7cf08c08df56d5e8c6cd4a3f7842007b85103cd822c49",
+        "size": 5461
+      },
+      "runtime/tests/unit/test_bo_module_contract.py": {
+        "mode": "100644",
+        "git_blob": "c4e09c86d529de50fc910bf9e70370387d8f8d6d",
+        "sha256": "a89cf81cc5b809067cebae6c6c887ebc6984a583c793caf1acb0545ac2f123d9",
+        "size": 9466
+      },
+      "runtime/tests/unit/test_core_owner_presentation.py": {
+        "mode": "100644",
+        "git_blob": "c709735de1554b594e3af44c73cef9ad97b33082",
+        "sha256": "57a7f4b91d5aa4c029df9b5e5115e11b071192ef940fe80cc7b675104aeb4d6a",
+        "size": 5291
+      },
+      "runtime/tests/unit/test_design_module.py": {
+        "mode": "100644",
+        "git_blob": "e0a055c7653d6cbeacfd1e886370c4f78dd251d5",
+        "sha256": "aad947144267d6e474c39755bd75d66c075c930ea3b88001861fffad4302c856",
+        "size": 8603
+      },
+      "runtime/tests/unit/test_distribution_layout.py": {
+        "mode": "100644",
+        "git_blob": "e4e393a36122b55ce0ce1e8823b68c29defb620e",
+        "sha256": "39e14fb7d0a0e59e8d3777edb6914731241872536bbc45910e67aa1fe292a7e9",
+        "size": 8818
+      },
+      "runtime/tests/unit/test_equipment_module_contract.py": {
+        "mode": "100644",
+        "git_blob": "093160132f3261ee8225eadbbb45d2ea35832844",
+        "sha256": "f4479a997f03be13d88d01de979654378ae731b6e80053bdf187df729e932a6d",
+        "size": 19607
+      },
+      "runtime/tests/unit/test_equipment_utm_skills.py": {
+        "mode": "100644",
+        "git_blob": "1b1d0329d7ebdb5bc25a5fba400a7eebe287a03f",
+        "sha256": "28dc51d4d04e9946fc1c1feba1743c873918b07d8a9d5892f80f85430279889f",
+        "size": 16825
+      },
+      "runtime/tests/unit/test_knowledge_workspace_services.py": {
+        "mode": "100644",
+        "git_blob": "dbe7b3066385400d923e867e34a3463df4e32116",
+        "sha256": "f0c033169d7d590978b36555fbc31c8db91ba55779dad7d5bb1296e6ee61a8a8",
+        "size": 20626
+      },
+      "runtime/tests/unit/test_layout_manifest.py": {
+        "mode": "100644",
+        "git_blob": "5e5f0c84b4a9d4739108affe1953763c022a3b13",
+        "sha256": "3775ebc14867a4c01e14c4ec2f1aca32c814cf8ec0161b79d6a5dbdef3144044",
+        "size": 10019
+      },
+      "runtime/tests/unit/test_layout_validation_sandbox.py": {
+        "mode": "100644",
+        "git_blob": "e78f3c1f3537fb3c16f7097df4d8c7524c996b6b",
+        "sha256": "d447de286c000a140980e23e5681d5b88357c702cf9362190aadf3e7fc3a2db7",
+        "size": 8754
+      },
+      "runtime/tests/unit/test_orchestrator_checkpoint.py": {
+        "mode": "100644",
+        "git_blob": "73ef3b962a6a25ce13a4d6afc00220b8667dd269",
+        "sha256": "3274693e4fed4be1eb3962fca6a25826bb0238c2d98487c405a804a2e6c37f15",
+        "size": 58734
+      },
+      "runtime/tests/unit/test_planning_setup_api.py": {
+        "mode": "100644",
+        "git_blob": "b76750f9b70fa9bc5251f7ac4f4f30177732ba29",
+        "sha256": "0a0d9918d35a401690009fa78a309032fee32415e59f404a62ec7d7b3cd296f3",
+        "size": 34510
+      },
+      "runtime/tests/unit/test_runtime_wiki_safety.py": {
+        "mode": "100644",
+        "git_blob": "9791ad52c7dba815843638fab1095057c036c6b2",
+        "sha256": "fa68cff76a2a487a77a93d806af9bd05bfc2ea2f7993d18c68c7b94e45e1cbc5",
+        "size": 5200
+      },
+      "runtime/tests/unit/test_utm_clear_cycle.py": {
+        "mode": "100644",
+        "git_blob": "a4e54dadf65f0cea06e290903a3350c642f69f5b",
+        "sha256": "5537f60c04837187fd8ddb6ec70d26eb3088f526ba5886a2fdcdbaad4efbf97f",
+        "size": 37028
+      },
+      "runtime/tools/repository_layout/checks.py": {
+        "mode": "100644",
+        "git_blob": "9db08752abfc3e1975d2e6e1498550574a262e22",
+        "sha256": "eb36d256b8aa5879f5efeded984c4a6e7db10cc384d92a5e17a81d2c70ee69cf",
+        "size": 38708
+      },
+      "runtime/tools/repository_layout/fixture_server.py": {
+        "mode": "100644",
+        "git_blob": "d9cb4a9843debee335be6c4000b8f1be3782e5d9",
+        "sha256": "151d01162435a38167fb6e9505c5719a21a414b92728c57d553d21c5fdf0aae9",
+        "size": 12691
+      },
+      "runtime/tools/repository_layout/sandbox.py": {
+        "mode": "100644",
+        "git_blob": "9566a8677d9802100939bac5dae23635a5495411",
+        "sha256": "81790dd01fd8d7be65d91df144ba80419fcbdc9b4a411f3f99410646a9fd9518",
+        "size": 9889
+      }
+    },
     "base_revision": "a8486a3dd893cb5cd20804c9fe5ba5a4ebe3d4a3",
     "paired_before_revision": "428067bd117fb3d466900a4c90e73ca460b62ff8",
     "scope": "Validation diagnostics, document syntax and moved-source fixture compatibility only",

@@ -5,6 +5,14 @@ from types import SimpleNamespace
 import pytest
 
 
+def relocated_knowledge_service(data_root):
+    from knowledge.context_service import KnowledgeContextService
+    from utils.runtime_paths import current_paths
+    paths = current_paths()
+    return KnowledgeContextService(paths.repository_root, data_root=data_root,
+        wiki_corpus_root=paths.system_root / "knowledge/wiki", wiki_source_root=paths.repository_root)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode,want', [('cited', 'used'), ('invalid', 'unknown'), ('absent', 'unknown'), ('nonuse', 'excluded')])
 @pytest.mark.parametrize('owner', ['orchestrator', 'design', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'bo', 'knowledge', 'guardian'])
@@ -84,7 +92,7 @@ def test_reference_pack_is_injected_and_anonymous_delivery_is_inline(tmp_path):
     from agents.core.knowledge.context import build_reference_context, inject_reference_only
     from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
 
-    service = KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path)
+    service = relocated_knowledge_service(tmp_path)
     ctx = CapturingContext(service)
     packet = {"operation": "decide_orchestration", "context": {"goal": "Design Agent"}}
     reference = build_reference_context(ctx, consumer="orchestrator_agent", query="What does the Design Agent do?")
@@ -100,7 +108,7 @@ def test_unknown_question_has_an_explicit_no_match_pack(tmp_path):
     from agents.core.knowledge.context import build_reference_context
     from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
 
-    reference = build_reference_context(CapturingContext(KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path)),
+    reference = build_reference_context(CapturingContext(relocated_knowledge_service(tmp_path)),
         consumer="analysis_agent", query="nonexistenttokenonly")
 
     assert reference["pack"]["diagnostics"]["no_match"] is True
@@ -112,7 +120,7 @@ def test_mixed_possible_provider_route_excludes_private_memory_without_both_cons
     from agents.core.knowledge.context import build_reference_context
     from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
 
-    service = KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path)
+    service = relocated_knowledge_service(tmp_path)
     principal = KnowledgePrincipal(subject_id="synthetic", remote_model_consent=True, local_model_consent=False)
     # Keep the private-only query distinct from ordinary public Wiki vocabulary.
     private_text = "privateconsentfixtureonly"
@@ -139,7 +147,7 @@ async def test_deterministic_equipment_entrypoint_never_marks_retrieved_context_
     from knowledge.context_service import KnowledgeContextService
     from orchestrator.state import Mode, OrchestratorState, Stage
 
-    ctx = CapturingContext(KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path))
+    ctx = CapturingContext(relocated_knowledge_service(tmp_path))
     ctx.force_real_llm_in_test = False
     state = OrchestratorState(run_id="synthetic-run", experiment_id="synthetic", mode=Mode.TEST,
         stage=Stage.EQUIPMENT, active_goal=query)
@@ -163,7 +171,7 @@ async def test_every_active_owner_actual_decision_prompt_carries_relevant_or_no_
     from orchestrator.state import Mode, OrchestratorState, Stage
     from tests.knowledge_delivery_fixtures import KnowledgeDeliveryTransport, reference_pack_from_prompt
 
-    service = KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path / owner / query)
+    service = relocated_knowledge_service(tmp_path / owner / query)
     ctx = KnowledgeDeliveryTransport(service, query_case=query)
     state = OrchestratorState(run_id="knowledge-matrix", experiment_id="synthetic", mode=Mode.TEST,
         stage=Stage.DESIGN, active_goal=query, current_experiment_spec={"specimen_id": "s1", "candidate_id": "c1"})

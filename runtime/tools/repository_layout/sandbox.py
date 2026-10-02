@@ -169,8 +169,21 @@ def boundary_probe() -> dict:
             "denied_attempts": denied, "capabilities": "0000000000000000"}
 
 
-def run_bounded(command: list[str], *, timeout: int = 600) -> subprocess.CompletedProcess:
+def run_bounded(command: list[str], *, timeout: int = 600,
+                output_path: Path | None = None) -> subprocess.CompletedProcess:
     """Kill only the new test-owned process group on timeout, never host services."""
+    if output_path is not None:
+        with output_path.open('x') as output:
+            with subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT,
+                                  start_new_session=True) as process:
+                try:
+                    code = process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    code = 124
+                    output.write('\nSandbox timeout\n')
+        return subprocess.CompletedProcess(command, code, output_path.read_text())
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, start_new_session=True) as process:
         try:

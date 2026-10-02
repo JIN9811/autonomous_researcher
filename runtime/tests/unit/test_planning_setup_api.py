@@ -12,6 +12,8 @@ pytestmark = pytest.mark.usefixtures("handoff_no_external")
 
 @pytest.fixture
 def controller(tmp_path, handoff_no_external):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
     from app.controller import MainController, ControllerDeps
     from agents.registry import AgentRegistry
     from agents.core.orchestrator.agent import OrchestratorAgent
@@ -19,13 +21,18 @@ def controller(tmp_path, handoff_no_external):
     registry = AgentRegistry()
     registry.register(OrchestratorAgent())
     registry.register(BOAgent())
+    paths = replace(current_paths(), workspace_root=tmp_path / "workspace",
+        run_root=tmp_path / "runs", memory_root=tmp_path / "memory",
+        artifact_root=tmp_path / "artifacts", output_root=tmp_path / "outputs",
+        source_inbox_root=tmp_path / "inbox", user_file_root=tmp_path / "user-files",
+        log_root=tmp_path / "logs")
     async def complete(task, prompt, **kwargs):
         return SimpleNamespace(model="controlled", raw={}, text=json.dumps(
             {"intent": "question", "reason": "Question", "pending_id": None}))
     return MainController(ControllerDeps(agent_registry=registry,
         orchestrator_agent_name="orchestrator_agent",
-        agent_context=SimpleNamespace(complete=complete, active_backend="controlled"),
-        run_root=tmp_path / "runs", logging_config={}, system_config={}, runtime_profile={}))
+        agent_context=SimpleNamespace(complete=complete, active_backend="controlled", paths=paths),
+        run_root=paths.run_root, logging_config={}, system_config={}, runtime_profile={}, paths=paths))
 
 
 @pytest.fixture

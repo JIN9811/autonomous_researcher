@@ -47,7 +47,8 @@ def test_analysis_descriptor_owns_sources_without_a_physical_low_boundary():
         for item in path if isinstance(path, list) else [path]:
             if isinstance(item, str) and "/" in item:
                 assert (root / item).is_file(), item
-    assert (root / descriptor["documentation"]).is_file()
+    from utils.runtime_paths import current_paths
+    assert (current_paths().repository_root / descriptor["documentation"]).is_file()
 
 
 def test_analysis_source_catalog_resolves_real_symbols_and_has_no_fake_low_node():

@@ -10,6 +10,9 @@ import re
 import html
 import hashlib
 import posixpath
+import sys
+import time
+from contextlib import redirect_stderr
 from urllib.parse import unquote, urlsplit
 
 from .manifest import build_manifest, validate_manifest, git_entries, _git
@@ -213,22 +216,7 @@ CHECKS: dict[str, list[list[str]]] = {
             "tests/js/omx_environment_layout.test.cjs"
         ]
     ],
-    "11": [
-        [
-            "python",
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "pytest_asyncio.plugin",
-            "tests"
-        ],
-        [
-            "node",
-            "--test",
-            "tests/js"
-        ]
-    ],
+    "11": [],  # Explicit reviewed literal selection required; no broad default.
     "12": [
         [
             "python",
@@ -597,6 +585,34 @@ CHECKS["7"] = [
 CHECKS["7"][4][:1] = ["/usr/bin/env", "ISAAC_LAB_PATH=/deps/validation-tools/isaaclab-cpu-source", "/deps/bin/python3", "-S"]
 
 
+def literal_selection(payload: dict) -> dict:
+    """A command manifest is a bounded selection, never discovery or authority."""
+    if not isinstance(payload, dict) or set(payload) != {'id', 'command', 'timeout'}:
+        raise ValueError('Selection requires exactly id, command, timeout')
+    if not isinstance(payload['id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]+', payload['id']):
+        raise ValueError('Invalid receipt id')
+    if type(payload['timeout']) is not int or not 0 < payload['timeout'] <= 1200:
+        raise ValueError('Explicit bound must be 1..1200 seconds')
+    command = payload['command']
+    if (not isinstance(command, list) or not command
+            or any(not isinstance(value, str) or not value or '\0' in value for value in command)
+            or any('*' in value or value.rstrip('/') in {'tests', 'tests/unit', 'tests/integration', 'tests/js'}
+                   for value in command)):
+        raise ValueError('Literal file/node argv required; no broad test roots or globs')
+    if ('pytest' in command and not any(value.split('::')[0].endswith('.py') for value in command)
+            or '--test' in command and not any(value.endswith(('.cjs', '.mjs', '.js')) for value in command)):
+        raise ValueError('Test runners require explicit test files or node IDs')
+    return payload
+
+
+def receipt_directory(private: Path, identifier: str) -> Path:
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', identifier):
+        raise ValueError('Invalid receipt id')
+    output = private / 'task-11-receipts' / identifier
+    output.mkdir(parents=True, exist_ok=False)
+    return output
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["check"])
@@ -605,11 +621,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--revision", default="HEAD")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--baseline-suite", action="store_true", help="Run bounded ordinary pytest after containment")
+    parser.add_argument("--selection", type=Path, help="Explicit Task11 JSON id/command/timeout; exclusive receipt")
+    parser.add_argument("--helper-revision", help="Exact immutable helper object for Task11")
     args = parser.parse_args(argv)
+    selection = None
+    if args.task == '11':
+        if (args.selection is None or args.baseline_suite
+                or not re.fullmatch('[0-9a-f]{40}', args.revision)
+                or not re.fullmatch('[0-9a-f]{40}', args.helper_revision or '')):
+            parser.error('Task11 requires selection and exact target/helper object IDs; broad baseline disabled')
+        selection = literal_selection(json.loads(args.selection.read_text()))
+    elif args.selection is not None or args.helper_revision is not None:
+        parser.error('Explicit selection/helper options belong to Task11')
     root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
     private = root / ".superpowers/sdd/2026-10-01-repository-layout-migration"
     dependencies = args.dependencies or private / "deps"
-    original = build_manifest(root, BASELINE)
+    output = receipt_directory(private, selection['id']) if selection else None
+    helper_hashes = {}
+    if output:
+        for name in ('__init__.py', 'checks.py', 'manifest.py', 'sandbox.py'):
+            source = Path(__file__).parent / name
+            data = source.read_bytes()
+            expected = _git(root, 'show', args.helper_revision + ':runtime/tools/repository_layout/' + name)
+            if data != expected:
+                raise ValueError('Unpinned helper bytes: ' + name)
+            helper_hashes[name] = hashlib.sha256(data).hexdigest()
+        with (output / 'inventory-diagnostics.log').open('x') as diagnostics, redirect_stderr(diagnostics):
+            original = build_manifest(root, BASELINE)
+        print((output / 'inventory-diagnostics.log').read_text(), end='', file=sys.stderr)
+    else:
+        original = build_manifest(root, BASELINE)
     revision = _git(root, "rev-parse", "--verify", f"{args.revision}^{{tree}}").decode().strip()
     records = {path: (mode, kind, blob) for path, mode, kind, blob in git_entries(root, revision)}
     candidates = [path for path in ("docs/maintenance/repository_layout_manifest.json",
@@ -646,18 +687,32 @@ def main(argv: list[str] | None = None) -> int:
         export_tracked(root, snapshot, revision=revision)
         cwd = "/snapshot/runtime" if (snapshot / "runtime/pyproject.toml").is_file() else "/snapshot"
         probe = ["python", "-c", "import json; from tools.repository_layout.sandbox import boundary_probe; b=boundary_probe(); print(json.dumps(b)); assert not b['host_paths_visible'] and not b['device_nodes'] and not b['host_pid_visible'] and not b['non_loopback_connected']"]
-        commands = [["python", "-m", "pytest", "-p", "pytest_asyncio.plugin"]] if args.baseline_suite else CHECKS[args.task]
-        for command in [probe, *commands]:
-            completed = run_bounded(sandbox_command(snapshot, dependencies, command, cwd=cwd), timeout=args.timeout)
+        commands = [selection['command']] if selection else ([["python", "-m", "pytest", "-p", "pytest_asyncio.plugin"]] if args.baseline_suite else CHECKS[args.task])
+        for index, command in enumerate([probe, *commands]):
+            started = time.time()
+            log = output / f'command-{index}.log' if output else None
+            bound = (30 if index == 0 else selection['timeout']) if selection else args.timeout
+            completed = run_bounded(sandbox_command(snapshot, dependencies, command, cwd=cwd),
+                                    timeout=bound, output_path=log)
             print(completed.stdout, end="", flush=True)
-            results.append({"command": command, "returncode": completed.returncode, "output": completed.stdout})
+            results.append({"command": command, "returncode": completed.returncode, "output": completed.stdout,
+                            "started": started, "ended": time.time(), "timeout_seconds": bound,
+                            "log": log.name if log else None,
+                            "sha256": hashlib.sha256(completed.stdout.encode()).hexdigest()})
+            if output:
+                (output / 'progress.json').write_text(json.dumps(results, indent=2))
             if command is probe and completed.returncode:
                 break
     report = {"task": args.task, "baseline": BASELINE, "revision": revision,
               "requested_revision": args.revision, "checks": results,
               "software_only": True, "complete": len(results) == len(commands) + 1}
     label = "baseline-suite" if args.baseline_suite else f"check-{args.task}"
-    (private / f"{label}-results.json").write_text(json.dumps(report, indent=2))
+    report.update(helper_revision=args.helper_revision, helper_sha256=helper_hashes,
+                  evidence='software-only', timed_out=any(row['returncode'] == 124 for row in results))
+    if report['timed_out']:
+        report['complete'] = False
+    destination = output / 'receipt.json' if output else private / f"{label}-results.json"
+    destination.write_text(json.dumps(report, indent=2))
     return 0 if report["complete"] and all(item["returncode"] == 0 for item in results) else 1
 
 

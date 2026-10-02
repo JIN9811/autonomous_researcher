@@ -31,6 +31,7 @@ class NonActuatingBoundary(BaseException):
 class OfflineContext:
     def __init__(self, root):
         self.artifact_run_root = root
+        self.paths = None  # Deliberate legacy context with the explicit disposable archive root above.
 
     def __getattr__(self, name):
         raise NonActuatingBoundary(name)

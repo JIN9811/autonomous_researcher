@@ -10,7 +10,9 @@ from utils.equipment_utm_skills import (
 )
 
 
-REFERENCE_ROOT = Path(__file__).resolve().parents[2] / "references" / "trapeziumx_v_equipment_agent"
+from utils.runtime_paths import current_paths
+
+REFERENCE_ROOT = current_paths().system_root / "references" / "trapeziumx_v_equipment_agent"
 
 
 def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_path: Path) -> None:
