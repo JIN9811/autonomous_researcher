@@ -76,8 +76,13 @@ class LabEquipmentAgent(BaseAgent):
     _WORKSPACE_SETTINGS_PATH = Path(__file__).resolve().parents[2] / "memory" / "equipment_workspace_settings.json"
 
     @classmethod
-    def _runtime_service(cls) -> EquipmentRuntimeService:
-        return EquipmentRuntimeService(cls._RUNTIME_ROOT)
+    def _runtime_root(cls, ctx: AgentContext | None = None) -> Path:
+        paths = getattr(ctx, "paths", None)
+        return paths.memory_root / "equipment_runtime" if paths is not None else cls._RUNTIME_ROOT
+
+    @classmethod
+    def _runtime_service(cls, ctx: AgentContext | None = None) -> EquipmentRuntimeService:
+        return EquipmentRuntimeService(cls._runtime_root(ctx))
     _RESULT_FILE_KEYS = ("result_file", "result_path", "csv_path", "utm_result_file", "utm_csv_path", "artifact_path")
 
     @staticmethod
@@ -1007,8 +1012,9 @@ class LabEquipmentAgent(BaseAgent):
         return result(True, data_quality=quality)
 
 
-    def _write_test_utm_csv(self, *, state: OrchestratorState, specimen_id: str, program_id: str) -> dict[str, Any]:
-        artifact_dir = Path("artifacts") / "equipment" / state.run_id / "utm"
+    def _write_test_utm_csv(self, *, state: OrchestratorState, specimen_id: str, program_id: str,
+                            artifact_root: Path | None = None) -> dict[str, Any]:
+        artifact_dir = (artifact_root if artifact_root is not None else Path("artifacts")) / "equipment" / state.run_id / "utm"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         safe_specimen = self._safe_artifact_segment(specimen_id, "specimen-test")
@@ -1753,6 +1759,7 @@ class LabEquipmentAgent(BaseAgent):
         tool_results: list[dict[str, Any]],
         program_catalog: set[str],
         source_stage_context: dict[str, Any],
+        artifact_root: Path | None = None,
     ) -> dict[str, Any]:
         equipment_result = dict(final_result)
         bridge_provider = str(equipment_result.get("bridge") or run_payload.get("bridge") or "windows_pyautogui")
@@ -1776,6 +1783,7 @@ class LabEquipmentAgent(BaseAgent):
                 state=state,
                 specimen_id=str(specimen.get("specimen_id") or state.current_experiment_spec.get("specimen_id") or "specimen-test"),
                 program_id=program_id,
+                artifact_root=artifact_root,
             )
             equipment_result.setdefault("output_artifacts", []).append(artifact)
             equipment_result["result_file"] = artifact["path"]
@@ -2543,6 +2551,7 @@ class LabEquipmentAgent(BaseAgent):
             tool_results=tool_results,
             program_catalog={self._UTM_DEFAULT_PROGRAM},
             source_stage_context=source_stage_context,
+            artifact_root=getattr(getattr(ctx, "paths", None), "artifact_root", None),
         )
         bridge = str(response.get("bridge") or "utm_direct") if isinstance(response, dict) else "utm_direct"
         return AgentResult(
@@ -2891,8 +2900,8 @@ class LabEquipmentAgent(BaseAgent):
         return bool(profile.vision_link.get("enabled"))
 
     @classmethod
-    def _write_skill_flow_execution(cls, profile_id: str, execution: dict[str, Any]) -> None:
-        path = cls._RUNTIME_ROOT / "equipment_skill_flow_latest" / f"{profile_id}.json"
+    def _write_skill_flow_execution(cls, profile_id: str, execution: dict[str, Any], *, runtime_root: Path | None = None) -> None:
+        path = (runtime_root if runtime_root is not None else cls._RUNTIME_ROOT) / "equipment_skill_flow_latest" / f"{profile_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(execution, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
@@ -2950,6 +2959,12 @@ class LabEquipmentAgent(BaseAgent):
         validate_only: bool = False,
     ) -> AgentResult:
         """Execute ordered composite Skill blocks and their bounded Vision phases."""
+        runtime_root = self._runtime_root(ctx)
+        def persist_execution(profile_id, execution):
+            if getattr(ctx, "paths", None) is not None:
+                self._write_skill_flow_execution(profile_id, execution, runtime_root=runtime_root)
+            else:
+                self._write_skill_flow_execution(profile_id, execution)
         profile_id = str(flow.get("profile_id") or "")
         agentic_task_id = str(flow.get("agentic_task_id") or "").strip()
         flow_execution_id = (checkpoint or {}).get("flow_execution_id") or f"equipment-flow-{uuid4().hex}"
@@ -3153,7 +3168,7 @@ class LabEquipmentAgent(BaseAgent):
             return payload
 
         def write_execution(*, active_block: str = "", active_phase: str = "", terminal_value: str = "") -> None:
-            self._write_skill_flow_execution(
+            persist_execution(
                 profile_id,
                 execution_payload(
                     active_block=active_block,
@@ -3165,7 +3180,7 @@ class LabEquipmentAgent(BaseAgent):
         # Every agent start condition creates a new flow invocation. Persist IDLE
         # before validating or dispatching its first block so a prior terminal
         # projection can never be mistaken for the state of this invocation.
-        self._write_skill_flow_execution(profile_id, execution_payload())
+        persist_execution(profile_id, execution_payload())
 
         if not task_contract.get("ok"):
             failure_code = str(task_contract.get("failure_code") or "EQUIPMENT_FLOW_REVISION_INVALID")
@@ -3174,7 +3189,7 @@ class LabEquipmentAgent(BaseAgent):
                 terminal_value="__blocked__",
                 failure_code=failure_code,
             )
-            self._write_skill_flow_execution(profile_id, execution)
+            persist_execution(profile_id, execution)
             overlay = execution.get("workflow_agentic_task", {})
             return AgentResult(
                 success=False,
@@ -3207,7 +3222,7 @@ class LabEquipmentAgent(BaseAgent):
                 terminal_value="__blocked__",
                 failure_code="EQUIPMENT_HANDOFF_NOT_READY",
             )
-            self._write_skill_flow_execution(profile_id, execution)
+            persist_execution(profile_id, execution)
             overlay = execution.get("workflow_agentic_task", {})
             return AgentResult(
                 success=False,
@@ -3252,7 +3267,7 @@ class LabEquipmentAgent(BaseAgent):
                 terminal_value="__blocked__",
                 failure_code="EQUIPMENT_SKILL_FLOW_UNBOUND",
             )
-            self._write_skill_flow_execution(profile_id, execution)
+            persist_execution(profile_id, execution)
             overlay = execution.get("workflow_agentic_task", {})
             overlay_report = (
                 {
@@ -3321,7 +3336,7 @@ class LabEquipmentAgent(BaseAgent):
                 terminal_value="__blocked__",
                 failure_code=failure_code,
             )
-            self._write_skill_flow_execution(profile_id, execution)
+            persist_execution(profile_id, execution)
             overlay = execution.get("workflow_agentic_task", {})
             return AgentResult(
                 success=False,
@@ -3588,7 +3603,7 @@ class LabEquipmentAgent(BaseAgent):
             terminal_value=terminal,
             failure_code="EQUIPMENT_AGENTIC_RUN_CANCELLED" if cancelled else "",
         )
-        self._write_skill_flow_execution(profile_id, execution)
+        persist_execution(profile_id, execution)
         success = terminal == "__complete__"
         data = dict(last_result.data) if last_result is not None else {}
         data["protocol_note"] = "agentic UTM equipment skill flow"
@@ -3658,7 +3673,7 @@ class LabEquipmentAgent(BaseAgent):
                     "failure_code": failure_code,
                     "message": "UTM cycle evidence is incomplete; no downstream handoff was emitted.",
                 }
-                self._write_skill_flow_execution(profile_id, execution)
+                persist_execution(profile_id, execution)
         if not success:
             data["verified"] = False
             if isinstance(data.get("equipment_result"), dict):
@@ -4281,6 +4296,7 @@ class LabEquipmentAgent(BaseAgent):
                 tool_results=tool_results,
                 program_catalog=set(program_ids),
                 source_stage_context=source_stage_context,
+                artifact_root=getattr(getattr(ctx, "paths", None), "artifact_root", None),
             )
         else:
             result_package = self._build_program_result_package(
@@ -4456,7 +4472,7 @@ class LabEquipmentAgent(BaseAgent):
             program_id=requested_program if requested_program_allowed else profile.default_program_id,
         )
         active_contract = execution_contract
-        runtime_service = self._runtime_service()
+        runtime_service = self._runtime_service(ctx)
         runtime_execution = runtime_service.begin(
             sequence_id=f"{state.run_id}-equipment-{int(state.loop_count):04d}",
             run_id=state.run_id,
@@ -4656,6 +4672,7 @@ class LabEquipmentAgent(BaseAgent):
                 tool_results=tool_results,
                 program_catalog=program_catalog,
                 source_stage_context=source_stage_context,
+                artifact_root=getattr(getattr(ctx, "paths", None), "artifact_root", None),
             )
             runtime_execution = runtime_service.transition(
                 runtime_execution["execution_id"],
@@ -4788,6 +4805,7 @@ class LabEquipmentAgent(BaseAgent):
                 tool_results=tool_results,
                 program_catalog=program_catalog,
                 source_stage_context=source_stage_context,
+                artifact_root=getattr(getattr(ctx, "paths", None), "artifact_root", None),
             )
             package["equipment_report"]["completion_policy"] = dict(active_contract.completion_policy)
             package["data_ready"] = package["utm_data_ready"]

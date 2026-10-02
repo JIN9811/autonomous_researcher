@@ -69,8 +69,16 @@ class VisionAgent(BaseAgent):
         return Path(__file__).resolve().parents[2]
 
     @classmethod
-    def _artifact_dir(cls, state: OrchestratorState, observation_id: str) -> Path:
-        path = cls._repo_root() / "runs" / state.run_id / "vision" / observation_id
+    def _run_root(cls, ctx: AgentContext) -> Path:
+        paths = getattr(ctx, "paths", None)
+        if paths is not None:
+            return paths.run_root
+        root = getattr(ctx, "artifact_run_root", None)
+        return Path(root) if root is not None else cls._repo_root() / "runs"
+
+    @classmethod
+    def _artifact_dir(cls, state: OrchestratorState, observation_id: str, *, run_root: Path | None = None) -> Path:
+        path = (run_root if run_root is not None else cls._repo_root() / "runs") / state.run_id / "vision" / observation_id
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -81,6 +89,7 @@ class VisionAgent(BaseAgent):
         state: OrchestratorState,
         observation_id: str,
         active_check: dict[str, Any],
+        run_root: Path | None = None,
     ) -> dict[str, Any]:
         captured_at_dt = datetime.now(timezone.utc)
         captured_at = captured_at_dt.isoformat()
@@ -135,12 +144,12 @@ class VisionAgent(BaseAgent):
                 "failure_code": "ACTIVE_CAM_ARTIFACT_FORMAT_UNSUPPORTED",
             }
 
-        output_dir = cls._artifact_dir(state, observation_id)
+        output_dir = cls._artifact_dir(state, observation_id, run_root=run_root)
         stamp = captured_at_dt.strftime("%Y%m%dT%H%M%S%fZ")
         target = output_dir / f"active_cam_capture_{stamp}{suffix}"
         try:
             shutil.copy2(source, target)
-            run_dir = (cls._repo_root() / "runs" / state.run_id).resolve()
+            run_dir = ((run_root if run_root is not None else cls._repo_root() / "runs") / state.run_id).resolve()
             relative = target.resolve().relative_to(run_dir).as_posix()
         except (OSError, ValueError) as exc:
             target.unlink(missing_ok=True)
@@ -167,6 +176,7 @@ class VisionAgent(BaseAgent):
         state: OrchestratorState,
         observation_id: str,
         capture: dict[str, Any],
+        run_root: Path | None = None,
     ) -> dict[str, Any]:
         captured_at_dt = datetime.now(timezone.utc)
         captured_at = captured_at_dt.isoformat()
@@ -229,12 +239,12 @@ class VisionAgent(BaseAgent):
                 "failure_code": "UTM_COMPLETION_ARTIFACT_FORMAT_UNSUPPORTED",
             }
 
-        output_dir = cls._artifact_dir(state, observation_id)
+        output_dir = cls._artifact_dir(state, observation_id, run_root=run_root)
         stamp = captured_at_dt.strftime("%Y%m%dT%H%M%S%fZ")
         target = output_dir / f"utm_completion_{stamp}{suffix}"
         try:
             shutil.copy2(source, target)
-            run_dir = (cls._repo_root() / "runs" / state.run_id).resolve()
+            run_dir = ((run_root if run_root is not None else cls._repo_root() / "runs") / state.run_id).resolve()
             relative = target.resolve().relative_to(run_dir).as_posix()
         except (OSError, ValueError) as exc:
             target.unlink(missing_ok=True)
@@ -690,6 +700,7 @@ class VisionAgent(BaseAgent):
                 capture=capture,
                 result=enriched[result_key],
                 active_camera_key=active_camera_key,
+                run_root=self._run_root(ctx),
             )
             return enriched
         enriched = dict(capture)
@@ -701,6 +712,7 @@ class VisionAgent(BaseAgent):
             capture=capture,
             result=result,
             active_camera_key=active_camera_key,
+            run_root=self._run_root(ctx),
         )
         enriched["active_cam_ejection_check"] = active_check
         enriched["camera_returned_to_vla"] = bool(active_check.get("camera_returned_to_vla", enriched.get("camera_returned_to_vla", True)))
@@ -1045,6 +1057,7 @@ class VisionAgent(BaseAgent):
         capture: dict[str, Any],
         result: dict[str, Any],
         active_camera_key: str,
+        run_root: Path | None = None,
     ) -> dict[str, Any]:
         specimen = self._specimen_result(state)
         driver_result = result.get("active_robot_cam_result") if isinstance(result.get("active_robot_cam_result"), dict) else {}
@@ -1070,7 +1083,7 @@ class VisionAgent(BaseAgent):
             try:
                 detection = inspect_specimen_presence_path(
                     capture_path,
-                    output_dir=self._artifact_dir(state, observation_id) / "active_cam_detection",
+                    output_dir=self._artifact_dir(state, observation_id, run_root=run_root) / "active_cam_detection",
                     specimen_id=str(specimen.get("specimen_id") or "specimen"),
                     frame_id=f"active-cam-{state.loop_count}",
                     roi_normalized=self.ACTIVE_CAM_WORKSPACE_ROI,
@@ -1622,8 +1635,9 @@ class VisionAgent(BaseAgent):
         detections: list[dict[str, Any]],
         events: list[dict[str, Any]],
         signals: list[dict[str, Any]],
+        run_root: Path | None = None,
     ) -> dict[str, Any]:
-        output_dir = self._artifact_dir(state, observation_id)
+        output_dir = self._artifact_dir(state, observation_id, run_root=run_root)
         timestamp = self.now_iso()
         active_check = capture.get("active_cam_ejection_check") if isinstance(capture.get("active_cam_ejection_check"), dict) else {}
         active_run_artifact = active_check.get("run_artifact") if isinstance(active_check.get("run_artifact"), dict) else {}
@@ -2065,6 +2079,7 @@ class VisionAgent(BaseAgent):
         capture: dict[str, Any],
         *,
         rollout_status: dict[str, Any] | None = None,
+        run_root: Path | None = None,
     ) -> dict[str, Any]:
         specimen = self._specimen_result(state)
         fabrication_report = self._fabrication_report(state, specimen)
@@ -2087,6 +2102,7 @@ class VisionAgent(BaseAgent):
                 state=state,
                 observation_id=observation_id,
                 active_check=active_cam_payload,
+                run_root=run_root,
             )
             active_cam_payload = dict(active_cam_payload)
             if active_cam_artifact_update.get("status") == "stored":
@@ -2153,6 +2169,7 @@ class VisionAgent(BaseAgent):
                 state=state,
                 observation_id=observation_id,
                 capture=capture,
+                run_root=run_root,
             )
             capture["utm_completion_run_artifact"] = dict(utm_completion_artifact_update)
             if utm_completion_artifact_update.get("status") == "stored":
@@ -2290,6 +2307,7 @@ class VisionAgent(BaseAgent):
             detections=detections,
             events=events,
             signals=signals,
+            run_root=run_root,
         )
         evidence_refs = self._evidence_refs(artifacts)
         decisions = self._decisions(task=task, ready=ready, capture_ok=capture_ok, anomaly=anomaly, signal_count=len(signals))
@@ -2783,7 +2801,8 @@ class VisionAgent(BaseAgent):
     async def _verify_clearance(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         from utils.utm_clear_cycle import run_clear_vision
 
-        return await run_clear_vision(state, ctx, artifact_dir=self._artifact_dir(state, f"clear-{state.loop_count}"))
+        return await run_clear_vision(state, ctx,
+            artifact_dir=self._artifact_dir(state, f"clear-{state.loop_count}", run_root=self._run_root(ctx)))
 
     async def _observe_and_review(self, state: OrchestratorState, ctx: AgentContext, prepared: dict[str, Any]) -> AgentResult:
         """Composite capture, deterministic interlocks, stop and bounded model review."""
@@ -2854,7 +2873,7 @@ class VisionAgent(BaseAgent):
                     "message": "UTM specimen-presence capture tool is not registered.",
                 }
             else:
-                output_dir = self._artifact_dir(state, frame_id) / "utm_completion"
+                output_dir = self._artifact_dir(state, frame_id, run_root=self._run_root(ctx)) / "utm_completion"
                 physical_camera_runtime = self._camera_runtime_mode(state) == "live"
                 virtual_test_bridge = bool(
                     self._camera_runtime_mode(state) == "test"
@@ -2975,6 +2994,7 @@ class VisionAgent(BaseAgent):
             state,
             dict(response),
             rollout_status=rollout_status,
+            run_root=self._run_root(ctx),
         )
         observation = payload["observation"]
         monitoring_ok = bool(response.get("ok")) and not bool(observation.get("anomaly"))
@@ -3108,7 +3128,8 @@ class VisionAgent(BaseAgent):
             if not decision_allows_existing_gate(visual_decision):
                 response["anomaly"] = True
                 response["completion_blocking_reason"] = visual_decision.get("failure_code", "VISION_REVIEW_REQUIRED")
-                payload = self._transfer_observation(state, dict(response), rollout_status=rollout_status)
+                payload = self._transfer_observation(state, dict(response), rollout_status=rollout_status,
+                                                     run_root=self._run_root(ctx))
                 observation = payload["observation"]
                 completion = observation["vision_manipulation_completion"]
                 completion.update(rollout_stopped=True, rollout_stop_status="STOPPED")

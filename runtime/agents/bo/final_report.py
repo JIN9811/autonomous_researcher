@@ -11,7 +11,7 @@ from learning.bo_parameter_space import BOParameterSpace
 from learning.botorch_backend import BoTorchBackendError, propose_next
 
 
-async def finalize_bo(agent, state, settings, objective, priors, integrity, knowledge):
+async def finalize_bo(agent, state, settings, objective, priors, integrity, knowledge, *, run_root=None):
     space = BOParameterSpace.from_mapping(settings["parameter_space"])
     observations = _botorch_observations({"prior_evaluations": priors}, space)
     if not observations:
@@ -47,11 +47,12 @@ async def finalize_bo(agent, state, settings, objective, priors, integrity, know
     decision = {"status": "completed", "decision": "final_report",
                 "reason": "Approved experiment count reached; no further candidate requested."}
     artifacts = agent._write_artifacts(state, reasoning=decision, decision=decision,
-                                      candidate_ranking=[], next_candidate={})
+                                      candidate_ranking=[], next_candidate={}, run_root=run_root)
     if visualization:
         from reporting.bo_visualization_artifacts import write_bo_visualization_artifacts
         plots = await asyncio.to_thread(write_bo_visualization_artifacts,
-                                       visualization, agent._artifact_dir(state))
+                                       visualization, (agent._artifact_dir(state, run_root=run_root)
+                                                       if run_root is not None else agent._artifact_dir(state)))
         artifacts.update({item["name"]: item["path"] for item in plots})
     report = {"ok": True, "tool": "bo.agent", "status": "completed", "run_id": state.run_id,
         "experiment_id": state.experiment_id, "optimization_phase": "final_report",

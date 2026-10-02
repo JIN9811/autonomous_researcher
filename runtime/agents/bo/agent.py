@@ -1462,8 +1462,8 @@ class BOAgent(BaseAgent):
         return [dict(item) for item in curve if isinstance(item, dict)]
 
     @staticmethod
-    def _artifact_dir(state: OrchestratorState) -> Path:
-        path = Path(__file__).resolve().parents[2] / "runs" / str(state.run_id or "run") / "bo"
+    def _artifact_dir(state: OrchestratorState, *, run_root: Path | None = None) -> Path:
+        path = (run_root if run_root is not None else Path(__file__).resolve().parents[2] / "runs") / str(state.run_id or "run") / "bo"
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -1481,8 +1481,9 @@ class BOAgent(BaseAgent):
         decision: dict[str, Any],
         candidate_ranking: list[dict[str, Any]],
         next_candidate: dict[str, Any],
+        run_root: Path | None = None,
     ) -> dict[str, str]:
-        base = self._artifact_dir(state)
+        base = self._artifact_dir(state, run_root=run_root) if run_root is not None else self._artifact_dir(state)
         return {
             "bo_reasoning_report": self._write_json(base / "bo_reasoning_report.json", reasoning),
             "bo_decision": self._write_json(base / "bo_decision.json", decision),
@@ -1497,6 +1498,9 @@ class BOAgent(BaseAgent):
         settings: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Run BO Agent with GUI/API-supplied settings."""
+        paths = getattr(ctx, "paths", None)
+        selected_root = paths.run_root if paths is not None else getattr(ctx, "artifact_run_root", None)
+        run_root = Path(selected_root) if selected_root is not None else None
         contract = state.run_metadata.get("orchestrator_design_contract") or {}
         if contract.get("parameter_space") and contract.get("manufacturing_constraints"):
             settings = {**(settings or {}), "parameter_space": deepcopy(contract["parameter_space"])}
@@ -1629,7 +1633,7 @@ class BOAgent(BaseAgent):
                 and state.loop_count + 1 == total_cycles):
             from agents.bo.final_report import finalize_bo
             return await finalize_bo(self, state, normalized, objective, compatible_observations,
-                                     observation_integrity, knowledge_context)
+                                     observation_integrity, knowledge_context, run_root=run_root)
         failure_model = self._failure_model(priors)
         benchmark: dict[str, Any] = {}
 
@@ -1925,6 +1929,7 @@ class BOAgent(BaseAgent):
             decision=decision,
             candidate_ranking=candidate_ranking,
             next_candidate=next_design_request,
+            run_root=run_root,
         )
         strategy_payload = (
             benchmark.get("strategies", {}).get(recommendation.get("source_strategy"), {})

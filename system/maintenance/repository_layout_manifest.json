@@ -47341,6 +47341,60 @@
   "task11_phase": {
     "accepted_checkpoint": "982b15adb1dd3bcdf94a4c26eda71a0cf3158fa4",
     "current_source_identities": {
+      "runtime/agents/bo/agent.py": {
+        "mode": "100644",
+        "git_blob": "234908ae545c3ea6ffb3a7a0e5e5ced8fba2b0ea",
+        "sha256": "fb3b2c666f177c7077bbaf4b7b6627185306578f42f44d601affee23e86214d4",
+        "size": 108464
+      },
+      "runtime/agents/bo/final_report.py": {
+        "mode": "100644",
+        "git_blob": "8fb84331b37573fb6cb5d8dc00f0eb32d11735f7",
+        "sha256": "4fdb9489b04a2727d66403c688af85c1ec79b2fc52b2fe0a703cd13c55945a97",
+        "size": 4752
+      },
+      "runtime/agents/equipment/agent.py": {
+        "mode": "100644",
+        "git_blob": "a092a8d96390115ec3133448fe0034842d0106b4",
+        "sha256": "cce9eabc977f9589f1ad3b9f1365e800ea35ac39df40d528d0b320a0140fc838",
+        "size": 255450
+      },
+      "runtime/agents/equipment/workflow.py": {
+        "mode": "100644",
+        "git_blob": "cb82e4bbb1fd9f2b28460f0019817b0ede43e8f9",
+        "sha256": "9f931f5e33e4e15e2eb9945dde6d7159a09c4045933e73a13e942df6dbcecc0f",
+        "size": 33149
+      },
+      "runtime/agents/specimen/agent.py": {
+        "mode": "100644",
+        "git_blob": "b994d31eaaaab046097fa3a2c98b03d94891e95b",
+        "sha256": "181b7465151a41dd4949ddc8fc8d782b631dbb91feaa4c0e9960657f28fd6bb2",
+        "size": 92007
+      },
+      "runtime/agents/vision/agent.py": {
+        "mode": "100644",
+        "git_blob": "7e564fe0187ae4f44013f6305df40b8975ccb7ee",
+        "sha256": "7ab2768082ab08d20b0ac96f2ceb52280f8a2f56d5256d398aa71a18ccec0e7d",
+        "size": 167001
+      },
+      "runtime/tests/unit/test_bo_final_report.py": {
+        "mode": "100644",
+        "git_blob": "bca11cbbcf0a96ee75b64ae0cad404858546cd5f",
+        "sha256": "00fc8ca605b2f6d7519d972ef9795d801c989a97725705edcf70b87bf9d5285d",
+        "size": 5304
+      },
+      "runtime/tests/unit/test_runtime_path_consumers.py": {
+        "mode": "100644",
+        "git_blob": "61a0aaea769ced440e8efa7eef3e3abcf6fe62c5",
+        "sha256": "8e85a13417915d80025fde4489f3e8bc003e0be17c464f21364a20d7563f23a8",
+        "size": 22417
+      },
+      "runtime/tests/unit/test_vision_agent.py": {
+        "mode": "100644",
+        "git_blob": "c37190c4ceb1ec18c55989ceccd23898cca900f4",
+        "sha256": "f4578ae626ccae0ae570e2f88307b57da6703e8aab3cf2110fb8fb7ee0b74656",
+        "size": 84896
+      },
       "runtime/tests/integration/test_all_agent_loop_archives.py": {
         "mode": "100644",
         "git_blob": "107badd685b16da86f460e706da62c7e4f799298",

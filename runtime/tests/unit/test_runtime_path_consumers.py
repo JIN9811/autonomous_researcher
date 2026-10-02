@@ -34,6 +34,77 @@ def test_positional_dependency_contract_is_preserved():
     assert fields(AgentContext)[-1].name == "paths"
 
 
+def test_specimen_preparation_yields_selected_run_directory_without_geometry(disposable_paths, tmp_path):
+    from types import SimpleNamespace
+    from agents.specimen.agent import SpecimenMakingAgent
+    from orchestrator.state import OrchestratorState, Mode, Stage
+    from tests.unit.test_specimen_agent import _valid_spec
+    agent = SpecimenMakingAgent()
+    for root in (tmp_path / 'first-volume/runs', tmp_path / 'unrelated-second/history'):
+        state = OrchestratorState(run_id='same-run', experiment_id='fixture', mode=Mode.TEST,
+            stage=Stage.SPECIMEN, current_experiment_spec=_valid_spec())
+        steps = agent._prepare_fabrication_steps(state, SimpleNamespace(paths=replace(disposable_paths, run_root=root)))
+        next(steps)  # Prepare the existing tool payload; do not execute geometry or equipment.
+        specimen = str(state.current_experiment_spec.get('specimen_id') or
+                       'specimen-' + state.current_experiment_spec.get('candidate_id', 'cand-unknown'))
+        assert (root / 'same-run/specimens' / specimen).is_dir()
+        steps.close()
+
+
+def test_bo_json_artifacts_use_independent_selected_run_roots(tmp_path):
+    from agents.bo.agent import BOAgent
+    from orchestrator.state import OrchestratorState, Mode, Stage
+    state = OrchestratorState(run_id='same-run', experiment_id='fixture', mode=Mode.TEST, stage=Stage.BO)
+    agent = BOAgent()
+    for root in (tmp_path / 'first-volume/runs', tmp_path / 'unrelated-second/history'):
+        artifacts = agent._write_artifacts(state, reasoning={'fixture': True}, decision={},
+            candidate_ranking=[], next_candidate={}, run_root=root)
+        assert len(artifacts) == 4
+        assert all(Path(path).is_relative_to(root / 'same-run/bo') and Path(path).is_file()
+                   for path in artifacts.values())
+
+
+def test_equipment_projection_and_test_csv_use_selected_private_roots(disposable_paths, tmp_path, monkeypatch):
+    from agents.equipment.agent import LabEquipmentAgent
+    from orchestrator.state import OrchestratorState, Mode, Stage
+    from types import SimpleNamespace
+    monkeypatch.chdir(tmp_path)
+    lookalike = tmp_path / 'unselected-runtime/memory/equipment_runtime'
+    monkeypatch.setattr(LabEquipmentAgent, '_RUNTIME_ROOT', lookalike)
+    state = OrchestratorState(run_id='same-run', experiment_id='fixture', mode=Mode.TEST, stage=Stage.EQUIPMENT)
+    for root in (tmp_path / 'first-volume', tmp_path / 'unrelated-second'):
+        paths = replace(disposable_paths, memory_root=root / 'private-memory', artifact_root=root / 'private-exports')
+        runtime_root = LabEquipmentAgent._runtime_root(SimpleNamespace(paths=paths))
+        assert runtime_root == paths.memory_root / 'equipment_runtime'
+        LabEquipmentAgent._write_skill_flow_execution('fixture', {'run_id': 'same-run'}, runtime_root=runtime_root)
+        projection = runtime_root / 'equipment_skill_flow_latest/fixture.json'
+        assert json.loads(projection.read_text()) == {'run_id': 'same-run'}
+        artifact = LabEquipmentAgent()._write_test_utm_csv(state=state, specimen_id='fixture',
+            program_id='utm_compression_start_v1', artifact_root=paths.artifact_root)
+        assert Path(artifact['path']).is_relative_to(paths.artifact_root / 'equipment/same-run/utm')
+        assert Path(artifact['path']).read_text().startswith('time_s,displacement_mm,force_N\n')
+    assert not lookalike.exists() and not (tmp_path / 'artifacts').exists()
+
+
+@pytest.mark.asyncio
+async def test_equipment_actual_workflow_writes_only_each_context_memory(disposable_paths, tmp_path, monkeypatch):
+    from tests.unit.test_equipment_workflow_decision import setup_flow, Model
+    agent, original_state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    for root in (tmp_path / 'selected-memory', tmp_path / 'unrelated-store'):
+        ctx = Model(tools)
+        ctx.paths = replace(disposable_paths, memory_root=root)
+        state = original_state.model_copy(deep=True)
+        result = await agent.run(state, ctx)
+        assert result.success, result
+        decisions = root / 'equipment_runtime/workflow_decisions'
+        assert (decisions / 'sequence_index.json').is_file()
+        assert list((decisions / 'executions').glob('*/state.json'))
+        latest = root / 'equipment_runtime/equipment_skill_flow_latest/windows_desktop_v1.json'
+        assert json.loads(latest.read_text())['status'] == 'completed'
+    assert executed == ['prepare', 'measure', 'export'] * 2
+    assert not (tmp_path / 'runtime').exists()
+
+
 @pytest.mark.parametrize("legacy", [None, "operator-runs", "/tmp/absolute-operator-runs"])
 def test_bootstrap_shares_effective_paths_and_preserves_legacy_settings(disposable_paths, monkeypatch, legacy):
     from app import bootstrap

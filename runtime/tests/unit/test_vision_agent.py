@@ -46,6 +46,69 @@ class _NoCaptureCtxStub(_CtxStub):
         raise AssertionError("Vision preflight must not invoke perception or LLM execution")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('binding', ['paths', 'artifact_run_root'])
+async def test_vision_evidence_keeps_interleaved_context_roots_separate(tmp_path, monkeypatch, binding):
+    import asyncio
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    lookalike = tmp_path / 'unselected-runtime'
+    monkeypatch.setattr(VisionAgent, '_repo_root', staticmethod(lambda: lookalike))
+    agent = VisionAgent()
+    original_observe = agent._observe_and_review
+    async def interleave(*args):
+        await asyncio.sleep(0)
+        return await original_observe(*args)
+    monkeypatch.setattr(agent, '_observe_and_review', interleave)
+    class YieldingContext(_CtxStub):
+        async def complete(self, *args, **kwargs):
+            await asyncio.sleep(0)
+            return await super().complete(*args, **kwargs)
+    roots = [tmp_path / 'volume-a/runs', tmp_path / 'unrelated-volume-b/history']
+    async def observe(root):
+        tools = ToolRegistry()
+        tools.register('camera.capture', lambda payload: {'ok': True, 'frame_id': 'same-frame',
+            'confidence': 0.9, 'source': 'synthetic-camera'})
+        ctx = YieldingContext(tools)
+        if binding == 'paths':
+            ctx.paths = replace(current_paths(), run_root=root)
+        else:
+            ctx.artifact_run_root = str(root)
+        result = await agent.run(_state(), ctx)
+        assert (root / 'run-vision/vision/same-frame/detection.json').is_file(), result
+        return result
+    await asyncio.gather(*(observe(root) for root in roots))
+    assert not (lookalike / 'runs').exists()
+    assert len(list(roots[0].rglob('detection.json'))) == len(list(roots[1].rglob('detection.json'))) == 1
+
+
+def test_vision_direct_legacy_artifact_helper_keeps_explicit_legacy_contract(tmp_path, monkeypatch):
+    monkeypatch.setattr(VisionAgent, '_repo_root', staticmethod(lambda: tmp_path))
+    assert VisionAgent._artifact_dir(_state(), 'legacy') == tmp_path / 'runs/run-vision/vision/legacy'
+
+
+@pytest.mark.parametrize('kind', ['active_cam', 'utm'])
+def test_vision_capture_copy_and_artifact_url_use_selected_run_root(tmp_path, monkeypatch, kind):
+    monkeypatch.setattr(VisionAgent, '_repo_root', staticmethod(lambda: tmp_path / 'unselected-runtime'))
+    source = tmp_path / 'synthetic.png'
+    source.write_bytes(b'synthetic evidence bytes')
+    state = _state()
+    for root in (tmp_path / 'selected-one/history', tmp_path / 'independent-two/runs'):
+        if kind == 'active_cam':
+            result = VisionAgent._persist_active_cam_run_artifact(state=state, observation_id='same-observation',
+                active_check={'status': 'confirmed', 'capture_path': str(source)}, run_root=root)
+        else:
+            result = VisionAgent._persist_utm_completion_run_artifact(state=state, observation_id='same-observation',
+                capture={'ok': True, 'detected': True, 'raw_frame_path': str(source)}, run_root=root)
+        assert result['status'] == 'stored'
+        target = Path(result['path'])
+        assert target.is_relative_to(root / state.run_id)
+        assert target.read_bytes() == source.read_bytes()
+        assert result['relative_path'] == str(target.relative_to(root / state.run_id))
+        assert result['url'] == '/api/runs/run-vision/artifact-file/' + result['relative_path']
+    assert not (tmp_path / 'unselected-runtime/runs').exists()
+
+
 def _state() -> OrchestratorState:
     return OrchestratorState(
         run_id="run-vision",

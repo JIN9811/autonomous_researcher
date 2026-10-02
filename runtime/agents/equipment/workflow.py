@@ -317,7 +317,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
     description = _describe(agent, state, flow)
     from mcp_tools.source_tools import source_context
     scope_digest = _digest([snapshot, description])
-    service = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions")
+    service = EquipmentRuntimeService(agent._runtime_root(ctx) / "workflow_decisions")
     specimen = state.current_experiment_spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id") or "specimen-unresolved"
     sequence_id = f"stacked-loop-{state.loop_count}"
     sequence_id += explicit_restart_suffix(state, service)

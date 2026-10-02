@@ -69,9 +69,9 @@ class SpecimenMakingAgent(BaseAgent):
         return out
 
     @staticmethod
-    def _artifact_dir(state: OrchestratorState, specimen_id: str) -> Path:
+    def _artifact_dir(state: OrchestratorState, specimen_id: str, *, run_root: Path | None = None) -> Path:
         repo_root = Path(__file__).resolve().parents[2]
-        path = repo_root / "runs" / state.run_id / "specimens" / specimen_id
+        path = (run_root if run_root is not None else repo_root / "runs") / state.run_id / "specimens" / specimen_id
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -1198,7 +1198,10 @@ class SpecimenMakingAgent(BaseAgent):
         state.current_experiment_spec = spec
 
         constraints = spec.get("constraints") if isinstance(spec.get("constraints"), dict) else {}
-        output_dir = self._artifact_dir(state, specimen_id)
+        paths = getattr(ctx, "paths", None)
+        run_root = paths.run_root if paths is not None else getattr(ctx, "artifact_run_root", None)
+        output_dir = (self._artifact_dir(state, specimen_id, run_root=Path(run_root)) if run_root is not None
+                      else self._artifact_dir(state, specimen_id))
         specimen_size = self._vector3(spec.get("specimen_size_mm"), [30.0, 30.0, 30.0])
         wall = float(spec.get("wall_thickness_mm", 1.2))
         cell = float(spec.get("cell_size_mm", 7.5))

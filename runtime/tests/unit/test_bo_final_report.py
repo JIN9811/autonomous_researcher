@@ -32,9 +32,11 @@ def test_final_fit_does_not_optimize_or_fabricate_candidate(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_final_agent_updates_posterior_and_artifacts_without_design_handoff(monkeypatch, tmp_path):
+    from dataclasses import replace
+    from pathlib import Path
+    from utils.runtime_paths import current_paths
     import agents.bo.agent as module
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(BOAgent, "_artifact_dir", staticmethod(lambda state: tmp_path / "bo"))
     monkeypatch.setattr(module, "run_bo_decision", forbid)
     state = OrchestratorState(run_id="final-run", experiment_id="final-exp", mode=Mode.TEST,
                               stage=Stage.BO, loop_count=14)
@@ -44,7 +46,9 @@ async def test_final_agent_updates_posterior_and_artifacts_without_design_handof
     state.run_metadata["bo_recommended_constraints"] = {"cell_size_mm": 5.}
     _add_completed_lhs_observations(state, count=15)
     before = deepcopy(state.experiment_evaluations)
-    result = await BOAgent().run_with_settings(state, _CtxStub(), {
+    ctx = _CtxStub()
+    ctx.paths = replace(current_paths(), run_root=tmp_path / 'selected-history')
+    result = await BOAgent().run_with_settings(state, ctx, {
         "parameter_space": {"cell_size_mm": [5., 10.], "wall_thickness_mm": [.6, 1.6]}})
     assert result.success, result
     report = result.data["bo_result"]
@@ -58,6 +62,9 @@ async def test_final_agent_updates_posterior_and_artifacts_without_design_handof
     assert report["artifacts"]
     assert any(name.endswith("_2d.png") for name in report["artifacts"])
     assert any(name.endswith("_3d.png") for name in report["artifacts"])
+    assert all(Path(path).is_relative_to(ctx.paths.run_root / state.run_id / 'bo')
+               for path in report['artifacts'].values())
+    assert not (tmp_path / 'bo').exists()
     assert state.experiment_evaluations == before
 
 
