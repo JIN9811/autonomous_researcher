@@ -47355,15 +47355,15 @@
       },
       "runtime/app/run_recovery.py": {
         "mode": "100644",
-        "git_blob": "5d027d5b8243d4db87849d1ac6f592578be0752b",
-        "sha256": "7380576546e8a535489b4dafe1102da7782743f617e6afd7601d16cee7b0e62b",
-        "size": 47798
+        "git_blob": "2eaa7b3e29c27203a4fd72851ecee8d3a41aae1e",
+        "sha256": "358c38af43052200d1259d22caf3c18486b02bbd7fd6a5ffdd94f90d0bf940c7",
+        "size": 47869
       },
       "runtime/tests/unit/test_equipment_workflow_decision.py": {
         "mode": "100644",
-        "git_blob": "b434e027ed6a983ec6649bef0a88ad174796e204",
-        "sha256": "46bd4cc506cd7142a13d0c17155b6c460ad2dd651152caf5f0b96f3db4ca381f",
-        "size": 39495
+        "git_blob": "0b0e4144f33d4687b678e9b95968e46a8d901bce",
+        "sha256": "eb6469f317c83812df0a8f0e13aa14fcce8107c4a47392efcb2437a41669d8f6",
+        "size": 42937
       },
       "runtime/agents/bo/agent.py": {
         "mode": "100644",
@@ -47385,9 +47385,9 @@
       },
       "runtime/agents/equipment/workflow.py": {
         "mode": "100644",
-        "git_blob": "cb82e4bbb1fd9f2b28460f0019817b0ede43e8f9",
-        "sha256": "9f931f5e33e4e15e2eb9945dde6d7159a09c4045933e73a13e942df6dbcecc0f",
-        "size": 33149
+        "git_blob": "42960b7a6ae996a7e3d608d297dea4ad23ccd136",
+        "sha256": "dae55f765fa10668466a6ea9471d59ae378e5b50d9e3bef1d4be01a8cd8bd807",
+        "size": 33395
       },
       "runtime/agents/specimen/agent.py": {
         "mode": "100644",
@@ -47550,6 +47550,18 @@
         "git_blob": "9566a8677d9802100939bac5dae23635a5495411",
         "sha256": "81790dd01fd8d7be65d91df144ba80419fcbdc9b4a411f3f99410646a9fd9518",
         "size": 9889
+      },
+      "runtime/app/equipment_tail_recovery.py": {
+        "mode": "100644",
+        "git_blob": "e32e3ff4ce039aec0c840355ef9a2358d889491e",
+        "sha256": "c46ebc30ad4ac7b507b041bc821a98cb0ce797883e05b1f615b155b78ab9cc58",
+        "size": 16994
+      },
+      "runtime/tests/unit/test_equipment_tail_recovery.py": {
+        "mode": "100644",
+        "git_blob": "6fb83d01a00054b9868a3075fd7976b838e5f848",
+        "sha256": "cc99ff91a53e16ea1b3331ba4ab5ced93fe8ba7c5d4245be94b7e548931998da",
+        "size": 8802
       }
     },
     "base_revision": "a8486a3dd893cb5cd20804c9fe5ba5a4ebe3d4a3",

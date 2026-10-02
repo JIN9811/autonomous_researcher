@@ -68,7 +68,7 @@ def read_request(root, run_id, *, reference_roots=None, relocation_map=None):
     return request
 
 
-def validate(state, request, flow, *, reference_roots=None, relocation_map=None):
+def validate(state, request, flow, *, reference_roots=None, relocation_map=None, ctx=None):
     from agents.equipment.agent import LabEquipmentAgent
     from agents.equipment.workflow import _describe
     source_path = historical_reference(request['source_path'], schema=request.get('schema'), field='source_path',
@@ -77,7 +77,7 @@ def validate(state, request, flow, *, reference_roots=None, relocation_map=None)
     loop = boundary(state, source)
     if loop != request['loop_id']:
         raise ValueError('Tail cycle changed')
-    if _describe(LabEquipmentAgent(), state, flow) != request['description']:
+    if _describe(LabEquipmentAgent(), state, flow, ctx=ctx) != request['description']:
         raise ValueError('Equipment Skill Flow or deployed programs changed')
     if state.current_experiment_spec != request['experiment_spec']:
         raise ValueError('Experiment settings changed')
@@ -90,7 +90,9 @@ def unstarted_tail(controller, request):
     if marker.get('status') != 'returned' or (marker.get('result') or {}).get('decision') != 'stop':
         return False
     sequence = f"stacked-loop-{request['loop_id']}-tail-{request['source_execution_id']}"
-    directory = ROOT / 'memory/equipment_runtime/workflow_decisions/executions'
+    from agents.equipment.agent import LabEquipmentAgent
+    ctx = getattr(getattr(controller, '_deps', None), 'agent_context', None)
+    directory = LabEquipmentAgent._runtime_root(ctx) / 'workflow_decisions/executions'
     for path in directory.glob('*/state.json'):
         identity = json.loads(path.read_text()).get('identity') or {}
         if identity.get('run_id') == request['run_id'] and identity.get('sequence_id') == sequence:
@@ -104,7 +106,7 @@ def reconcile_printer_observation(state, health):
     return reconcile(state, health)
 
 
-def prepare_request(snapshot, root, execution_id):
+def prepare_request(snapshot, root, execution_id, *, ctx=None):
     """Offline preparation only; immutable evidence is pinned before Restore."""
     from orchestrator.state import OrchestratorState
     from agents.equipment.agent import LabEquipmentAgent
@@ -114,8 +116,9 @@ def prepare_request(snapshot, root, execution_id):
     state = OrchestratorState.model_validate(snapshot['state'])
     if snapshot.get('is_running') or state.stage.value not in ('complete', 'error'):
         raise ValueError('Tail must be inactive')
-    source_path = ROOT / 'memory/equipment_runtime/workflow_decisions/executions' / execution_id / 'state.json'
-    if source_path.parent.parent != ROOT / 'memory/equipment_runtime/workflow_decisions/executions':
+    execution_root = LabEquipmentAgent._runtime_root(ctx) / 'workflow_decisions/executions'
+    source_path = execution_root / execution_id / 'state.json'
+    if source_path.parent.parent != execution_root:
         raise ValueError('Invalid execution ID')
     source = json.loads(source_path.read_text())
     loop = boundary(state, source)
@@ -136,7 +139,8 @@ def prepare_request(snapshot, root, execution_id):
     for index, (block, skill, version) in enumerate(ADOPT, 3):
         if flow['blocks'][index]['id'] != block or flow['blocks'][index]['skill'] != {'skill_id': skill, 'skill_version': version}:
             raise ValueError('Adoption block order changed')
-        manifest = ROOT / 'memory/equipment_skills' / skill / version / 'manifest.json'
+        manifest = LabEquipmentAgent._skill_registry_root(ctx,
+            explicit=state.current_experiment_spec.get('equipment_skill_registry_root')) / skill / version / 'manifest.json'
         receipt = json.loads(manifest.read_text())['last_test']
         if (receipt.get('ok') is not True or receipt.get('runtime_mode') != 'live'
                 or receipt.get('tested_at', '') <= source['updated_at']
@@ -190,7 +194,7 @@ def prepare_request(snapshot, root, execution_id):
         'run_id': state.run_id, 'loop_id': loop, 'source_execution_id': execution_id,
         'source_path': str(source_path), 'evidence_hashes': hashes, 'checkpoint': checkpoint,
         'experiment_spec': deepcopy(state.current_experiment_spec),
-        'description': _describe(LabEquipmentAgent(), state, flow), 'one_cycle_only': True}
+        'description': _describe(LabEquipmentAgent(), state, flow, ctx=ctx), 'one_cycle_only': True}
     encoded = json.dumps(request, ensure_ascii=False)
     path = directory / 'equipment_tail_request.json'
     with path.open('x') as stream:
@@ -205,7 +209,8 @@ def restore(controller, run_id, *, reference_roots=None, relocation_map=None):
     state = controller._state
     if state.run_id != run_id or not state.is_paused or controller._planning_request_lock.locked():
         raise ValueError('Restore requires this paused inactive run')
-    validate(state, request, request['description']['flow'], **context)
+    ctx = getattr(controller._deps, 'agent_context', None)
+    validate(state, request, request['description']['flow'], **context, **({'ctx': ctx} if ctx is not None else {}))
     retry_unstarted = unstarted_tail(controller, request)
     if (run_directory(controller._deps.run_root, run_id) / 'recovery/equipment_tail.claim').exists() and not retry_unstarted:
         raise ValueError('Equipment tail was already dispatched')
@@ -232,7 +237,8 @@ async def continue_tail(controller, first_spec, start_cycle, *, reference_roots=
     state = controller._state
     context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
     request = read_request(controller._deps.run_root, state.run_id, **context)
-    validate(state, request, request['description']['flow'], **context)
+    ctx = getattr(controller._deps, 'agent_context', None)
+    validate(state, request, request['description']['flow'], **context, **({'ctx': ctx} if ctx is not None else {}))
     if start_cycle != request['loop_id'] + 1 or first_spec != request['experiment_spec']:
         raise ValueError('Planning tail cycle/specimen changed')
     path = run_directory(controller._deps.run_root, state.run_id) / 'recovery/equipment_tail.claim'
@@ -271,4 +277,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     with urlopen('http://127.0.0.1:7860/api/state', timeout=20) as response:
         snapshot = json.load(response)
-    print(json.dumps(prepare_request(snapshot, ROOT / 'runs', args.execution_id)))
+    from types import SimpleNamespace
+    from utils.runtime_paths import current_paths, finalize_paths
+    paths = finalize_paths(current_paths())
+    print(json.dumps(prepare_request(snapshot, paths.run_root, args.execution_id,
+        ctx=SimpleNamespace(paths=paths))))

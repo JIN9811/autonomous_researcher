@@ -168,8 +168,8 @@ def _blocked(code, result=None):
     return AgentResult(success=False, summary=f"Equipment workflow blocked: {code}", data=data)
 
 
-def _describe(agent, state, flow):
-    root = state.current_experiment_spec.get("equipment_skill_registry_root") or Path(__file__).resolve().parents[2] / "memory/equipment_skills"
+def _describe(agent, state, flow, *, ctx=None):
+    root = agent._skill_registry_root(ctx, explicit=state.current_experiment_spec.get("equipment_skill_registry_root"))
     registry = EquipmentSkillRegistry(root)
     skills = []
     for block in flow.get("blocks", []):
@@ -274,10 +274,11 @@ def _digest_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def _focus_action(state, result):
+def _focus_action(state, result, *, ctx=None):
     """Only offer a focus operation already defined by the failed deployed Skill."""
     skill = result.data.get("equipment_skill_execution") or {}
-    root = state.current_experiment_spec.get("equipment_skill_registry_root") or Path(__file__).resolve().parents[2] / "memory/equipment_skills"
+    from agents.equipment.agent import LabEquipmentAgent
+    root = LabEquipmentAgent._skill_registry_root(ctx, explicit=state.current_experiment_spec.get("equipment_skill_registry_root"))
     try:
         package = EquipmentSkillRegistry(root).get(skill["skill_id"], skill["version"])
         program_id = (_last_run(result).get("payload") or {}).get("program_id")
@@ -314,7 +315,7 @@ def explicit_restart_suffix(state, service):
 
 async def run_decided_workflow(agent, state, ctx, flow):
     snapshot, frozen_flow = _scope(state), deepcopy(flow)
-    description = _describe(agent, state, flow)
+    description = _describe(agent, state, flow, ctx=ctx)
     from mcp_tools.source_tools import source_context
     scope_digest = _digest([snapshot, description])
     service = EquipmentRuntimeService(agent._runtime_root(ctx) / "workflow_decisions")
@@ -324,8 +325,10 @@ async def run_decided_workflow(agent, state, ctx, flow):
     tail_request = None
     if (state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'running':
         from app.equipment_tail_recovery import read_request, validate, ROOT
-        tail_request = read_request(ROOT / 'runs', state.run_id)
-        validate(state, tail_request, flow)
+        paths = getattr(ctx, 'paths', None)
+        run_root = paths.run_root if paths is not None else getattr(ctx, 'artifact_run_root', None) or ROOT / 'runs'
+        tail_request = read_request(run_root, state.run_id)
+        validate(state, tail_request, flow, ctx=ctx)
         sequence_id += '-tail-' + tail_request['source_execution_id']
     selection_retry = state.run_metadata.get("equipment_selection_retry") or {}
     if selection_retry:
@@ -388,7 +391,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
     result = retry_result
     attempts = 0
     def valid():
-        return not _stopped(state) and _scope(state) == snapshot and flow == frozen_flow and _describe(agent, state, flow) == description
+        return not _stopped(state) and _scope(state) == snapshot and flow == frozen_flow and _describe(agent, state, flow, ctx=ctx) == description
 
     async def decide(phase, proposals, images=None):
         refs = ["task:configured"]
@@ -467,7 +470,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
                         proposals["resume_failed_block"] = {}
                     elif attempts == 0:
                         proposals["recover_wait"] = {}
-                        if _focus_action(state, result):
+                        if _focus_action(state, result, ctx=ctx):
                             proposals["recover_focus"] = {}
                 if not observed:
                     proposals["observe_workflow"] = {}
@@ -501,7 +504,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
                         await asyncio.sleep(0 if agent._effective_runtime_mode(state) == "test" else 1)
                         recovery_result = {"ok": True, "operation": "wait", "actuation_performed": False}
                     else:
-                        action = _focus_action(state, result)
+                        action = _focus_action(state, result, ctx=ctx)
                         recovery_result = await agent._call_tool(ctx, "equipment.pyautogui.run", {
                             **_payload(agent, state, result, execution_id), "sequence": [action],
                             "sequence_id": f"{execution_id}-recovery-{attempts}"}, state=state)

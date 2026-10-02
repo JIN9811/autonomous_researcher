@@ -161,7 +161,8 @@ def prepare_error_resume(controller, *, reference_roots=None, relocation_map=Non
     identity = record.get("identity") or {}
     if (identity.get("run_id") != run_id or identity.get("experiment_id") != state.experiment_id
             or record.get("lifecycle") not in {"ESCALATED", "COMPLETED"}
-            or record.get("metadata", {}).get("scope_digest") != _digest([_scope(state), _describe(agent, state, flow)])):
+            or record.get("metadata", {}).get("scope_digest") != _digest([_scope(state), _describe(
+                agent, state, flow, ctx=getattr(controller._deps, "agent_context", None))])):
         raise ValueError("Equipment recovery scope changed or no longer awaits review")
     completed_candidate(record, flow, state)
     return record["execution_id"]

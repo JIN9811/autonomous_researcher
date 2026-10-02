@@ -34,6 +34,68 @@ class Model:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('mutation', ['program', 'deployment'])
+async def test_selected_registry_mutation_revokes_pending_scope(tmp_path, monkeypatch, mutation):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    import shutil
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    selected = tmp_path / 'selected-memory'
+    shutil.copytree(tmp_path / 'skills', selected / 'equipment_skills')
+    state.current_experiment_spec.pop('equipment_skill_registry_root')
+    class Changed(Model):
+        async def complete(self, *args, **kwargs):
+            package = selected / 'equipment_skills/prepare/1.0.0'
+            path = package / 'manifest.json' if mutation == 'deployment' else next((package / 'programs').glob('*.json'))
+            data = json.loads(path.read_text())
+            if mutation == 'deployment':
+                data['deployment']['deployment_sha256'] = 'changed'
+            else:
+                data['sequence'].append({'action': 'wait', 'seconds': 0})
+            path.write_text(json.dumps(data))
+            return await super().complete(*args, **kwargs)
+    ctx = Changed(tools)
+    ctx.paths = replace(current_paths(), memory_root=selected)
+    result = await agent.run(state, ctx)
+    assert not result.success
+    assert result.data['failure_code'] == 'EQUIPMENT_WORKFLOW_SCOPE_CHANGED'
+    assert executed == []
+
+
+@pytest.mark.parametrize('lookalike', [False, True])
+@pytest.mark.parametrize('selected_focus', [False, True])
+def test_focus_action_uses_only_selected_package(tmp_path, monkeypatch, lookalike, selected_focus):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    from agents.equipment.workflow import _focus_action
+    from agents.equipment import workflow
+    from agents.base_agent import AgentResult
+    agent, state, _, _, _, _ = setup_flow(tmp_path, monkeypatch)
+    import shutil
+    selected = tmp_path / 'selected-memory/equipment_skills'
+    shutil.copytree(tmp_path / 'skills', selected)
+    legacy_root = tmp_path / 'legacy-runtime'
+    monkeypatch.setattr(workflow, '__file__', str(legacy_root / 'agents/equipment/workflow.py'))
+    state.current_experiment_spec.pop('equipment_skill_registry_root')
+    path = next((selected / 'prepare/1.0.0/programs').glob('*.json'))
+    program = json.loads(path.read_text())
+    program['sequence'] = [{'action': 'focus_window', 'window': 'selected-worker-only'}] if selected_focus else []
+    path.write_text(json.dumps(program))
+    if lookalike:
+        shutil.copytree(tmp_path / 'skills', legacy_root / 'memory/equipment_skills')
+        legacy = next((legacy_root / 'memory/equipment_skills/prepare/1.0.0/programs').glob('*.json'))
+        wrong = deepcopy(program)
+        wrong['sequence'] = [{'action': 'focus_window', 'window': 'unrelated-lookalike'}]
+        legacy.write_text(json.dumps(wrong))
+    result = AgentResult(success=False, summary='controlled failure', data={
+        'equipment_skill_execution': {'skill_id': 'prepare', 'version': '1.0.0'},
+        'tool_results': [{'tool': 'equipment.pyautogui.run', 'payload': {'program_id': program['program_id']}}]})
+    ctx = SimpleNamespace(paths=replace(current_paths(), memory_root=selected.parent))
+    assert _focus_action(state, result, ctx=ctx) == (
+        {'action': 'focus_window', 'window': 'selected-worker-only'} if selected_focus else None)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mismatch", [False, True])
 async def test_selection_receives_real_upstream_handoff_not_config_flags(tmp_path, monkeypatch, mismatch):
     agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)

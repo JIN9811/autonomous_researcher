@@ -56,6 +56,38 @@ def test_request_rejects_modified_receipt(tmp_path):
         recovery.read_request(tmp_path,'run-1')
 
 
+def test_selected_memory_tail_receipt_blocks_unstarted_retry(tmp_path):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    state, _ = fixture()
+    state.run_metadata['equipment_tail_recovery'] = {'status': 'returned', 'result': {'decision': 'stop'}}
+    request = {'run_id': state.run_id, 'loop_id': 0, 'source_execution_id': 'source'}
+    paths = replace(current_paths(), memory_root=tmp_path / 'selected-memory')
+    controller = SimpleNamespace(_state=state, _deps=SimpleNamespace(agent_context=SimpleNamespace(paths=paths)))
+    assert recovery.unstarted_tail(controller, request)
+    path = paths.memory_root / 'equipment_runtime/workflow_decisions/executions/selected/state.json'
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({'identity': {'run_id': state.run_id, 'sequence_id': 'stacked-loop-0-tail-source'}}))
+    original = path.read_bytes()
+    assert not recovery.unstarted_tail(controller, request)
+    assert path.read_bytes() == original
+
+
+def test_preparation_reads_selected_record_before_rejecting_identity(tmp_path):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    from orchestrator.state import OrchestratorState, Stage
+    paths = replace(current_paths(), memory_root=tmp_path / 'selected-memory', run_root=tmp_path / 'selected-runs')
+    path = paths.memory_root / 'equipment_runtime/workflow_decisions/executions/source/state.json'
+    path.parent.mkdir(parents=True)
+    _, record = fixture()
+    path.write_text(json.dumps(record))
+    state = OrchestratorState(run_id='different-run', experiment_id='exp-1', stage=Stage.ERROR)
+    with pytest.raises(ValueError, match='identity/cycle mismatch'):
+        recovery.prepare_request({'state': state.model_dump(mode='json'), 'is_running': False},
+            paths.run_root, 'source', ctx=SimpleNamespace(paths=paths))
+
+
 @pytest.mark.asyncio
 async def test_dispatches_original_loop_tail_once_without_standalone_device_calls(tmp_path, monkeypatch):
     from orchestrator.state import Stage
@@ -114,10 +146,20 @@ async def test_real_equipment_workflow_skips_adopted_prefix_but_keeps_model_revi
     checkpoint={'next_index':2,'run_context':{},'transitions':[
         {'block_id':name,'phase':'skill','success':True,'outcome':'completed','evidence':{}}
         for name in ('prepare','measure')]}
-    request={'source_execution_id':'prior','checkpoint':checkpoint}
-    monkeypatch.setattr(recovery,'read_request',lambda *a:deepcopy(request))
-    monkeypatch.setattr(recovery,'validate',lambda *a:None)
+    request={'source_execution_id':'prior','checkpoint':checkpoint, 'run_id':state.run_id,
+        'requested_by':'operator','evidence_hashes':{}}
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    import hashlib
+    paths=replace(current_paths(),run_root=tmp_path/'selected-runs', memory_root=tmp_path/'selected-memory')
+    directory=paths.run_root/state.run_id/'recovery'
+    directory.mkdir(parents=True)
+    raw=json.dumps(request)
+    (directory/'equipment_tail_request.json').write_text(json.dumps({
+        'payload_json':raw,'sha256':hashlib.sha256(raw.encode()).hexdigest()}))
+    monkeypatch.setattr(recovery,'validate',lambda *a,**kw:None)
     model=Model(tools)
+    model.paths=paths
     result=await agent.run(state,model)
     assert result.success
     assert executed==['export']
