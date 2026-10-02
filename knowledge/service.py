@@ -17,6 +17,7 @@ from knowledge.graph_sync_worker import GraphSyncWorker
 from knowledge.neo4j_repository import Neo4jRepository
 from knowledge.ontology.registry import OntologyRegistry
 from knowledge.ontology.validator import OntologyValidator
+from utils.runtime_paths import RuntimePaths
 
 
 class KnowledgeService:
@@ -27,11 +28,13 @@ class KnowledgeService:
         backend: KnowledgeGraphBackend,
         registry: OntologyRegistry | None = None,
         max_attempts: int = 5,
+        paths: RuntimePaths | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
-        self.registry = registry or OntologyRegistry.load_default(self.project_root)
+        self.registry = registry or OntologyRegistry.load_default(
+            self.project_root, runtime_root=paths.runtime_root if paths is not None else None)
         self.validator = OntologyValidator(self.registry)
-        memory_root = self.project_root / "memory" / "knowledge"
+        memory_root = (paths.memory_root if paths is not None else self.project_root / "memory") / "knowledge"
         self.ledger = AuditLedger(memory_root / "ledger")
         self.outbox = DurableOutbox(memory_root / "outbox", max_attempts=max_attempts)
         self.repository = Neo4jRepository(backend)
@@ -39,9 +42,9 @@ class KnowledgeService:
         self.retrieval = GraphRetrievalService(backend)
 
     @classmethod
-    def from_env(cls, project_root: Path) -> "KnowledgeService":
+    def from_env(cls, project_root: Path, *, paths: RuntimePaths | None = None) -> "KnowledgeService":
         attempts = max(1, int(os.environ.get("ATR_KNOWLEDGE_GRAPH_MAX_ATTEMPTS", "5")))
-        return cls(project_root, backend=graph_backend_from_env(project_root), max_attempts=attempts)
+        return cls(project_root, backend=graph_backend_from_env(project_root, paths=paths), max_attempts=attempts, paths=paths)
 
     def ingest(self, payload: dict[str, Any]) -> dict[str, Any]:
         event = normalize_knowledge_event(payload, ontology_version=self.registry.version_id)

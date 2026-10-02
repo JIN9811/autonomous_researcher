@@ -13,6 +13,11 @@ pytestmark = pytest.mark.usefixtures('handoff_no_external')
 
 @pytest.fixture(autouse=True)
 def isolated_bo_settings(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    paths = replace(current_paths(), memory_root=tmp_path)
+    original_load = load_runtime
+    monkeypatch.setattr(__name__ + '.load_runtime', lambda: original_load(paths=paths))
     monkeypatch.setattr('app.test_bo_settings.WORKSPACE_SETTINGS_PATH', tmp_path / 'bo.json')
 
 

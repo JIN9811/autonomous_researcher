@@ -12,6 +12,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
+from utils.runtime_paths import RuntimePaths
 
 
 GRAPH_SCHEMA_VERSION = "atr_knowledge_graph_v1"
@@ -385,7 +386,7 @@ class Neo4jGraphBackend:
         self._driver.close()
 
 
-def graph_backend_from_env(project_root: Path) -> KnowledgeGraphBackend:
+def graph_backend_from_env(project_root: Path, *, paths: RuntimePaths | None = None) -> KnowledgeGraphBackend:
     """Build graph backend from environment with fail-open defaults."""
     enabled = _env_bool("ATR_KNOWLEDGE_GRAPH_ENABLED", default=False)
     if not enabled:
@@ -406,7 +407,8 @@ def graph_backend_from_env(project_root: Path) -> KnowledgeGraphBackend:
             if _env_bool("ATR_KNOWLEDGE_GRAPH_FAIL_OPEN", default=True):
                 return NullGraphBackend(enabled=True, status="degraded", error="Neo4j backend initialization failed")
             raise
-    return JsonGraphBackend(project_root / "memory" / "knowledge" / "graph_backend" / "knowledge_graph.json")
+    memory_root = paths.memory_root if paths is not None else project_root / "memory"
+    return JsonGraphBackend(memory_root / "knowledge" / "graph_backend" / "knowledge_graph.json")
 
 
 def normalize_node(node: dict[str, Any]) -> dict[str, Any]:

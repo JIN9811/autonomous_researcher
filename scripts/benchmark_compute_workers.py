@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from urllib.request import urlopen
+from utils.runtime_paths import RuntimePaths, current_paths
 
 
 def serve(workers, root, listener):
@@ -45,7 +46,8 @@ def serve(workers, root, listener):
     uvicorn.Server(config).run(sockets=[listener])
 
 
-def measure(workers, root):
+def measure(workers, root, *, paths: RuntimePaths | None = None):
+    paths = paths or current_paths()
     import psutil
     listener = socket.socket()
     listener.bind(('127.0.0.1', 0))
@@ -54,7 +56,8 @@ def measure(workers, root):
     url = f'http://127.0.0.1:{port}'
     process = subprocess.Popen([sys.executable, '-m', 'scripts.benchmark_compute_workers',
         '--serve', str(workers), '--root', str(root), '--fd', str(listener.fileno())],
-        pass_fds=[listener.fileno()], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pass_fds=[listener.fileno()], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        cwd=paths.runtime_root)
     listener.close()
     def request(path, post=False):
         with urlopen(url + path, data=b'' if post else None, timeout=120) as response:

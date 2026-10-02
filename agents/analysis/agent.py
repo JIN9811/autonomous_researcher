@@ -1021,10 +1021,10 @@ class AnalysisAgent(BaseAgent):
         slug = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text).strip("_")
         return slug[:120] or default
 
-    def _analysis_artifact_dir(self, state: OrchestratorState) -> Path:
+    def _analysis_artifact_dir(self, state: OrchestratorState, *, run_root: Path | None = None) -> Path:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         specimen_id = str(spec.get("specimen_id") or state.experiment_id or "specimen")
-        path = resolve_path("runs") / self._safe_slug(state.run_id, "run") / "analysis" / self._safe_slug(specimen_id, "specimen")
+        path = (run_root if run_root is not None else resolve_path("runs")) / self._safe_slug(state.run_id, "run") / "analysis" / self._safe_slug(specimen_id, "specimen")
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -1225,8 +1225,9 @@ class AnalysisAgent(BaseAgent):
         metrics: dict[str, Any],
         analysis: dict[str, Any],
         handoff: dict[str, Any],
+        run_root: Path | None = None,
     ) -> dict[str, str]:
-        base = self._analysis_artifact_dir(state)
+        base = self._analysis_artifact_dir(state, run_root=run_root)
         canonical = self._canonical_curve(curve, analysis.get("specimen_geometry", {})) if curve else []
         preprocessing = self._preprocessing_report(curve, canonical) if curve else {"schema": "analysis_preprocessing.v1", "input_rows": 0, "output_rows": 0}
         paths: dict[str, str] = {}
@@ -1914,6 +1915,7 @@ class AnalysisAgent(BaseAgent):
             equipment_result=equipment_result,
         )
         analysis["analysis_artifacts"] = self._write_analysis_artifacts(
+            run_root=ctx.paths.run_root if getattr(ctx, "paths", None) is not None else None,
             state=state,
             curve=curve,
             source_meta=source_meta,

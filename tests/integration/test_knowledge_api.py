@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,7 @@ def _store(tmp_path: Path, monkeypatch) -> JsonlKnowledgeStore:
     memory_root = tmp_path / "memory" / "knowledge"
     run_root = tmp_path / "runs"
     monkeypatch.setattr(app_main, "KNOWLEDGE_MEMORY_ROOT", memory_root)
+    monkeypatch.setattr(app_main, "RUNTIME_PATHS", replace(app_main.RUNTIME_PATHS, run_root=run_root, memory_root=tmp_path / "memory"))
     monkeypatch.setattr(app_main, "resolve_path", lambda value: run_root if value == "runs" else Path(value))
     return JsonlKnowledgeStore(memory_root=memory_root, run_root=run_root)
 

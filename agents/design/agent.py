@@ -1141,10 +1141,10 @@ class DesignAgent(BaseAgent):
         return text or fallback
 
     @classmethod
-    def _run_artifact_url(cls, run_id: Any, path: Any) -> str:
+    def _run_artifact_url(cls, run_id: Any, path: Any, *, run_root: Path | None = None) -> str:
         safe_run = cls._safe_artifact_segment(run_id, "run")
         try:
-            run_dir = (resolve_path("runs") / safe_run).resolve()
+            run_dir = ((run_root if run_root is not None else resolve_path("runs")) / safe_run).resolve()
             artifact_path = Path(str(path)).expanduser().resolve()
             rel = artifact_path.relative_to(run_dir).as_posix()
         except Exception:
@@ -1207,7 +1207,9 @@ class DesignAgent(BaseAgent):
         if tools is None or not hasattr(tools, "call") or not state.run_id:
             return
         safe_run = self._safe_artifact_segment(state.run_id, "run")
-        run_dir = resolve_path("runs") / safe_run
+        paths = getattr(ctx, "paths", None)
+        run_root = paths.run_root if paths is not None else resolve_path("runs")
+        run_dir = run_root / safe_run
         for index, candidate in enumerate(pool[:24], start=1):
             candidate_id = self._safe_artifact_segment(candidate.get("candidate_id"), f"candidate-{index:02d}")
             output_dir = run_dir / "design_candidates" / candidate_id
@@ -1230,18 +1232,18 @@ class DesignAgent(BaseAgent):
             preview_path = result.get("preview_image_path")
             if stl_path:
                 candidate["stl_path"] = str(stl_path)
-                candidate["stl_url"] = self._run_artifact_url(state.run_id, stl_path)
+                candidate["stl_url"] = self._run_artifact_url(state.run_id, stl_path, run_root=run_root)
             if capture_path:
                 candidate["viewer_capture_path"] = str(capture_path)
                 candidate["capture_image_path"] = str(capture_path)
-                candidate["viewer_capture_url"] = self._run_artifact_url(state.run_id, capture_path)
+                candidate["viewer_capture_url"] = self._run_artifact_url(state.run_id, capture_path, run_root=run_root)
                 candidate["capture_image_url"] = candidate["viewer_capture_url"]
                 candidate["preview_render_kind"] = "viewer_capture_png"
                 candidate["preview_render_engine"] = "geometry.generate_metamaterial_stl"
                 candidate["preview_render_source"] = "generated_stl"
             if preview_path:
                 candidate["preview_image_path"] = str(preview_path)
-                candidate["preview_image_url"] = self._run_artifact_url(state.run_id, preview_path)
+                candidate["preview_image_url"] = self._run_artifact_url(state.run_id, preview_path, run_root=run_root)
                 candidate.setdefault("preview_render_kind", "svg_preview")
                 candidate.setdefault("preview_render_engine", "geometry.generate_metamaterial_stl")
                 candidate.setdefault("preview_render_source", "generated_geometry_preview")

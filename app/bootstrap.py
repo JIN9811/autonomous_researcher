@@ -308,7 +308,8 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     from knowledge.source_runtime import library_for
     from mcp_tools.source_tools import register_source_tools
     register_source_tools(tools, lambda: library_for(
-        library_root=paths.memory_root / "knowledge/source_library", inbox_root=paths.source_inbox_root))
+        library_root=paths.memory_root / "knowledge/source_library", inbox_root=paths.source_inbox_root,
+        runtime_root=paths.runtime_root))
     register_mock_tools(tools)
     # Keep repo_root as the explicit-relative compatibility base; typed omitted
     # defaults use the same frozen source/private binding throughout each graph.

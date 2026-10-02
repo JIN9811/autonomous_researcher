@@ -36,8 +36,8 @@ class OntologyRegistry:
         )
 
     @classmethod
-    def load_default(cls, project_root: Path) -> "OntologyRegistry":
-        root = project_root / "knowledge" / "ontology"
+    def load_default(cls, project_root: Path, *, runtime_root: Path | None = None) -> "OntologyRegistry":
+        root = (runtime_root if runtime_root is not None else project_root) / "knowledge" / "ontology"
         core = _load_yaml(root / "atr_core.v1.yaml")
         relations = _load_yaml(root / "relation_rules.v1.yaml")
         shapes = _load_yaml(root / "validation_shapes.v1.yaml")

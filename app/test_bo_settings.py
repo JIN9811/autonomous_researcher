@@ -4,9 +4,9 @@ import json
 
 from agents.bo.agent import BOAgent
 from utils.gyroid_contract import BOUNDS, parameter_space
-from utils.paths import resolve_path
+from utils.runtime_paths import RuntimePaths, current_paths
 
-WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
+WORKSPACE_SETTINGS_PATH = current_paths().memory_root / "bo_workspace_settings.json"
 
 
 def validate_initial_design_size(value):
@@ -15,10 +15,11 @@ def validate_initial_design_size(value):
     return value
 
 
-def load_test_bo_defaults():
+def load_test_bo_defaults(*, paths: RuntimePaths | None = None):
     """Whitelist only count and continuous ranges; do not import mode or devices."""
     try:
-        saved = json.loads(WORKSPACE_SETTINGS_PATH.read_text(encoding="utf-8"))
+        path = paths.memory_root / "bo_workspace_settings.json" if paths is not None else WORKSPACE_SETTINGS_PATH
+        saved = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         saved = {}
     if not isinstance(saved, dict):

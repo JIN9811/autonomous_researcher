@@ -6235,7 +6235,7 @@ class MainController:
             return {"ok": False, "message": "Test scenario input already active.", "session": self.planning_snapshot()}
         from app.test_bo_settings import load_test_bo_defaults, with_initial_design
         try:
-            bo_defaults = load_test_bo_defaults()
+            bo_defaults = load_test_bo_defaults(paths=self._paths)
             # Explicit request values precede workspace defaults, including the
             # existing nested contract representation of the LHS count.
             requested = deepcopy(constraints)

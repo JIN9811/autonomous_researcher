@@ -239,6 +239,64 @@ CHECKS: dict[str, list[list[str]]] = {
 }
 BASELINE = "ba273ddb0fc2bf8795630d51d93d3932748e0a51"
 
+# Task 7's final, bounded cross-slice gate. Keep failures visible by partition,
+# with fresh child-origin evidence and the original behavior suites alongside
+# each root/default matrix. No device/model/provider lifecycle is exercised.
+_TASK7_PARTITIONS = [
+    # Root propagation across the composed bootstrap and app factories.
+    ["tests/unit/test_runtime_paths.py", "tests/unit/test_runtime_path_consumers.py",
+     "tests/unit/test_runtime_bridge_roots.py", "tests/unit/test_runtime_printer_roots.py",
+     "tests/unit/test_runtime_lerobot_roots.py", "tests/unit/test_runtime_app_bridge_roots.py",
+     "tests/unit/test_runtime_knowledge_roots.py", "tests/unit/test_runtime_app_knowledge_roots.py",
+     "tests/unit/test_runtime_ancillary_roots.py", "tests/unit/test_knowledge_graph_cli.py"],
+    # Actual fresh children: origins, metadata, environment, artifacts, cancellation.
+    ["tests/unit/test_runtime_worker_origins.py", "tests/unit/test_runtime_launchers.py",
+     "tests/unit/test_compute_pool.py", "tests/unit/test_monitor_process.py",
+     "tests/unit/test_safe_hot_reload.py", "tests/unit/test_local_pyautogui_bridge.py",
+     "tests/unit/test_cli_restart.py", "tests/unit/test_module_designer_cli_contract.py"],
+    # UTM/pose/equipment synthetic behavior and private output families.
+    ["tests/unit/test_utm_tools.py", "tests/unit/test_utm_runtime_bridge.py",
+     "tests/unit/test_utm_camera_config.py", "tests/unit/test_utm_camera_calibration_command.py",
+     "tests/unit/test_utm_runtime_camera_env.py", "tests/unit/test_utm_state_observer.py",
+     "tests/unit/test_specimen_pose_tracker.py", "tests/unit/test_equipment_pyautogui_bridge.py",
+     "tests/unit/test_multifidelity_contracts.py", "tests/unit/test_vision_monitor_stream.py",
+     "tests/unit/test_windows_equipment_module_contract.py", "tests/unit/test_camera_vision_package.py"],
+    # Both printer branches, profile helpers and artifact/provenance compatibility.
+    ["tests/unit/test_prusa_bridge.py", "tests/unit/test_printer_tools.py",
+     "tests/unit/test_bambu_bridge.py", "tests/unit/test_bambu_auto_orientation.py",
+     "tests/unit/test_bambu_slicer_profiles.py", "tests/unit/test_printer_fleet_package.py",
+     "tests/unit/test_bambu_material_priority.py", "tests/unit/test_printer_profile.py",
+     "tests/unit/test_bambu_autoejection.py", "tests/unit/test_bambu_autoejection_completion_audit.py"],
+    # LeRobot source and process contracts. One unchanged baseline interpreter-name
+    # assertion is recorded in task-7d-report.md, not rerun to produce a known failure.
+    ["tests/unit/test_lerobot_home_paths.py", "tests/unit/test_lerobot_bridge.py",
+     "tests/unit/test_lerobot_tools.py", "tests/unit/test_lerobot_joint_telemetry.py",
+     "tests/unit/test_lerobot_isaac_lab_e2e_contract.py", "tests/unit/test_lerobot_isaac_lab_synthetic.py",
+     "tests/unit/test_lerobot_isaac_mirror_runtime_wrapper.py", "tests/unit/test_lerobot_active_robot_cam_once.py",
+     "tests/unit/test_lerobot_replay.py", "tests/unit/test_lerobot_rollout_profile.py",
+     "tests/unit/test_manipulation_lerobot_agent.py", "tests/unit/test_lerobot_synthetic_e2e_smoke.py",
+     "tests/unit/test_lerobot_isaac_lab_validate_cli.py", "tests/unit/test_isaac_omx_mirror_mapping.py",
+     "--deselect=tests/unit/test_lerobot_isaac_lab_e2e_contract.py::test_live_e2e_check_command_uses_real_10s_three_episode_preset"],
+    # Knowledge ownership, ontology, evidence identities and retired API behavior.
+    ["tests/unit/test_knowledge_service.py", "tests/unit/test_knowledge_graph_backend.py",
+     "tests/unit/test_knowledge_ontology.py", "tests/unit/test_knowledge_agent.py",
+     "tests/unit/test_knowledge_reconciliation_service.py", "tests/unit/test_knowledge_layout_compatibility.py",
+     "tests/unit/test_graphify_bridge.py", "tests/unit/test_source_runtime.py",
+     "tests/integration/test_knowledge_api.py", "tests/integration/test_knowledge_ontology_api.py",
+     "tests/integration/test_knowledge_graphify_api.py", "tests/integration/test_markdown_knowledge_api.py"],
+    # Ancillary agent semantics and the changed controller BO-store composition.
+    ["tests/unit/test_analysis_agent.py", "tests/unit/test_analysis_measurement_only.py",
+     "tests/unit/test_analysis_decisions.py", "tests/unit/test_design_agent.py",
+     "tests/unit/test_design_decision.py", "tests/unit/test_design_evidence_display.py",
+     "tests/unit/test_test_bo_workspace.py", "tests/unit/test_test_mode_cycles.py"],
+]
+CHECKS["7"] = [
+    ["python", "-u", "-m", "pytest", "-vv", "--tb=short", "-p", "pytest_asyncio.plugin", *selection]
+    for selection in _TASK7_PARTITIONS
+]
+# Reuse the already-approved dependency-only CPU profile, never a simulator.
+CHECKS["7"][4][:1] = ["/usr/bin/env", "ISAAC_LAB_PATH=/deps/validation-tools/isaaclab-cpu-source", "/deps/bin/python3", "-S"]
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()

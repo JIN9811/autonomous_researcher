@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from knowledge.graph_backend import JsonGraphBackend, Neo4jGraphBackend, graph_backend_from_env  # noqa: E402
 from knowledge.graph_importer import import_store_to_graph  # noqa: E402
 from knowledge.stores import JsonlKnowledgeStore  # noqa: E402
+from utils.runtime_paths import RuntimePaths, current_paths  # noqa: E402
 
 DEFAULT_CONTAINER = "atr-neo4j"
 DEFAULT_IMAGE = "neo4j:5-community"
@@ -30,10 +31,10 @@ DEFAULT_HTTP_PORT = 7474
 DEFAULT_BOLT_PORT = 7687
 
 
-def main() -> int:
+def main(*, paths: RuntimePaths | None = None) -> int:
     parser = argparse.ArgumentParser(description="ATR Knowledge graph backend utility")
-    parser.add_argument("--project-root", default=str(PROJECT_ROOT))
-    parser.add_argument("--json-path", default="memory/knowledge/graph_backend/knowledge_graph.json")
+    parser.add_argument("--project-root", default=None)
+    parser.add_argument("--json-path", default=None)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("health")
@@ -56,8 +57,8 @@ def main() -> int:
     start.add_argument("--password", default=os.environ.get("ATR_NEO4J_PASSWORD", DEFAULT_PASSWORD))
     start.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT)
     start.add_argument("--bolt-port", type=int, default=DEFAULT_BOLT_PORT)
-    start.add_argument("--data-dir", default="memory/knowledge/neo4j/data")
-    start.add_argument("--logs-dir", default="memory/knowledge/neo4j/logs")
+    start.add_argument("--data-dir", default=None)
+    start.add_argument("--logs-dir", default=None)
     start.add_argument("--wait", action="store_true")
 
     stop = sub.add_parser("neo4j-stop")
@@ -68,19 +69,23 @@ def main() -> int:
     env.add_argument("--bolt-port", type=int, default=DEFAULT_BOLT_PORT)
 
     args = parser.parse_args()
-    root = Path(args.project_root).resolve()
+    # Explicit project selection retains the CLI's legacy store defaults.
+    paths = (paths or current_paths()) if args.project_root is None else None
+    root = paths.repository_root if paths is not None else Path(args.project_root).resolve()
 
     if args.cmd == "health":
-        return _print(_backend(root, args.json_path).health())
+        return _print(_backend(root, args.json_path, paths=paths).health())
     if args.cmd == "import":
-        backend = _backend(root, args.json_path)
+        backend = _backend(root, args.json_path, paths=paths)
         try:
-            store = JsonlKnowledgeStore(memory_root=root / "memory" / "knowledge", run_root=root / "runs")
+            store = JsonlKnowledgeStore(
+                memory_root=(paths.memory_root if paths is not None else root / "memory") / "knowledge",
+                run_root=paths.run_root if paths is not None else root / "runs")
             return _print(import_store_to_graph(store, backend, limit=args.limit))
         finally:
             backend.close()
     if args.cmd == "query":
-        backend = _backend(root, args.json_path)
+        backend = _backend(root, args.json_path, paths=paths)
         try:
             return _print(
                 backend.query(
@@ -98,7 +103,7 @@ def main() -> int:
         finally:
             backend.close()
     if args.cmd == "neo4j-start":
-        return _print(_neo4j_start(root, args))
+        return _print(_neo4j_start(root, args, paths=paths))
     if args.cmd == "neo4j-stop":
         return _print(_neo4j_stop(args.container))
     if args.cmd == "print-env":
@@ -125,18 +130,21 @@ def main() -> int:
     return 2
 
 
-def _backend(root: Path, json_path: str):
+def _backend(root: Path, json_path: str | None, *, paths: RuntimePaths | None = None):
     enabled = os.environ.get("ATR_KNOWLEDGE_GRAPH_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
     backend_type = os.environ.get("ATR_KNOWLEDGE_GRAPH_BACKEND", "json").strip().lower() or "json"
     if enabled and backend_type == "json":
-        return JsonGraphBackend((root / json_path).resolve())
-    return graph_backend_from_env(root)
+        path = ((root / json_path).resolve() if json_path is not None else
+                (paths.memory_root if paths is not None else root / "memory") / "knowledge/graph_backend/knowledge_graph.json")
+        return JsonGraphBackend(path)
+    return graph_backend_from_env(root, paths=paths)
 
 
-def _neo4j_start(root: Path, args: argparse.Namespace) -> dict[str, Any]:
+def _neo4j_start(root: Path, args: argparse.Namespace, *, paths: RuntimePaths | None = None) -> dict[str, Any]:
     _require_docker()
-    data_dir = (root / args.data_dir).resolve()
-    logs_dir = (root / args.logs_dir).resolve()
+    memory_root = paths.memory_root if paths is not None else root / "memory"
+    data_dir = (root / args.data_dir).resolve() if args.data_dir is not None else memory_root / "knowledge/neo4j/data"
+    logs_dir = (root / args.logs_dir).resolve() if args.logs_dir is not None else memory_root / "knowledge/neo4j/logs"
     data_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     existing = _run(["docker", "ps", "-a", "--filter", f"name=^{args.container}$", "--format", "{{.Names}}"], check=False)

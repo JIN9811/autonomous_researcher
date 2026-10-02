@@ -57,7 +57,7 @@ def _synchronized(method: Any) -> Any:
 
 
 class SourceLibrary:
-    def __init__(self, root: Path, inbox: Path):
+    def __init__(self, root: Path, inbox: Path, *, runtime_root: Path | None = None):
         self.root = Path(root).resolve()
         self.inbox = Path(inbox).resolve()
         if self.root == self.inbox or self.root.is_relative_to(self.inbox):
@@ -68,7 +68,7 @@ class SourceLibrary:
         self._sources_root.mkdir(parents=True, exist_ok=True)
         self._catalog_path = self._contained(self.root / "catalog.json")
         self._lock_path = self._contained(self.root / ".library.lock")
-        self._ontology = OntologyRegistry.load_default(_PROJECT_ROOT)
+        self._ontology = OntologyRegistry.load_default(_PROJECT_ROOT, runtime_root=runtime_root)
         self._mutex = threading.RLock()
 
     @_synchronized

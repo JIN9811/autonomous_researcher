@@ -34,6 +34,7 @@ from typing import Any
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from agents.core.knowledge.decision import run_knowledge_decision
 from utils.agent_artifact_archive import archive_agent_run
+from utils.runtime_paths import RuntimePaths
 from knowledge.graph_backend import graph_backend_from_env
 from knowledge.graph_importer import mirror_knowledge_records
 from knowledge.pattern_miner import build_agent_performance_records, update_failure_patterns, update_success_patterns
@@ -113,9 +114,16 @@ class KnowledgeAgent(BaseAgent):
             "What constraints, memory, failures, and architecture rules should this loop enforce?"
         )
         run_root = getattr(ctx, "artifact_run_root", None)
-        project_root = Path(run_root).resolve().parent if run_root else Path(__file__).resolve().parents[3]
-        store = JsonlKnowledgeStore.default(project_root)
-        markdown_store = store_for(ctx)
+        paths = getattr(ctx, "paths", None)
+        if paths is None and not run_root:
+            from utils.runtime_paths import current_paths
+            paths = current_paths()
+        project_root = paths.repository_root if paths is not None else (
+            Path(run_root).resolve().parent if run_root else Path(__file__).resolve().parents[3])
+        store = (JsonlKnowledgeStore(memory_root=paths.memory_root / "knowledge", run_root=paths.run_root)
+                 if paths is not None else JsonlKnowledgeStore.default(project_root))
+        markdown_store = (store_for(ctx, memory_root=paths.memory_root / "knowledge", runtime_root=paths.runtime_root)
+                          if paths is not None else store_for(ctx))
         cycle_id = f"loop-{state.loop_count + 1:06d}"
         objective_value = state.latest_analysis.get("objective_score")
         objective = float(objective_value) if objective_value is not None else None
@@ -269,6 +277,7 @@ class KnowledgeAgent(BaseAgent):
         graph_backend_status = {"ok": True, "enabled": False, "status": "retired"}
         graph_event_status = _ingest_local_event(
             project_root=project_root,
+            paths=paths,
             state=state,
             experiment_record=experiment_record,
             artifact_refs=artifact_refs,
@@ -410,6 +419,7 @@ def _ingest_local_event(
     occurred_at: str,
     activity_counts: dict[str, int] | None = None,
     activity_consumers: list[str] | None = None,
+    paths: RuntimePaths | None = None,
 ) -> dict[str, Any]:
     candidate_id = _candidate_id_from_state(state)
     specimen_id = _specimen_id_from_state(state)
@@ -462,10 +472,12 @@ def _ingest_local_event(
         "provenance": experiment_record.provenance.model_dump(mode="json"),
     }
     try:
-        registry = OntologyRegistry.load_default(Path(__file__).resolve().parents[3])
+        registry = OntologyRegistry.load_default(Path(__file__).resolve().parents[3],
+            runtime_root=paths.runtime_root if paths is not None else None)
         event = normalize_knowledge_event(payload, ontology_version=registry.version_id)
         validation = OntologyValidator(registry).validate_event(event)
-        receipt = AuditLedger(project_root / "memory" / "knowledge" / "ledger").append(event)
+        memory_root = paths.memory_root if paths is not None else project_root / "memory"
+        receipt = AuditLedger(memory_root / "knowledge" / "ledger").append(event)
         return {"ok": validation.ok, "enabled": False, "status": "local_only", "event_id": event["event_id"],
                 "ledger_receipt": receipt.as_dict(), "validation_errors": list(validation.errors),
                 "outbox": {"pending": 0}, "sync": {"safety_lag": 0}}

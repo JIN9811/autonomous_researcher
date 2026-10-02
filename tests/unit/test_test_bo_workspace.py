@@ -14,6 +14,11 @@ pytestmark = pytest.mark.usefixtures("handoff_no_external")
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     import app.test_bo_settings as settings
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
+    paths = replace(current_paths(), memory_root=tmp_path)
+    original_load = load_runtime
+    monkeypatch.setattr(__name__ + '.load_runtime', lambda: original_load(paths=paths))
     path = tmp_path / "bo_workspace_settings.json"
     monkeypatch.setattr(settings, "WORKSPACE_SETTINGS_PATH", path)
     path.write_text(json.dumps({"initial_design_size": 12, "parameter_space": {

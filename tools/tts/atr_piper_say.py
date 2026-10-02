@@ -18,6 +18,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from utils.runtime_paths import RuntimePaths, current_paths  # noqa: E402
+
 DEFAULT_VOICE_DIR = REPO_ROOT / "models" / "tts" / "piper" / "en_US-lessac-medium"
 DEFAULT_MODEL = DEFAULT_VOICE_DIR / "en_US-lessac-medium.onnx"
 DEFAULT_CONFIG = DEFAULT_VOICE_DIR / "en_US-lessac-medium.onnx.json"
@@ -53,12 +58,14 @@ def _player_cmd(wav_path: Path, player: str) -> list[str] | None:
     return None
 
 
-def main() -> int:
+def main(*, paths: RuntimePaths | None = None) -> int:
+    paths = paths or current_paths()
+    voice_dir = paths.runtime_root / "models/tts/piper/en_US-lessac-medium"
     parser = argparse.ArgumentParser(description="Speak a short LeRobot cue with ATR packaged Piper TTS.")
     parser.add_argument("text", nargs="?", default="", help="Text to speak. If omitted, stdin is used.")
-    parser.add_argument("--model", default=str(DEFAULT_MODEL), help="Piper ONNX voice model path.")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Piper model JSON config path.")
-    parser.add_argument("--piper-bin", default=str(DEFAULT_PIPER_BIN), help="Piper executable path.")
+    parser.add_argument("--model", default=str(voice_dir / "en_US-lessac-medium.onnx"), help="Piper ONNX voice model path.")
+    parser.add_argument("--config", default=str(voice_dir / "en_US-lessac-medium.onnx.json"), help="Piper model JSON config path.")
+    parser.add_argument("--piper-bin", default=str(paths.repository_root / ".venv/bin/piper"), help="Piper executable path.")
     parser.add_argument("--player", default="", help="Audio player executable. Defaults to aplay, then paplay.")
     parser.add_argument("--rate", type=int, default=-35, help="Speech rate in LeRobot GUI scale: -100..100.")
     parser.add_argument("--volume", type=float, default=1.0, help="Piper volume multiplier.")

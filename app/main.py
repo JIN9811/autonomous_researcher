@@ -79,6 +79,7 @@ from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adap
 from knowledge.graph_backend import NullGraphBackend, graph_backend_from_env
 from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
+from knowledge.relation_store import RelationStore
 from knowledge.schemas import EvolutionOutcomeRecord
 from knowledge.service import KnowledgeService
 from knowledge.manuals.service import ManualKnowledgeService
@@ -4028,12 +4029,12 @@ def _module_config_store() -> ModuleConfigStore:
 
 def _knowledge_store() -> JsonlKnowledgeStore:
     """Return the file-backed Knowledge memory store."""
-    return JsonlKnowledgeStore(memory_root=KNOWLEDGE_MEMORY_ROOT, run_root=resolve_path("runs"))
+    return JsonlKnowledgeStore(memory_root=KNOWLEDGE_MEMORY_ROOT, run_root=RUNTIME_PATHS.run_root)
 
 
 def _markdown_store():
     from knowledge.markdown_runtime import store_for
-    return store_for(memory_root=KNOWLEDGE_MEMORY_ROOT)
+    return store_for(memory_root=KNOWLEDGE_MEMORY_ROOT, runtime_root=RUNTIME_PATHS.runtime_root)
 
 
 def _knowledge_graph_backend():
@@ -4042,12 +4043,12 @@ def _knowledge_graph_backend():
     Neo4j is optional. If disabled or unavailable with fail-open enabled, the
     backend returns disabled/JSON fallback status and does not break runtime APIs.
     """
-    return graph_backend_from_env(resolve_path("."))
+    return graph_backend_from_env(RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
 
 
 def _knowledge_service() -> KnowledgeService:
     """Return the shared durable Knowledge service for API and CLI parity."""
-    return KnowledgeService(resolve_path("."), backend=NullGraphBackend(status="retired"))
+    return KnowledgeService(RUNTIME_PATHS.repository_root, backend=NullGraphBackend(status="retired"), paths=RUNTIME_PATHS)
 
 
 def _manual_knowledge_service() -> ManualKnowledgeService:
@@ -4079,11 +4080,12 @@ def _legacy_knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
     global _KNOWLEDGE_RECONCILIATION_WORKER
     global _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE
     if _KNOWLEDGE_RECONCILIATION_WORKER is None:
-        knowledge_service = KnowledgeService.from_env(resolve_path("."))
+        knowledge_service = KnowledgeService.from_env(RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
         reconciliation = KnowledgeReconciliationService(
-            project_root=resolve_path("."),
+            project_root=RUNTIME_PATHS.repository_root,
             knowledge_service=knowledge_service,
             agent_context=controller._deps.agent_context,
+            store=RelationStore(RUNTIME_PATHS.memory_root / "knowledge/reconciliation"),
         )
         _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE = knowledge_service
         _KNOWLEDGE_RECONCILIATION_SERVICE = reconciliation
@@ -18250,8 +18252,8 @@ async def post_knowledge_graphify_scan(payload: dict[str, object] | None = None)
     sources = payload.get("sources") if isinstance(payload.get("sources"), list) else None
     source_paths = [str(item) for item in sources] if sources else None
     max_file_bytes = max(1024, min(int(payload.get("max_file_bytes") or 256_000), 5_000_000))
-    out_dir_raw = str(payload.get("out_dir") or "memory/knowledge/graphify")
-    out_dir = resolve_path(out_dir_raw) if not Path(out_dir_raw).is_absolute() else Path(out_dir_raw)
+    out_dir_raw = payload.get("out_dir")
+    out_dir = resolve_path(str(out_dir_raw)) if out_dir_raw else RUNTIME_PATHS.memory_root / "knowledge/graphify"
     result = scan_project_graph(
         resolve_path("."),
         out_dir=out_dir,
@@ -18272,8 +18274,8 @@ async def post_knowledge_graphify_scan(payload: dict[str, object] | None = None)
 async def post_knowledge_graphify_import(payload: dict[str, object] | None = None) -> dict[str, object]:
     """Import Graphify-compatible project graph artifacts into the optional graph backend."""
     payload = payload or {}
-    graph_raw = str(payload.get("graphify_json") or "memory/knowledge/graphify/project_graph.json")
-    graph_json = resolve_path(graph_raw) if not Path(graph_raw).is_absolute() else Path(graph_raw)
+    graph_raw = payload.get("graphify_json")
+    graph_json = resolve_path(str(graph_raw)) if graph_raw else RUNTIME_PATHS.memory_root / "knowledge/graphify/project_graph.json"
     if not graph_json.exists():
         return {"ok": False, "error": f"graphify JSON not found: {graph_json}", "hint": "run /api/knowledge/graphify/scan first"}
     runtime_limit = max(1, min(int(payload.get("runtime_limit") or 500), 5000))
@@ -18975,7 +18977,7 @@ async def get_agent_integration_baseline_markdown() -> PlainTextResponse:
 from knowledge.http_api import install_markdown_routes, retire_graph_routes
 retire_graph_routes(app)
 install_markdown_routes(app, store_factory=lambda: _markdown_store(),
-                        run_root_factory=lambda: resolve_path("runs"),
+                        run_root_factory=lambda: RUNTIME_PATHS.run_root,
                         memory_root_factory=lambda: KNOWLEDGE_MEMORY_ROOT)
 
 from knowledge.source_api import install_source_routes, retire_manual_routes
@@ -18989,7 +18991,7 @@ def _source_ingestion_service():
     if _SOURCE_INGESTION_SERVICE is None:
         _SOURCE_INGESTION_SERVICE = SourceIngestionService(_source_library_for(
             library_root=RUNTIME_PATHS.memory_root / "knowledge/source_library",
-            inbox_root=RUNTIME_PATHS.source_inbox_root),
+            inbox_root=RUNTIME_PATHS.source_inbox_root, runtime_root=RUNTIME_PATHS.runtime_root),
             lambda: controller._deps.agent_context)
     return _SOURCE_INGESTION_SERVICE
 

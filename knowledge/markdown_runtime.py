@@ -46,14 +46,17 @@ def applicability_for(state) -> dict:
 
 
 @lru_cache(maxsize=32)
-def _store(root: str):
+def _store(root: str, runtime_root: str):
     from knowledge.markdown_memory import MarkdownKnowledgeStore
-    return MarkdownKnowledgeStore(Path(root), OntologyRegistry.load_default(_PROJECT))
+    return MarkdownKnowledgeStore(Path(root), OntologyRegistry.load_default(_PROJECT, runtime_root=Path(runtime_root)))
 
 
-def store_for(ctx=None, *, project_root: Path | None = None, memory_root: Path | None = None):
+def store_for(ctx=None, *, project_root: Path | None = None, memory_root: Path | None = None,
+              runtime_root: Path | None = None):
     """Honor isolated artifact roots in tests/direct calls; ontology stays code-owned."""
     paths = getattr(ctx, "paths", None)
+    if runtime_root is None and paths is not None:
+        runtime_root = paths.runtime_root
     if memory_root is None and project_root is None and paths is not None:
         memory_root = paths.memory_root / "knowledge"
     if memory_root is None:
@@ -63,10 +66,13 @@ def store_for(ctx=None, *, project_root: Path | None = None, memory_root: Path |
                 project_root = Path(run_root).resolve().parent
             else:
                 from utils.runtime_paths import current_paths
-                memory_root = current_paths().memory_root / "knowledge"
+                paths = current_paths()
+                memory_root = paths.memory_root / "knowledge"
+                runtime_root = runtime_root if runtime_root is not None else paths.runtime_root
         if memory_root is None:
             memory_root = Path(project_root) / "memory" / "knowledge"
-    return _store(str((Path(memory_root) / "markdown").resolve()))
+    return _store(str((Path(memory_root) / "markdown").resolve()),
+                  str((runtime_root if runtime_root is not None else _PROJECT).resolve()))
 
 
 def _read_json(path: Path, root: Path, *, limit: int = 4_000_000) -> dict:

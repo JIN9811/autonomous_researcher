@@ -29,6 +29,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from utils.runtime_paths import RuntimePaths, current_paths  # noqa: E402
+
 CORE_IMPORTS = [
     "fastapi",
     "uvicorn",
@@ -47,7 +49,9 @@ CORE_IMPORTS = [
 
 
 class Doctor:
-    def __init__(self, *, core_only: bool = False, hardware: bool = False) -> None:
+    def __init__(self, *, core_only: bool = False, hardware: bool = False,
+                 paths: RuntimePaths | None = None) -> None:
+        self.paths = paths or current_paths()
         self.core_only = core_only
         self.hardware = hardware
         self.results: list[dict[str, str]] = []
@@ -65,7 +69,7 @@ class Doctor:
         self.add("fail", name, detail, hint)
 
     def load_yaml(self, relative: str) -> dict[str, Any]:
-        path = ROOT / relative
+        path = self.paths.runtime_root / relative
         if yaml is None:
             self.warn("yaml loader", "PyYAML is not importable yet.", "Run pip install -r requirements.txt.")
             return {}
@@ -80,7 +84,7 @@ class Doctor:
         path = Path(str(value)).expanduser()
         if path.is_absolute():
             return path
-        return ROOT / path
+        return self.paths.repository_root / path
 
     def check_core_files(self) -> None:
         required = [
@@ -91,9 +95,10 @@ class Doctor:
             "configs/devices.yaml",
             "requirements.txt",
             "install/install_cli.sh",
-            ".env.example",
         ]
-        missing = [item for item in required if not (ROOT / item).exists()]
+        missing = [item for item in required if not (self.paths.runtime_root / item).exists()]
+        if not (self.paths.repository_root / ".env.example").exists():
+            missing.append(".env.example")
         if missing:
             self.fail("core files", "missing: " + ", ".join(missing), "Re-clone the repository or restore files.")
         else:
@@ -106,16 +111,16 @@ class Doctor:
         else:
             self.fail("python", f"{version.major}.{version.minor}.{version.micro}", "Use Python 3.11 or newer.")
 
-        linux_venv = ROOT / ".venv" / "bin" / "python"
-        windows_venv = ROOT / ".venv" / "Scripts" / "python.exe"
+        linux_venv = self.paths.repository_root / ".venv" / "bin" / "python"
+        windows_venv = self.paths.repository_root / ".venv" / "Scripts" / "python.exe"
         if linux_venv.exists() or windows_venv.exists():
             self.ok("virtualenv", ".venv exists")
         else:
             self.warn("virtualenv", ".venv was not found", "Run bash install/bootstrap_linux.sh or create .venv manually.")
 
     def check_env(self) -> None:
-        env_path = ROOT / ".env"
-        example = ROOT / ".env.example"
+        env_path = self.paths.repository_root / ".env"
+        example = self.paths.repository_root / ".env.example"
         if env_path.exists():
             self.ok("environment", ".env exists")
         elif example.exists():
@@ -162,8 +167,8 @@ class Doctor:
         except OSError as exc:
             self.warn("atr launcher", f"cannot read {target}: {exc}", "Reinstall with bash install/install_cli.sh.")
             return
-        if str(ROOT) in text:
-            self.ok("atr launcher", f"bound to this checkout: {ROOT}")
+        if str(self.paths.repository_root) in text:
+            self.ok("atr launcher", f"bound to this checkout: {self.paths.repository_root}")
         else:
             self.warn("atr launcher", "installed but bound to another checkout", "Run ATR_FORCE_INSTALL=1 bash install/install_cli.sh if this repo should own atr.")
 
@@ -172,8 +177,8 @@ class Doctor:
         bambu = devices.get("devices", {}).get("printer", {}).get("bambu", {}) if isinstance(devices, dict) else {}
         slicer = bambu.get("slicer", {}) if isinstance(bambu, dict) else {}
         env_name = str(slicer.get("executable_env") or "BAMBU_STUDIO_EXECUTABLE")
-        configured = str(slicer.get("executable_path") or "install/bambustudio/bambu-studio-wrapper")
-        wrapper = self.resolve_repo_path(configured)
+        configured = slicer.get("executable_path")
+        wrapper = self.resolve_repo_path(str(configured)) if configured else self.paths.runtime_root / "install/bambustudio/bambu-studio-wrapper"
         if wrapper.exists() and os.access(wrapper, os.X_OK):
             self.ok("Bambu wrapper", str(wrapper))
         else:
@@ -207,8 +212,8 @@ class Doctor:
             self.warn("Bambu video dependency", "ffmpeg not found", "Install ffmpeg for browser MJPEG proxy.")
 
     def check_prusa(self) -> None:
-        wrapper = ROOT / "install" / "prusaslicer" / "prusa-slicer-docker"
-        dockerfile = ROOT / "install" / "prusaslicer" / "Dockerfile"
+        wrapper = self.paths.runtime_root / "install" / "prusaslicer" / "prusa-slicer-docker"
+        dockerfile = self.paths.runtime_root / "install" / "prusaslicer" / "Dockerfile"
         if wrapper.exists() and os.access(wrapper, os.X_OK) and dockerfile.exists():
             self.ok("PrusaSlicer wrapper", "Docker wrapper files are present")
         else:
@@ -234,8 +239,8 @@ class Doctor:
         else:
             self.warn("LeRobot checkout", f"not found: {lerobot_root}", "Clone LeRobot separately before live robot workflows.")
 
-        patch = ROOT / "patches" / "lerobot" / "spark_realsense_d405_rsusb.patch"
-        applier = ROOT / "install" / "apply_lerobot_d405_patch.sh"
+        patch = self.paths.runtime_root / "patches" / "lerobot" / "spark_realsense_d405_rsusb.patch"
+        applier = self.paths.runtime_root / "install" / "apply_lerobot_d405_patch.sh"
         if patch.exists() and applier.exists():
             self.ok("LeRobot D405 patch", "patch and apply script are present")
         else:
@@ -268,7 +273,7 @@ class Doctor:
                 self.warn("RealSense hardware", f"enumeration failed: {exc}", "Check USB bus/hub and RSUSB installation.")
 
     def check_models(self) -> None:
-        deploy = ROOT / "deploy" / "nemoclaw-vllm.yaml"
+        deploy = self.paths.runtime_root / "deploy" / "nemoclaw-vllm.yaml"
         models = self.load_yaml("configs/models.yaml")
         if deploy.exists():
             self.ok("NemoClaw/vLLM deploy", str(deploy))
@@ -311,7 +316,7 @@ class Doctor:
         for path in secret_paths:
             result = subprocess.run(
                 [git, "check-ignore", path],
-                cwd=ROOT,
+                cwd=self.paths.repository_root,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,

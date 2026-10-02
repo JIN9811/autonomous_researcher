@@ -31,7 +31,7 @@ def curation_context(ctx):
 
 @lru_cache(maxsize=8)
 def library_for(project_root: Path | None = None, *, library_root: Path | None = None,
-                inbox_root: Path | None = None):
+                inbox_root: Path | None = None, runtime_root: Path | None = None):
     """Construct a service only when requested, using explicitly bound stores."""
     from knowledge.source_library import SourceLibrary
     from utils.runtime_paths import current_paths
@@ -43,7 +43,8 @@ def library_for(project_root: Path | None = None, *, library_root: Path | None =
         paths = current_paths()
         library_root = library_root if library_root is not None else paths.memory_root / "knowledge/source_library"
         inbox_root = inbox_root if inbox_root is not None else paths.source_inbox_root
-    return SourceLibrary(Path(library_root), Path(inbox_root))
+        runtime_root = runtime_root if runtime_root is not None else paths.runtime_root
+    return SourceLibrary(Path(library_root), Path(inbox_root), runtime_root=runtime_root)
 
 
 class SourceIngestionService:
