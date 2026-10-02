@@ -629,7 +629,7 @@ def literal_selection(payload: dict) -> dict:
         if runner == 'node' and value.startswith('--test-name-pattern=') and value.partition('=')[2]:
             continue
         filename, separator, node = value.partition('::')
-        if (not re.fullmatch(r'tests/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:py|js|cjs|mjs)', filename)
+        if (not re.fullmatch(r'tests/(?:[A-Za-z0-9_-]+/)*(?:[A-Za-z0-9_-]+\.)+(?:py|js|cjs|mjs)', filename)
                 or not filename.endswith(suffixes)
                 or separator and (runner != 'pytest' or not node or '\n' in node or '\r' in node)):
             raise ValueError('Every test selector must be an explicit tests/ file or pytest node')

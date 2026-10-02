@@ -158,6 +158,8 @@ def test_literal_selection_rejects_wrappers_and_indirection(command):
     ['/deps/bin/python3', '-S', '-u', '-m', 'pytest', '-v', '--tb=short', '-rA',
      '-p', 'pytest_asyncio.plugin', 'tests/unit/test_example.py::test_case[one]'],
     ['node', '--test', '--test-name-pattern=exact case', 'tests/js/example.cjs'],
+    ['node', '--test', 'tests/js/omx_environment_layout.test.cjs'],
+    ['node', '--test', 'tests/js/example.test.js'],
 ])
 def test_literal_selection_accepts_direct_bounded_runners(command):
     from tools.repository_layout.checks import literal_selection
