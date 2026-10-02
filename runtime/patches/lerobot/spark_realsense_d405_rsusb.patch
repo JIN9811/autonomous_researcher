@@ -913,7 +913,7 @@ index 6e13646b..0d382700 100644
  def say(text: str, blocking: bool = False):
      system = platform.system()
 
-@@ -202,9 +210,60 @@ def say(text: str, blocking: bool = False):
+@@ -202,9 +210,61 @@ def say(text: str, blocking: bool = False):
          cmd = ["say", text]
 
      elif system == "Linux":
@@ -926,11 +926,12 @@ index 6e13646b..0d382700 100644
 +
 +        if engine == "piper":
 +            atr_root = Path(os.environ.get("ATR_REPO_ROOT", "/home/jin/autonomous_researcher")).expanduser()
++            runtime_root = Path(os.environ.get("ATR_RUNTIME_ROOT") or atr_root / "runtime").expanduser()
 +            piper_python = os.environ.get("LEROBOT_TTS_PIPER_PYTHON") or str(atr_root / ".venv" / "bin" / "python")
-+            piper_script = os.environ.get("LEROBOT_TTS_PIPER_SCRIPT") or str(atr_root / "tools" / "tts" / "atr_piper_say.py")
++            piper_script = os.environ.get("LEROBOT_TTS_PIPER_SCRIPT") or str(runtime_root / "tools" / "tts" / "atr_piper_say.py")
 +            piper_bin = os.environ.get("LEROBOT_TTS_PIPER_BIN") or str(atr_root / ".venv" / "bin" / "piper")
 +            piper_model = os.environ.get("LEROBOT_TTS_PIPER_MODEL") or str(
-+                atr_root / "models" / "tts" / "piper" / "en_US-lessac-medium" / "en_US-lessac-medium.onnx"
++                runtime_root / "models" / "tts" / "piper" / "en_US-lessac-medium" / "en_US-lessac-medium.onnx"
 +            )
 +            piper_config = os.environ.get("LEROBOT_TTS_PIPER_CONFIG") or f"{piper_model}.json"
 +            piper_player = os.environ.get("LEROBOT_TTS_PIPER_PLAYER", "").strip()

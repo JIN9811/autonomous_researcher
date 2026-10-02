@@ -39106,11 +39106,11 @@
       },
       "patches/lerobot/spark_realsense_d405_rsusb.patch": {
         "mode": "100644",
-        "git_blob": "79f3c3d2af3a85209c08a3607d9f2c79f9aa1a0f",
-        "sha256": "489965146ef03f167715b5984307d012d9b545c0a827f02050deb5090705de37",
-        "size": 52972,
+        "git_blob": "102a21d4d8a1749ed074d416fcf9b69997874f44",
+        "sha256": "cb3e4fbde9116ad39078ca78fba6db1f540a01547c8f6b700b2d5784f827e47d",
+        "size": 53086,
         "pre_move_sha256": "489965146ef03f167715b5984307d012d9b545c0a827f02050deb5090705de37",
-        "content_changed": false
+        "content_changed": true
       },
       "policies/__init__.py": {
         "mode": "100644",
@@ -42290,9 +42290,9 @@
       },
       "tests/unit/test_install_packaging.py": {
         "mode": "100644",
-        "git_blob": "b08dd32b3c1d3cf149a71102161f524c14507a08",
-        "sha256": "c620b8406c0c98a2eb074305cd9020a779ab187279ca3134f88a49572c556f98",
-        "size": 13386,
+        "git_blob": "097352433b3967debbdc1487b4645f4726df0862",
+        "sha256": "df811eec19ba2634453d68e4f129a338e2685b3bbb5258ba95c7ce45a396cce3",
+        "size": 16304,
         "pre_move_sha256": "1e109182eafddcbd7d342051117e685facc8fcdac0a41d549d7466159b0fd858",
         "content_changed": true
       },

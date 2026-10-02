@@ -72,6 +72,72 @@ def test_lerobot_patch_contains_expected_realsense_files() -> None:
     assert "tests/cameras/test_realsense.py" in patch
 
 
+def test_applied_lerobot_piper_patch_splits_outer_environment_and_runtime_assets(tmp_path, monkeypatch):
+    """Catch fallback argv pointing at removed outer tools/models directories."""
+    utility = tmp_path / 'src/lerobot/utils/utils.py'
+    utility.parent.mkdir(parents=True)
+    utility.write_text('''from pathlib import Path
+import os
+import os.path as osp
+import platform
+import select
+import subprocess
+import sys
+import time
+
+def capture_timestamp_utc():
+    return datetime.now(timezone.utc)
+
+
+def say(text: str, blocking: bool = False):
+    system = platform.system()
+
+    if system == "Darwin":
+        cmd = ["say", text]
+
+    elif system == "Linux":
+        cmd = ["spd-say", text]
+        if blocking:
+            cmd.append("--wait")
+
+    elif system == "Windows":
+        cmd = [
+            "synthetic-windows-command", text,
+        ]
+    return cmd
+''')
+    patch = ROOT / 'patches/lerobot/spark_realsense_d405_rsusb.patch'
+    applied = subprocess.run(['git', 'apply', '--include=src/lerobot/utils/utils.py', str(patch)],
+                             cwd=tmp_path, capture_output=True, text=True)
+    assert applied.returncode == 0, applied.stderr
+    spec = importlib.util.spec_from_file_location('synthetic_lerobot_tts', utility)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module.platform, 'system', lambda: 'Linux')
+    outer = tmp_path / 'outer'
+    python = outer / '.venv/bin/python'
+    python.parent.mkdir(parents=True)
+    python.touch()
+    for name in tuple(os.environ):
+        if name.startswith('LEROBOT_TTS_') or name == 'ATR_RUNTIME_ROOT':
+            monkeypatch.delenv(name)
+    monkeypatch.setenv('ATR_REPO_ROOT', str(outer))
+    monkeypatch.setenv('LEROBOT_TTS_ENGINE', 'piper')
+    model = outer / 'runtime/models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx'
+    assert module.say('fixture speech') == [str(python), str(outer / 'runtime/tools/tts/atr_piper_say.py'),
+        '--rate', '0', '--model', str(model), '--config', str(model)+'.json',
+        '--piper-bin', str(outer / '.venv/bin/piper'), 'fixture speech']
+    monkeypatch.setenv('ATR_RUNTIME_ROOT', str(tmp_path / 'explicit-runtime'))
+    assert module.say('fixture speech')[1] == str(tmp_path / 'explicit-runtime/tools/tts/atr_piper_say.py')
+    overrides = {'PYTHON': str(python), 'SCRIPT': '/synthetic/script.py', 'MODEL': '/synthetic/voice.onnx',
+                 'CONFIG': '/synthetic/voice.json', 'BIN': '/synthetic/piper', 'PLAYER': 'synthetic-player'}
+    for key, value in overrides.items():
+        monkeypatch.setenv('LEROBOT_TTS_PIPER_' + key, value)
+    assert module.say('fixture speech') == [str(python), '/synthetic/script.py', '--rate', '0',
+        '--model', '/synthetic/voice.onnx', '--config', '/synthetic/voice.json',
+        '--piper-bin', '/synthetic/piper', '--player', 'synthetic-player', 'fixture speech']
+
+
 def test_windows_bridge_release_contains_reproducible_installer_and_runtime_dependencies() -> None:
     package = ROOT / "Pyautogui_server_for_window"
     requirements = (package / "requirements-windows.txt").read_text(encoding="utf-8").lower()
