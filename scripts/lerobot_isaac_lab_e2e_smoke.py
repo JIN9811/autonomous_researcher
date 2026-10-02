@@ -125,21 +125,30 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     paths = None
-    if args.repo_root is None or args.runtime_root:
+    if args.repo_root is None or args.runtime_root is not None:
         # A direct script launch starts with scripts/, not the source root, on sys.path.
-        if str(_repo_root()) not in sys.path:
-            sys.path.insert(0, str(_repo_root()))
-        from utils.runtime_paths import current_paths
-        paths = current_paths()
-    repo_root = Path(args.repo_root).expanduser().resolve() if args.repo_root else paths.repository_root
-    source_root = Path(args.runtime_root).expanduser().resolve() if args.runtime_root else repo_root
-    if args.repo_root is None:
-        source_root = paths.runtime_root
-    if str(source_root) not in sys.path:
-        sys.path.insert(0, str(source_root))
-    if args.runtime_root:
+        # Bootstrap only the trusted sibling helper, then restore the import path
+        # before validating any caller-selected source root.
+        bootstrap_root = str(_repo_root())
+        added_bootstrap = bootstrap_root not in sys.path
+        if added_bootstrap:
+            sys.path.insert(0, bootstrap_root)
+        try:
+            from utils.runtime_paths import current_paths
+            paths = current_paths()
+        finally:
+            if added_bootstrap:
+                sys.path.remove(bootstrap_root)
+    repo_root = Path(args.repo_root).expanduser().resolve() if args.repo_root is not None else paths.repository_root
+    source_root = (
+        Path(args.runtime_root).expanduser().resolve() if args.runtime_root is not None
+        else paths.runtime_root if paths is not None else repo_root
+    )
+    if args.runtime_root is not None:
         if paths.repository_root != repo_root or paths.runtime_root != source_root:
             raise ValueError("Explicit roots conflict with runtime path metadata")
+    if str(source_root) not in sys.path:
+        sys.path.insert(0, str(source_root))
 
     dataset_path = Path(args.dataset_path).expanduser().resolve()
     if args.create_fixture:

@@ -280,6 +280,45 @@ def test_smoke_cli_absent_root_binds_but_explicit_repository_stays_legacy(paths,
     assert not paths.runtime_root.exists() and not paths.repository_root.exists()
 
 
+@pytest.mark.parametrize('explicit_repository', [False, True])
+@pytest.mark.parametrize('matching_runtime', [False, True])
+def test_e2e_explicit_runtime_root_validates_before_import_path_or_fixture_work(
+    paths, monkeypatch, explicit_repository, matching_runtime
+):
+    from utils import runtime_paths
+    from scripts import lerobot_isaac_lab_e2e_smoke as smoke
+    from scripts import lerobot_synthetic_e2e_smoke as fixture_source
+    monkeypatch.setattr(runtime_paths, '_current', paths)
+    runtime = paths.runtime_root if matching_runtime else paths.runtime_root.parent / 'conflicting-source'
+    before = [entry for entry in smoke.sys.path if entry not in {str(smoke._repo_root()), str(runtime)}]
+    monkeypatch.setattr(smoke.sys, 'path', list(before))
+    dataset = paths.artifact_root / 'fixture'
+    calls = []
+    def create_fixture(target, **kwargs):
+        target.mkdir(parents=True)
+        (target / 'created').write_text('fixture')
+    def bridge(root, **kwargs):
+        calls.append((root, kwargs.get('paths')))
+        return SimpleNamespace(isaac_lab_run_e2e=lambda payload: {'ok': True})
+    monkeypatch.setattr(fixture_source, 'build_fixture_recording_dataset', create_fixture)
+    monkeypatch.setattr(smoke, '_bridge', bridge)
+    argv = ['--dataset-path', str(dataset), '--runtime-root', str(runtime), '--create-fixture']
+    if explicit_repository:
+        argv.extend(['--repo-root', str(paths.repository_root)])
+    if matching_runtime:
+        assert smoke.main(argv) == 0
+        assert calls == [(paths.repository_root, paths)]
+        assert (dataset / 'created').read_text() == 'fixture'
+        assert smoke.sys.path[0] == str(paths.runtime_root)
+    else:
+        with pytest.raises(ValueError, match='Explicit roots conflict'):
+            smoke.main(argv)
+        assert smoke.sys.path == before
+        assert not dataset.exists()
+        assert calls == []
+    assert not paths.runtime_root.exists() and not paths.repository_root.exists()
+
+
 def test_e2e_direct_script_bootstraps_source_before_loading_binding(monkeypatch):
     import builtins
     from scripts import lerobot_isaac_lab_e2e_smoke as smoke
