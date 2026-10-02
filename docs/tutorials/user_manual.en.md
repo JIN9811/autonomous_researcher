@@ -14,8 +14,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -29,7 +29,7 @@ Use this guide after the first virtual run. Each exercise states its goal, exact
 controls and completion check. The first device setup requires a trained operator;
 these pages do not authorize unattended robot or UTM motion.
 
-Read [Requirements](../../REQUIREMENTS.md) for installation. For an already installed
+Read [Requirements](../project/REQUIREMENTS.md) for installation. For an already installed
 system, `atr up` opens the server at `http://localhost:7860`.
 Do not restart a running experiment for a documentation exercise.
 
@@ -54,7 +54,7 @@ Values shown are not universal settings.
 | UTM camera and ROS | Vision, `/device-bridge/vision-utm` | [Vision walkthrough](device_workspace_vision_camera_bridge_usage.en.md) |
 | Windows bridge and Skills | Windows Automation, `/equipment/windows` | Exercise 5 |
 | BO configuration | Bayesian Optimization, `/bo` | Exercise 6 |
-| Hardware interlocks | PLC Safety, `/plc` | [PLC bridge](../device_bridges/plc_safety_bridge.md) |
+| Hardware interlocks | PLC Safety, `/plc` | [PLC bridge](../../system/device_bridges/plc_safety_bridge.md) |
 | Retained knowledge | Knowledge, `/knowledge` | Exercise 7 |
 
 **Checkpoint:** you can return to the same run in Live without launching another
@@ -84,7 +84,7 @@ full print path.
 Passing the installed-printer exercise does not validate first-layer adhesion,
 full print duration or nozzle-cleaning performance. Validate physical printing
 separately under supervision. Profile edits affect the next admitted run, not an
-already running one. See [Test Mode](../runtime/test_mode.md).
+already running one. See [Test Mode](../../system/runtime/test_mode.md).
 
 ## Exercise 3 — Configure robot ports and record one demonstration
 
@@ -98,7 +98,7 @@ training and experiment execution.
    **Manual Port Override**, select the role/camera key and **Save Manual Port**.
    These are configuration actions, not harmless inspection buttons.
 4. Check calibration and camera ownership using the
-   [LeRobot bridge guide](../device_bridges/lerobot_bridge.md) before motion.
+   [LeRobot bridge guide](../../system/device_bridges/lerobot_bridge.md) before motion.
 
 ![Expanded follower, leader and camera setup](assets/screenshots/2026-09-29/robot-devices.png)
 
@@ -160,8 +160,8 @@ Do not run a standalone rollout concurrently with a loop-owned manipulation.
 
 4. Open `/equipment/agent-manager` and inspect **Equipment Flow** and its profile.
 5. Check the ordered Skills and Vision slots against the intended method.
-   Follow [Equipment Agent](../agents/equipment_agent.md) and
-   [Windows bridge](../device_bridges/windows_pyautogui_bridge.md) for configuration.
+   Follow [Equipment Agent](../../system/agents/equipment_agent.md) and
+   [Windows bridge](../../system/device_bridges/windows_pyautogui_bridge.md) for configuration.
    Do not edit an active flow to skip a failed device action.
 
 ![Equipment Agent Manager and flow composition](../gui/assets/screenshots/2026-09-29/equipment-agent-manager.png)
@@ -190,7 +190,7 @@ linked to the same identity. Before slicing, absent mass is unknown; afterward u
 the recorded mass used by analysis, not an unrelated geometry estimate.
 A BO candidate is a recommendation, not an already tested specimen.
 An initial LHS view without GP data can be correct.
-See [Analysis](../agents/analysis_agent.md) and [BO](../agents/bo_agent.md).
+See [Analysis](../../system/agents/analysis_agent.md) and [BO](../../system/agents/bo_agent.md).
 
 ## Exercise 7 — Find retained knowledge without changing run evidence
 
@@ -204,7 +204,7 @@ See [Analysis](../agents/analysis_agent.md) and [BO](../agents/bo_agent.md).
 **Checkpoint:** you can identify the source and whether it is historical, procedural
 or current run evidence. A wiki instruction cannot prove today's device action.
 Some private views require authorized access; a 401 is not an invitation to bypass
-authentication. See [Knowledge operations](../knowledge/markdown_memory_operations.ko.md).
+authentication. See [Knowledge operations](../../system/knowledge/markdown_memory_operations.ko.md).
 
 ## Exercise 8 — Diagnose and resume the same run
 
@@ -222,7 +222,7 @@ copied completion flags. Resume may repeat a recoverable step; it is not a blank
 guarantee of exactly-once physical execution. Inspect the requested route and device
 state before approving motion. Do not delete failure history, clear PLC latches
 blindly, or press Start to impersonate Resume.
-See [Runtime flow and recovery](../runtime/closed_loop_and_pages_reference.md).
+See [Runtime flow and recovery](../../system/runtime/closed_loop_and_pages_reference.md).
 
 ## Exercise 9 — Open a read-only replay
 
@@ -253,8 +253,8 @@ See [Replay reference](../gui/run_replay.md).
 
 **Checkpoint:** distinguish a UI report, a module implementation, a package connection
 contract and the executing graph. Changing display metadata does not grant device
-permissions. See [Runtime IDE](../runtime/runtime_ide.md),
-[Modularity](../modularity.md) and [Module Management screens](../gui/visual_structure.md).
+permissions. See [Runtime IDE](../../system/runtime/runtime_ide.md),
+[Modularity](../../system/modularity.md) and [Module Management screens](../../system/runtime/gui/visual_structure.md).
 
 ## Completion checklist and further reference
 
@@ -269,5 +269,5 @@ Connection/configuration files under `memory/` can contain secrets; do not publi
 them as tutorial attachments.
 
 For developer installation, tests and contribution workflow, use
-[CONTRIBUTING](../../CONTRIBUTING.md). For the complete screen map, use
-[GUI Structure](../gui/visual_structure.md).
+[CONTRIBUTING](../project/CONTRIBUTING.md). For the complete screen map, use
+[GUI Structure](../../system/runtime/gui/visual_structure.md).

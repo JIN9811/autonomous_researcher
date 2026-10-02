@@ -88,7 +88,7 @@ EQUIPMENT_MODULE = AgentModule(
                 "web/static/equipment_skill_workflow_model.js",
             ],
         },
-        "documentation": "docs/agents/equipment_agent.md",
+        "documentation": "system/agents/equipment_agent.md",
     }, allow_nan=False),
 )
 

@@ -1,7 +1,7 @@
 # Agent and Experimental Packages
 
 For the relationship between packages, modules, core owners, bridges, and the
-runtime path, start with the [Modularity Reference](../docs/modularity.md).
+runtime path, start with the [Modularity Reference](../system/modularity.md).
 
 Agent Packages are installed metadata, not an installer. Shipped manifests in
 `packages/agents/` are loaded only when their matching code-owned agent module

@@ -12,7 +12,7 @@ scope:
   - reproducibility
 summary: Defines progressive ATR reproduction tiers from static inspection through supervised live hardware.
 source_of_truth:
-  - REQUIREMENTS.md
+  - docs/project/REQUIREMENTS.md
   - scripts/validate_documentation.py
   - scripts/validate_paper_publication.py
   - tests
@@ -70,7 +70,7 @@ recorded on September 7; their private raw archives are not bundled. Repeating
 those experiments or claiming another Tier 1–4 result requires its own evidence
 record, environment and authorization.
 
-The [Orchestrator dynamic Setup verification](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+The [Orchestrator dynamic Setup verification](../../system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
 is one such bounded working-tree/Tier 1 record. Its provider cases use guarded
 local handlers and do not elevate the result to Tier 2–4, live hardware, or a
 complete experimental cycle.

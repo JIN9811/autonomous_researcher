@@ -1,7 +1,7 @@
 # GUI
 
 For the current page map and actual 1920 × 1080 screenshots, start with
-[GUI Structure and Screen Reference](visual_structure.md).
+[GUI Structure and Screen Reference](../../system/runtime/gui/visual_structure.md).
 This page retains detailed behavior and historical implementation notes.
 
 ![Live GUI shared shell](assets/screenshots/2026-09-29/live-overview.png)
@@ -18,7 +18,7 @@ dock. Completed-session data; private values redacted.*
 | Coverage | Run control, models, agent reports and device-workspace entry |
 | Implementation | [Main GUI](../../web/static/app.js) · [Live GUI](../../web/static/planning.js) |
 | Execution boundary | Controls can invoke runtime/device actions; this guide is not execution evidence |
-> [Runtime Closed-Loop/페이지/에이전트 실행 레퍼런스](../runtime/closed_loop_and_pages_reference.md)
+> [Runtime Closed-Loop/페이지/에이전트 실행 레퍼런스](../../system/runtime/closed_loop_and_pages_reference.md)
 
 
 Web dashboard panels:
@@ -122,7 +122,7 @@ Explicit confirmation schedules values for the next new run; that run's
 admission validates the complete captured set, combines same-owner settings,
 and completes owner readback before the affected path. A held admission does
 not enter runtime/model review/LHS/Design. See the
-[Orchestrator Agent Reference](../agents/orchestrator_agent.md) for the limited
+[Orchestrator Agent Reference](../../system/agents/orchestrator_agent.md) for the limited
 writable topics and recovery rules.
 
 - Material and print defaults may come from the operator-controlled 3D Printer GUI profile when not stated in chat. This counts as a confirmed GUI default, not an LLM-fabricated value.
@@ -359,7 +359,7 @@ Runtime IDE graph workspace:
 Design Agent report surface:
 - The Live GUI selected-agent report for Design Agent reads `state.run_metadata.design_report`, latest message `design_report`, or event payload `design_report`.
 - The current Design report shows objective metric/direction, hypothesis, candidate counts, validity, constraint margins, estimated physical quantities, performance-evidence status, LLM decision/tool trace and handoff readiness. Candidate performance is `unassessed` when no candidate-matched evidence exists; it is not a synthetic prediction.
-- `design_evaluation.v1` selects the evidence-based display. Selected-score, information-gain and risk strips remain only for legacy payloads without that evaluation; they are not the current candidate-selection criteria. See the [Design Reference](../agents/design_agent.md).
+- `design_evaluation.v1` selects the evidence-based display. Selected-score, information-gain and risk strips remain only for legacy payloads without that evaluation; they are not the current candidate-selection criteria. See the [Design Reference](../../system/agents/design_agent.md).
 - The expanded Design detail area shows candidate board, rejected/repair log, decision register, Knowledge/BO/failure prior context, and missing handoff fields.
 - The Agent Report API `/api/agents/design/report` returns the same structured report under `sections.design_report`, plus role-specific `candidate_board`, `manufacturability`, `decision_register`, and `handoff_packet` fields.
 

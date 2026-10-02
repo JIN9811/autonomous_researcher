@@ -37,7 +37,7 @@ VISION_MODULE = AgentModule(
             "direct_device_effect": True,
             "device_ownership": "Existing LeRobot bridge owns ActiveCam motion/capture/return and rollout stop",
         },
-        "documentation": "docs/agents/vision_agent.md",
+        "documentation": "system/agents/vision_agent.md",
     }, allow_nan=False),
 )
 

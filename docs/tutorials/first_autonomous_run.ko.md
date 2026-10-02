@@ -15,8 +15,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -31,7 +31,7 @@ supersedes: []
 결과로 해석하지 않습니다.
 
 설치된 AX4LAB, 사용 가능한 LLM 백엔드, 브라우저가 필요합니다.
-설치 전이라면 [Requirements](../../REQUIREMENTS.md)를 먼저 읽습니다.
+설치 전이라면 [Requirements](../project/REQUIREMENTS.md)를 먼저 읽습니다.
 화면은 1920 × 1080 기준입니다. 캡처 속 숫자와 저장값은 해당 설치 환경의
 예시이지 그대로 복사할 권장 설정이 아닙니다.
 
@@ -76,7 +76,7 @@ atr up
 | Physical Print | 전체 출력·냉각·설정된 자동 배출 | 비전·로봇·UTM은 실제 동작 가능 |
 
 저장된 에이전트별 override도 확인합니다. 상세 계약은
-[Test Mode](../runtime/test_mode.md)에 있습니다.
+[Test Mode](../../system/runtime/test_mode.md)에 있습니다.
 
 ## Step 3 — Live 대화창 열기
 

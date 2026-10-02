@@ -214,7 +214,7 @@ then auto-detects common user installs such as
 
 For SmolVLA training/rollout experiments, the tracked `smolvla_conda_env_name`
 uses the isolated `lerobot-pi05-torch211` environment. Prepare that environment
-as described in [Requirements](../REQUIREMENTS.md#optional-smolvla-training-branch),
+as described in [Requirements](../docs/project/REQUIREMENTS.md#optional-smolvla-training-branch),
 then install the extra and cache the required Hub repos there:
 
 ```bash

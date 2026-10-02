@@ -14,8 +14,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -29,7 +29,7 @@ supersedes: []
 확인을 함께 설명합니다. 첫 장비 설정은 숙련된 운영자와 진행하며, 이 문서는
 무인 로봇/UTM 동작을 승인하는 문서가 아닙니다.
 
-설치는 [Requirements](../../REQUIREMENTS.md)를 따릅니다. 설치가 끝났으면
+설치는 [Requirements](../project/REQUIREMENTS.md)를 따릅니다. 설치가 끝났으면
 `atr up` 후 `http://localhost:7860`에 접속합니다.
 문서 실습 때문에 진행 중인 런을 재시작하지 않습니다.
 
@@ -54,7 +54,7 @@ supersedes: []
 | UTM 카메라·ROS | Vision, `/device-bridge/vision-utm` | [비전 실습](device_workspace_vision_camera_bridge_usage.ko.md) |
 | Windows 브릿지·Skills | Windows Automation, `/equipment/windows` | 실습 5 |
 | BO 설정 | Bayesian Optimization, `/bo` | 실습 6 |
-| 장비 인터록 | PLC Safety, `/plc` | [PLC 브릿지](../device_bridges/plc_safety_bridge.md) |
+| 장비 인터록 | PLC Safety, `/plc` | [PLC 브릿지](../../system/device_bridges/plc_safety_bridge.md) |
 | 축적 지식 | Knowledge, `/knowledge` | 실습 7 |
 
 **완료 확인:** 다른 장비 동작을 시작하지 않고 기존 Live 런으로 돌아올 수 있습니다.
@@ -82,7 +82,7 @@ Installed Printer는 dry-run이 아닙니다. 배출 및 이후 실제 장비를
 
 실제 프린터 경로 통과만으로 첫 층 접착·전체 출력 시간·노즐 정리가 검증되지는
 않습니다. 실제 출력은 별도 현장 감독하에 검증합니다. 프로필 변경은 다음
-승인 런부터 적용됩니다. 상세는 [Test Mode](../runtime/test_mode.md)를 봅니다.
+승인 런부터 적용됩니다. 상세는 [Test Mode](../../system/runtime/test_mode.md)를 봅니다.
 
 ## Exercise 3 — 로봇 포트 설정과 데모 한 편 녹화하기
 
@@ -93,7 +93,7 @@ Installed Printer는 dry-run이 아닙니다. 배출 및 이후 실제 장비를
 3. 설정이 필요하면 대상 장치에서 **Baseline → ID Detect & Save** 순으로 화면
    안내를 따릅니다. 수동 설정은 **Manual Port Override**의 역할/카메라 key를
    고른 뒤 **Save Manual Port**를 사용합니다. 저장·장치 탐색 작업입니다.
-4. 동작 전에 [LeRobot 브릿지](../device_bridges/lerobot_bridge.md)에 따라
+4. 동작 전에 [LeRobot 브릿지](../../system/device_bridges/lerobot_bridge.md)에 따라
    캘리브레이션과 카메라 점유 상태를 확인합니다.
 
 ![펼친 로봇 포트와 카메라 설정](assets/screenshots/2026-09-29/robot-devices.png)
@@ -155,8 +155,8 @@ Installed Printer는 dry-run이 아닙니다. 배출 및 이후 실제 장비를
 
 4. `/equipment/agent-manager`에서 **Equipment Flow**와 프로필을 확인합니다.
 5. Skill 순서·Vision slot을 사용할 메소드와 대조합니다.
-   [Equipment Agent](../agents/equipment_agent.md),
-   [Windows 브릿지](../device_bridges/windows_pyautogui_bridge.md)를 따릅니다.
+   [Equipment Agent](../../system/agents/equipment_agent.md),
+   [Windows 브릿지](../../system/device_bridges/windows_pyautogui_bridge.md)를 따릅니다.
    실패한 동작을 건너뛰려고 실행 중 flow를 편집하지 않습니다.
 
 ![Equipment Agent Manager의 흐름 구성](../gui/assets/screenshots/2026-09-29/equipment-agent-manager.png)
@@ -183,7 +183,7 @@ Installed Printer는 dry-run이 아닙니다. 배출 및 이후 실제 장비를
 슬라이싱 전 질량 공란은 미확인이며 이후에는 분석에 사용된 기록값을 사용합니다.
 다른 형상 추정치로 대체하지 않습니다. 추천 후보는 이미 실험한 시편이 아닙니다.
 초기 LHS 단계에 GP가 없는 것은 정상일 수 있습니다.
-[ANL](../agents/analysis_agent.md), [BO](../agents/bo_agent.md)를 참고합니다.
+[ANL](../../system/agents/analysis_agent.md), [BO](../../system/agents/bo_agent.md)를 참고합니다.
 
 ## Exercise 7 — 축적 지식의 출처 확인하기
 
@@ -197,7 +197,7 @@ Installed Printer는 dry-run이 아닙니다. 배출 및 이후 실제 장비를
 **완료 확인:** 과거 정보·절차 설명·현재 실험 근거를 구분할 수 있습니다.
 Wiki의 문장이 오늘의 장비 실행을 증명하지 않습니다.
 Private 화면은 권한이 필요하며 401을 우회하지 않습니다.
-[Knowledge 운영](../knowledge/markdown_memory_operations.ko.md)을 참고합니다.
+[Knowledge 운영](../../system/knowledge/markdown_memory_operations.ko.md)을 참고합니다.
 
 ## Exercise 8 — 같은 런을 진단하고 재개하기
 
@@ -213,7 +213,7 @@ Private 화면은 권한이 필요하며 401을 우회하지 않습니다.
 Resume은 복구 가능한 단계를 반복할 수 있으므로 물리 동작 exactly-once를
 무조건 보장하지 않습니다. 동작 승인 전에 요청 경로·실제 장비 상태를 봅니다.
 과거 실패 기록 삭제, PLC 무조건 해제, Start를 Resume처럼 쓰는 행동은 피합니다.
-[런타임 흐름·복구](../runtime/closed_loop_and_pages_reference.md)를 참고합니다.
+[런타임 흐름·복구](../../system/runtime/closed_loop_and_pages_reference.md)를 참고합니다.
 
 ## Exercise 9 — 읽기 전용 다시보기 열기
 
@@ -243,8 +243,8 @@ Resume은 복구 가능한 단계를 반복할 수 있으므로 물리 동작 ex
 
 **완료 확인:** UI 리포트·모듈 구현·패키지 연결 계약·실행 graph를 구분합니다.
 화면 표시 정보 변경이 장비 권한을 부여하지 않습니다.
-[Runtime IDE](../runtime/runtime_ide.md), [모듈화](../modularity.md),
-[Module Management 화면](../gui/visual_structure.md)을 참고합니다.
+[Runtime IDE](../../system/runtime/runtime_ide.md), [모듈화](../../system/modularity.md),
+[Module Management 화면](../../system/runtime/gui/visual_structure.md)을 참고합니다.
 
 ## 완료 체크와 추가 문서
 
@@ -257,5 +257,5 @@ Resume은 복구 가능한 단계를 반복할 수 있으므로 물리 동작 ex
 보관할 때 `runs/<run-id>/`와 참조 산출물을 함께 유지합니다.
 `memory/`의 연결·설정에는 비밀정보가 있을 수 있으므로 공개 첨부하지 않습니다.
 
-개발 환경·테스트·기여 절차는 [CONTRIBUTING](../../CONTRIBUTING.md),
-전체 화면 지도는 [GUI 구조](../gui/visual_structure.md)를 참고합니다.
+개발 환경·테스트·기여 절차는 [CONTRIBUTING](../project/CONTRIBUTING.md),
+전체 화면 지도는 [GUI 구조](../../system/runtime/gui/visual_structure.md)를 참고합니다.

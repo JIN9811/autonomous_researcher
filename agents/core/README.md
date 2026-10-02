@@ -20,5 +20,5 @@ gates, or adds a core owner to specialist discovery.
 
 Their executable catalogs retain one composite task and one delivery operation,
 while source-backed structure describes the real responsibilities inside that
-unchanged task. See the [Modularity Reference](../../docs/modularity.md) for the
+unchanged task. See the [Modularity Reference](../../system/modularity.md) for the
 package, bridge, configuration, and runtime relationships.

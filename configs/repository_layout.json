@@ -2,7 +2,7 @@
   "schema": "atr.path_layout.v1",
   "repository_root": "..",
   "runtime_root": "..",
-  "system_root": "../docs",
+  "system_root": "../system",
   "workspace_root": "../workspace",
   "defaults": {
     "run_root": "runs",

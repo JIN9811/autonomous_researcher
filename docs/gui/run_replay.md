@@ -5,7 +5,7 @@
 *1920 × 1080 capture, 2026-09-29: coral REPLAY indicator, recorded session and
 Contract point selectors, shared agent report and chat. Only retained points can
 be selected; this image does not imply complete replay coverage of all 15 cycles.
-See [GUI structure](visual_structure.md) for the full page map.*
+See [GUI structure](../../system/runtime/gui/visual_structure.md) for the full page map.*
 
 Run Control → **replay · read-only review** reveals an **Experiment session**
 dropdown beside Mode. Select a recorded session, then **Start** opens `/replay` in a

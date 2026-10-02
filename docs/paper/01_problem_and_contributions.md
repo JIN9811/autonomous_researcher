@@ -95,8 +95,8 @@ with corresponding calibration and policy validation:
 
 | Integration layer | Responsibility | Reference |
 |---|---|---|
-| Agent decisions | Interpret task-specific evidence and select bounded actions | [Agent inventory](../agents/README.md) |
-| Tools and device bridges | Execute robot skills, APIs, desktop workflows, and computations | [Bridge inventory](../device_bridges/README.md) |
+| Agent decisions | Interpret task-specific evidence and select bounded actions | [Agent inventory](../../system/agents/README.md) |
+| Tools and device bridges | Execute robot skills, APIs, desktop workflows, and computations | [Bridge inventory](../../system/device_bridges/README.md) |
 | Closed-loop coordination | Carry results from design through testing into the next decision | [Method](03_closed_loop_method.md) |
 | Shared support | Preserve knowledge, execution evidence, and operational constraints | [Architecture](02_system_architecture.md) |
 

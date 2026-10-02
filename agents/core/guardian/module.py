@@ -20,6 +20,6 @@ CORE_MODULE = AgentModule(
         "capabilities": ["guardian_decision", "deterministic_policy_gates", "advisory_policy_review"],
         "frontend": {"host": "/live", "descriptor": "graphs/modules/guardian/ui.yaml", "asset_url": "/module-assets/guardian/live_report.js", "namespace": "AX4LABGuardianUI", "factory": "createFrontend", "report_api": "/api/agents/guardian/report"},
         "configuration": {"plan_contract": "agents/core/guardian/plan.py", "source": "graphs/modules/guardian/module.yaml", "activation_supported": False},
-        "documentation": "docs/agents/guardian_agent.md",
+        "documentation": "system/agents/guardian_agent.md",
     }, allow_nan=False),
 )

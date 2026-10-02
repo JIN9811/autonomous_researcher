@@ -11,15 +11,15 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR_PATH = REPOSITORY_ROOT / "scripts" / "validate_paper_publication.py"
 
-REQUIRED_ROOT_FILES = (
+REQUIRED_PUBLICATION_FILES = (
     "README.md",
-    "README.ko.md",
-    "CITATION.cff",
-    "LICENSE",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "CHANGELOG.md",
-    "REQUIREMENTS.md",
+    "docs/README.ko.md",
+    "docs/paper/CITATION.cff",
+    "runtime/LICENSE",
+    "docs/project/CONTRIBUTING.md",
+    ".github/SECURITY.md",
+    "docs/project/CHANGELOG.md",
+    "docs/project/REQUIREMENTS.md",
 )
 REQUIRED_PAPER_FILES = (
     "docs/paper/README.md",
@@ -89,14 +89,14 @@ def _evidence(
         "environment": environment,
         "verified_commit": "abc1234",
         "command": "python -m pytest -q",
-        "inputs": ["REQUIREMENTS.md"],
+        "inputs": ["docs/project/REQUIREMENTS.md"],
         "outputs": [{"path": output_path, "sha256": checksum}],
         "result": "pass",
     }
 
 
 def _write_required_publication_tree(root: Path) -> None:
-    for relative_path in REQUIRED_ROOT_FILES:
+    for relative_path in REQUIRED_PUBLICATION_FILES:
         _write(root, relative_path, "publication file\n")
     _write(
         root,
@@ -216,7 +216,7 @@ def test_duplicate_claim_and_evidence_ids_are_rejected(tmp_path: Path) -> None:
 
 def test_evidence_output_checksum_must_match(tmp_path: Path) -> None:
     module = _load_validator()
-    _write(tmp_path, "REQUIREMENTS.md", "requirements\n")
+    _write(tmp_path, "docs/project/REQUIREMENTS.md", "requirements\n")
     _write(tmp_path, "docs/paper/evidence/report.md", "measured\n")
     manifest = _write_manifest(
         tmp_path,
@@ -261,7 +261,7 @@ def test_structure_requires_publication_files(tmp_path: Path) -> None:
 
     errors = module.validate_paper_structure(tmp_path)
 
-    assert any("missing required publication file: CITATION.cff" in error for error in errors)
+    assert any("missing required publication file: docs/paper/CITATION.cff" in error for error in errors)
     assert any(
         "missing required publication file: docs/paper/02_system_architecture.md"
         in error
@@ -289,7 +289,7 @@ def test_public_paper_rejects_personal_absolute_paths(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "docs/paper/README.md",
-        "Run a script under /home/alice/private-project.\n",
+        "Run a script under " + "/home/" + "alice/private-project.\n",
     )
 
     errors = module.validate_paper_structure(tmp_path)

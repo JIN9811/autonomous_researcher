@@ -13,7 +13,7 @@ scope:
   - research_artifact
 summary: Canonical reading path for the system-first ATR paper and its evidence package.
 related_docs:
-  - docs/standards/paper_documentation_standard.md
+  - system/standards/paper_documentation_standard.md
   - docs/paper/01_problem_and_contributions.md
   - docs/paper/02_system_architecture.md
   - docs/paper/03_closed_loop_method.md
@@ -35,7 +35,7 @@ research decisions and execution; the platform supports equipment reuse and
 robot integration through LeRobot.
 
 [Results](06_evaluation_and_results.md) · [Reproduce](07_reproducibility.md) ·
-[Agent references](../agents/README.md) · [Device interfaces](../device_bridges/README.md)
+[Agent references](../../system/agents/README.md) · [Device interfaces](../../system/device_bridges/README.md)
 
 ![AX4LAB transforms an existing laboratory through multi-agent orchestration and device bridges](../assets/presentation/laboratory-transformation-sunburst.webp)
 
@@ -168,6 +168,6 @@ and artifact manifest are present.
 
 ## Related Documents
 
-- [Paper Documentation Standard](../standards/paper_documentation_standard.md)
-- [Current Code Snapshot](../runtime/current_code_snapshot.md)
-- [Paper-first documentation design](../oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md)
+- [Paper Documentation Standard](../../system/standards/paper_documentation_standard.md)
+- [Current Code Snapshot](../../system/runtime/current_code_snapshot.md)
+- [Paper-first documentation design](../../system/retained-history/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md)

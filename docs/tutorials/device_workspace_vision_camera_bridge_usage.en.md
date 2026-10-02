@@ -13,8 +13,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -58,7 +58,7 @@ The UTM camera configuration is distinct from LeRobot's top/wrist camera setting
 locally under `memory/device_bridge/utm_camera_config.json`.
 Do not copy the camera path from another computer or use private serials from a
 screenshot. For supported settings and dependencies, see
-[UTM Vision Bridge](../device_bridges/utm_vision_bridge.md).
+[UTM Vision Bridge](../../system/device_bridges/utm_vision_bridge.md).
 
 ## Step 3 — Start or check the UTM ROS runtime
 
@@ -86,7 +86,7 @@ them during a working run merely to refresh the browser.
 Preview FPS requests browser delivery rate; it does not raise the camera's acquisition
 rate. If the picture is slow, compare source/frame freshness before increasing preview
 FPS. Check the actual camera/USB/ROS stream when the source itself is slow.
-See [UTM ROS bridge](../hardware/utm_ros_vision_runtime_bridge.md).
+See [UTM ROS bridge](../../system/hardware/utm_ros_vision_runtime_bridge.md).
 
 ## Step 5 — Use pose diagnostics for their stated purpose
 
@@ -120,7 +120,7 @@ different times. Image delivery alone is not a verification pass.
 Workspace diagnostics do not mark that step complete. If the camera moved, realign
 the physical view to the configured ROI or follow an explicitly reviewed calibration
 change; do not change thresholds just to obtain a pass.
-See [Vision Agent](../agents/vision_agent.md).
+See [Vision Agent](../../system/agents/vision_agent.md).
 
 ## Step 7 — Calibrate only when required
 

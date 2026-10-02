@@ -13,8 +13,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -56,7 +56,7 @@ UTM 카메라 설정은 LeRobot top/wrist 카메라 설정과 별개입니다.
 **확인:** 다시 읽어도 같은 장치·프로필입니다.
 저장 위치는 로컬 `memory/device_bridge/utm_camera_config.json`입니다.
 다른 컴퓨터 경로나 스크린샷의 serial을 복사하지 않습니다.
-지원 설정·의존성은 [UTM Vision Bridge](../device_bridges/utm_vision_bridge.md)를 봅니다.
+지원 설정·의존성은 [UTM Vision Bridge](../../system/device_bridges/utm_vision_bridge.md)를 봅니다.
 
 ## Step 3 — UTM ROS 런타임 확인하기
 
@@ -84,7 +84,7 @@ UTM 카메라 설정은 LeRobot top/wrist 카메라 설정과 별개입니다.
 Preview FPS는 브라우저 전송 요청 속도이지 카메라 획득 속도를 올리는 설정이
 아닙니다. 느리면 preview 숫자부터 올리지 말고 원본/frame 최신성을 비교합니다.
 소스 자체가 느리면 카메라·USB·ROS를 확인합니다.
-[UTM ROS 브릿지](../hardware/utm_ros_vision_runtime_bridge.md)를 참고합니다.
+[UTM ROS 브릿지](../../system/hardware/utm_ros_vision_runtime_bridge.md)를 참고합니다.
 
 ## Step 5 — Pose 진단의 목적 구분하기
 
@@ -118,7 +118,7 @@ run/cycle, Active Cam 또는 verification slot, 촬영 이미지, ROI, 판정 �
 워크스페이스 진단이 그 단계를 완료 처리하지 않습니다.
 카메라가 움직였다면 기존 ROI에 물리 화면을 다시 맞추거나 검토된 보정 변경
 절차를 따릅니다. 통과시키려고 임계값만 바꾸지 않습니다.
-[Vision Agent](../agents/vision_agent.md)를 참고합니다.
+[Vision Agent](../../system/agents/vision_agent.md)를 참고합니다.
 
 ## Step 7 — 필요할 때만 보정하기
 

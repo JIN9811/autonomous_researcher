@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import re
 import html
+import hashlib
+import posixpath
 from urllib.parse import unquote, urlsplit
 
 from .manifest import build_manifest, validate_manifest, git_entries, _git
@@ -154,7 +156,10 @@ CHECKS: dict[str, list[list[str]]] = {
             "tests/unit/test_paper_publication_validation.py",
             "tests/unit/test_knowledge_publication.py",
             "tests/unit/test_knowledge_layout_compatibility.py"
-        ]
+        ],
+        ["python", "scripts/validate_documentation.py", "--root", "."],
+        ["python", "scripts/validate_paper_publication.py", "--root", "."],
+        ["python", "-c", "import json; from pathlib import Path; from tools.repository_layout.checks import audit_document_references; m=json.loads(Path('system/maintenance/repository_layout_manifest.json').read_text()); r=audit_document_references(Path.cwd(),m); print(json.dumps({**{k:v for k,v in r.items() if k!='historical_references'}, 'historical_references_count':len(r['historical_references'])})); assert not any(r[k] for k in ('missing_files','missing_anchors','escaping_references','metadata_errors'))"]
     ],
     "9": [
         [
@@ -338,6 +343,54 @@ def _front_matter(text: str) -> tuple[dict, str]:
     return meta, ' ' * body_start + text[body_start:]
 
 
+def document_references(text: str, suffix: str) -> list[dict]:
+    metadata, body = _front_matter(text) if suffix in {'.md', '.markdown'} else ({}, text)
+    references = []
+    for field in sorted(METADATA_PATH_FIELDS):
+        if field in metadata:
+            values = metadata[field] if isinstance(metadata[field], list) else [metadata[field]]
+            references.extend({'reference': value, 'base': 'repository', 'field': field} for value in values)
+    references.extend({'reference': target, 'base': 'document'} for _, _, target in reference_spans(body, suffix))
+    return references
+
+
+def historical_reference_errors(root: Path, original: str, current: str, manifest: dict) -> list[str]:
+    """Validate a specifically reviewed immutable document's historical ledger."""
+    record = manifest.get('historical_documents', {}).get(original)
+    if not record:
+        return ['Missing exact historical record']
+    data = (root / current).read_bytes()
+    entry = manifest['entries'][original]
+    if (record.get('original_path') != original or record.get('revision') != manifest.get('move_revision')
+            or not record.get('reason') or hashlib.sha256(data).hexdigest() != record.get('sha256')
+            or ('sha256' in entry and record['sha256'] != entry['sha256'])
+            or ('git_blob' in entry and record.get('git_blob') != entry['git_blob'])):
+        return ['Historical bytes/provenance no longer match reviewed identity']
+    references = document_references(data.decode(), Path(current).suffix.lower())
+    recorded = record.get('references', [])
+    if [(r['reference'], r['base']) for r in references] != [(r.get('reference'), r.get('base')) for r in recorded]:
+        return ['Historical reference accounting is incomplete or reordered']
+    locations = document_locations(manifest)
+    errors = []
+    for ref in recorded:
+        parts = urlsplit(ref['reference'])
+        if parts.scheme or parts.netloc or ref['reference'].startswith('/'):
+            if ref.get('original_resolution') != 'external':
+                errors.append('Historical external reference is not labelled external')
+            continue
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(original) if ref['base'] == 'document' else '', unquote(parts.path))) if parts.path else original
+        exists = target in locations or any(path.startswith(target + '/') for path in locations)
+        if target == '.git' and ref.get('field') == 'source_of_truth':
+            exists = bool(re.fullmatch('[0-9a-f]{40}', manifest.get('baseline_commit', '')))
+        if ref.get('original_target') != target or not exists:
+            errors.append('Historical reference does not resolve in its pinned inventory: ' + ref['reference'])
+        if target in locations and ref.get('current_target') != locations[target]:
+            errors.append('Historical reference has an incorrect mapped current target: ' + ref['reference'])
+        if parts.fragment and Path(target).suffix.lower() in DOCUMENT_SUFFIXES and not ref.get('fragment_verified'):
+            errors.append('Historical fragment lacks pinned anchor proof: ' + ref['reference'])
+    return errors
+
+
 def audit_document_references(repository_root: Path, manifest: dict) -> dict:
     """Audit exact tracked document rows and declared metadata bases, offline.
 
@@ -347,17 +400,27 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
     import yaml
     root = Path(repository_root).resolve()
     result = {key: [] for key in ('missing_files', 'missing_anchors', 'escaping_references', 'metadata_errors')}
-    result.update(checked=0, external_urls=0)
+    result.update(checked=0, external_urls=0, historical_references=[], repository_provenance=[])
     locations = document_locations(manifest)
     anchor_cache = {}
 
-    def inspect(label, target, base, *, metadata=False):
+    def inspect(label, target, base, *, metadata=False, provenance=False):
         if not isinstance(target, str):
             result['metadata_errors'].append({'document': label, 'reference': repr(target), 'reason': 'non-string path'})
             return
         result['checked'] += 1
+        if provenance and target == '.git':
+            if re.fullmatch('[0-9a-f]{40}', manifest.get('baseline_commit', '')) and manifest.get('entries'):
+                result['repository_provenance'].append({'document': label, 'reference': '.git',
+                    'baseline_commit': manifest['baseline_commit'], 'kind': 'pinned Git inventory, not a tracked document'})
+            else:
+                result['metadata_errors'].append({'document': label, 'reference': target, 'reason': 'Missing pinned Git provenance'})
+            return
         parts = urlsplit(html.unescape(target))
         if parts.scheme or parts.netloc or target.startswith('/'):
+            if metadata:
+                result['metadata_errors'].append({'document': label, 'reference': target, 'reason': 'Repository metadata is not a relative path'})
+                return
             result['external_urls'] += 1
             return
         path = unquote(parts.path)
@@ -379,7 +442,7 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
         path = root / current
         suffix = path.suffix.lower()
         if suffix not in DOCUMENT_SUFFIXES and not (current.endswith(('document_manifest.yaml',
-                'knowledge/manuals/registry.yaml', 'paper/artifact_manifest.yaml'))):
+                'knowledge/manuals/registry.yaml', 'paper/artifact_manifest.yaml', 'capture_manifest.json'))):
             continue
         if not path.is_file():
             result['missing_files'].append({'document': current, 'reference': current})
@@ -389,13 +452,21 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
             continue
         try:
             text = path.read_text(encoding='utf-8')
+            if original in manifest.get('historical_documents', {}):
+                errors = historical_reference_errors(root, original, current, manifest)
+                result['metadata_errors'].extend({'document': current, 'reason': error} for error in errors)
+                if not errors:
+                    record = manifest['historical_documents'][original]
+                    result['historical_references'].extend({'document': current, 'original_path': original,
+                        'revision': record['revision'], **ref} for ref in record['references'])
+                continue
             if suffix in DOCUMENT_SUFFIXES:
                 metadata, body = _front_matter(text) if suffix in {'.md', '.markdown'} else ({}, text)
                 for field in METADATA_PATH_FIELDS:
                     if field in metadata:
                         values = metadata[field] if isinstance(metadata[field], list) else [metadata[field]]
                         for value in values:
-                            inspect(current, value, root, metadata=True)
+                            inspect(current, value, root, metadata=True, provenance=field == 'source_of_truth')
                 if 'source_revision' in metadata and set(metadata.get('source_refs', [])) != set(metadata['source_revision']):
                     result['metadata_errors'].append({'document': current, 'reason': 'Wiki source key mismatch'})
                 for _, _, target in reference_spans(body, suffix):
@@ -416,6 +487,11 @@ def audit_document_references(repository_root: Path, manifest: dict) -> dict:
                             inspect(current, value, root, metadata=True)
                         for value in record.get('outputs', []):
                             inspect(current, value.get('path'), root, metadata=True)
+                elif current.endswith('capture_manifest.json'):
+                    for image in metadata.get('images', []):
+                        inspect(current, image.get('file'), path.parent, metadata=True)
+                    if metadata.get('reused_images'):
+                        inspect(current, metadata['reused_images'], path.parent, metadata=True)
         except (UnicodeError, ValueError, TypeError, yaml.YAMLError) as exc:
             result['metadata_errors'].append({'document': current, 'reason': str(exc)})
     for key in ('missing_files', 'missing_anchors', 'escaping_references', 'metadata_errors'):

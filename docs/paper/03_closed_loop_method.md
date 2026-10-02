@@ -174,8 +174,8 @@ does not become a new measurement. BO's LLM requests the configured optimizer
 and reviews its result, while LHS or BoTorch owns the numerical coordinates.
 Continuous-domain values are handed to Design without snapping to an old
 candidate table. The output remains a proposal, not an automatic physical
-command. See [Knowledge](../agents/knowledge_agent.md) and
-[BO](../agents/bo_agent.md) for the implemented contracts.
+command. See [Knowledge](../../system/agents/knowledge_agent.md) and
+[BO](../../system/agents/bo_agent.md) for the implemented contracts.
 
 ## Failure and Recovery Semantics
 
@@ -223,7 +223,7 @@ and later demonstrations retain their own dates and configurations. Test,
 replay, simulation, browser and live evidence are not inferred from the graph.
 The separately recorded Orchestrator Setup verification covers bounded
 next-new-run admission and provider-case aggregation, not a model-driven or
-physical whole cycle; see the [runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
+physical whole cycle; see the [runtime evidence note](../../system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
 
 ## Related Documents
 

@@ -16,19 +16,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _relocated_corpus(tmp_path):
-    mapping = {old: row['destination'] for old, row in json.loads(
-        (ROOT / 'docs/maintenance/repository_layout_manifest.json').read_text())['entries'].items()}
-    for page in (ROOT / 'docs/knowledge/wiki').glob('*.md'):
+    for page in (ROOT / 'system/knowledge/wiki').glob('*.md'):
         _, front, body = page.read_text().split('---\n', 2)
         meta = json.loads(front)
         for source in meta['source_refs']:
-            target = tmp_path / mapping[source]
+            target = tmp_path / source
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / source, target)
-        meta['source_refs'] = [mapping[source] for source in meta['source_refs']]
-        meta['source_revision'] = {mapping[source]: digest for source, digest in meta['source_revision'].items()}
         assert set(meta['source_refs']) == set(meta['source_revision'])
-        target = tmp_path / mapping[page.relative_to(ROOT).as_posix()]
+        target = tmp_path / page.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('---\n' + json.dumps(meta) + '\n---\n' + body)
     return tmp_path / 'system/knowledge/wiki'
@@ -47,7 +43,8 @@ def _snapshot(service):
 
 def test_all_reviewed_identities_excerpts_and_staleness_survive_relocation(tmp_path):
     corpus = _relocated_corpus(tmp_path)
-    old = KnowledgeContextService(ROOT, data_root=tmp_path / 'old-state')
+    old = KnowledgeContextService(ROOT, data_root=tmp_path / 'old-state',
+                                  wiki_corpus_root=ROOT / 'system/knowledge/wiki', wiki_source_root=ROOT)
     new = KnowledgeContextService(tmp_path / 'runtime', data_root=tmp_path / 'learned',
                                   wiki_corpus_root=corpus, wiki_source_root=tmp_path)
     before, after = _snapshot(old), _snapshot(new)
@@ -143,7 +140,7 @@ async def test_bootstrap_and_production_factories_share_explicit_knowledge_bindi
     for relative in ('project/Project_guide.txt', 'agents/specimen_design_existing_runtime_guideline.txt'):
         target = tmp_path / 'system' / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / 'docs' / relative, target)
+        shutil.copyfile(ROOT / 'system' / relative, target)
     paths = replace(current_paths(), system_root=tmp_path / 'system',
                     memory_root=tmp_path / 'learned', source_inbox_root=tmp_path / 'inbox',
                     run_root=tmp_path / 'unrelated/runs')
@@ -155,7 +152,8 @@ async def test_bootstrap_and_production_factories_share_explicit_knowledge_bindi
     assert ctx.knowledge_service.wiki.source_root == paths.repository_root
     assert ctx.knowledge_service.data_root == paths.memory_root / 'knowledge'
     before = SimpleNamespace(guide_chunks=[asdict(x) for x in
-        LocalRAGIndex.from_file(ROOT / 'docs/project/Project_guide.txt')._chunks])
+        LocalRAGIndex.from_file(ROOT / 'system/project/Project_guide.txt',
+            source_label=str(ROOT / 'docs/project/Project_guide.txt'))._chunks])
     after = SimpleNamespace(guide_chunks=[asdict(x) for x in ctx.rag._local_index._chunks])
     assert before.guide_chunks == after.guide_chunks
     assert ctx.rag._local_index.source_path == paths.system_root / 'project/Project_guide.txt'
@@ -165,7 +163,7 @@ async def test_bootstrap_and_production_factories_share_explicit_knowledge_bindi
     assert library.inbox == paths.source_inbox_root
     rendered = await controller._live_guideline_context(operator_message='message', goal='goal')
     assert '[source=docs/agents/specimen_design_existing_runtime_guideline.txt]\n' in rendered
-    assert (ROOT / 'docs/agents/specimen_design_existing_runtime_guideline.txt').read_text().strip()[:1800] in rendered
+    assert (ROOT / 'system/agents/specimen_design_existing_runtime_guideline.txt').read_text().strip()[:1800] in rendered
     monkeypatch.setattr(main, 'RUNTIME_PATHS', paths)
     monkeypatch.setattr(main, 'KNOWLEDGE_MEMORY_ROOT', paths.memory_root / 'knowledge')
     monkeypatch.setattr(main, '_SOURCE_INGESTION_SERVICE', None)

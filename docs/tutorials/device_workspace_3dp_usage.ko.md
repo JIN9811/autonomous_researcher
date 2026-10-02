@@ -13,8 +13,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -146,7 +146,7 @@ X/Y를 바꾸면 원본 모델을 다시 슬라이싱해야 합니다.
 - upload probe·전송도 프린터 접속/쓰기를 수행할 수 있습니다.
 
 현재 준비된 파일·승인을 사용하고 과거 성공 근거로 대체하지 않습니다.
-전송·정리·완료 계약은 [Bambu 브릿지](../device_bridges/bambu_x2d_bridge.md)를 봅니다.
+전송·정리·완료 계약은 [Bambu 브릿지](../../system/device_bridges/bambu_x2d_bridge.md)를 봅니다.
 
 ## Step 7 — 런 소유 SPC 근거 확인하기
 
@@ -176,8 +176,8 @@ Live의 **SPC → Report**에서 이번 job ID, 전송/시작 결과, telemetry 
 
 ## 다음 문서
 
-- [Printer fleet](../device_bridges/printer_fleet_bridge.md)
-- [Bambu 설정과 구현](../device_bridges/bambu_x2d_bridge.md)
-- [SPC 근거](../agents/specimen_agent.md)
-- [실행 프로필](../runtime/test_mode.md)
+- [Printer fleet](../../system/device_bridges/printer_fleet_bridge.md)
+- [Bambu 설정과 구현](../../system/device_bridges/bambu_x2d_bridge.md)
+- [SPC 근거](../../system/agents/specimen_agent.md)
+- [실행 프로필](../../system/runtime/test_mode.md)
 - [운영자 실습](user_manual.ko.md)

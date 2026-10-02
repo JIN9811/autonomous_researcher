@@ -35,8 +35,8 @@ claim_ids:
   - C-SAFE-LIVE-01
 related_docs:
   - docs/paper/README.md
-  - docs/runtime/current_code_snapshot.md
-  - docs/runtime/langgraph_runtime.md
+  - system/runtime/current_code_snapshot.md
+  - system/runtime/langgraph_runtime.md
   - docs/paper/03_closed_loop_method.md
 supersedes: []
 -->
@@ -84,15 +84,15 @@ does not certify every optional backend or physical device.
 The architecture places integration complexity in software rather than in a
 purpose-built laboratory. High-level decisions, middle-level procedures, and
 low-level execution are supported by Guardian/Safety and Knowledge/Evidence.
-The [control model](../runtime/three_level_control_model.md) and individual
+The [control model](../../system/runtime/three_level_control_model.md) and individual
 agent responsibility maps define these boundaries in detail.
 
 | Mechanism | Existing-laboratory role | Current implementation reference |
 |---|---|---|
-| VLA-enabled manipulation | Connect physical stages using a robot arm rather than making dedicated transfer fixtures the default | [Manipulation](../agents/manipulation_agent.md) |
-| Robot integration boundary | Permit supported robot substitutions with calibration and policy validation | [LeRobot bridge](../device_bridges/lerobot_bridge.md) |
-| API integration | Reuse programmatically controllable equipment | [Printer fleet](../device_bridges/printer_fleet_bridge.md) |
-| Desktop workflow integration | Reuse equipment operated through PC software | [Lab Equipment](../agents/equipment_agent.md) |
+| VLA-enabled manipulation | Connect physical stages using a robot arm rather than making dedicated transfer fixtures the default | [Manipulation](../../system/agents/manipulation_agent.md) |
+| Robot integration boundary | Permit supported robot substitutions with calibration and policy validation | [LeRobot bridge](../../system/device_bridges/lerobot_bridge.md) |
+| API integration | Reuse programmatically controllable equipment | [Printer fleet](../../system/device_bridges/printer_fleet_bridge.md) |
+| Desktop workflow integration | Reuse equipment operated through PC software | [Lab Equipment](../../system/agents/equipment_agent.md) |
 
 These mechanisms explain the hardware-reuse strategy; measured cost savings
 and cross-robot transfer performance are separate evaluation questions.
@@ -127,7 +127,7 @@ Dispatch maps the current stage to one of 12 entries: `idle`, `design`,
 Declared edges include logical transitions, supervisor overlays, evidence
 flows, and runtime-sidecar relations. The dated 74-edge count above describes
 that configuration surface, not sequential physical actions. Current inventories
-are maintained in the [code snapshot](../runtime/current_code_snapshot.md).
+are maintained in the [code snapshot](../../system/runtime/current_code_snapshot.md).
 
 ## Stage Contracts
 
@@ -153,7 +153,7 @@ The current working-tree Orchestrator contract keeps Setup confirmation and
 new-run admission inside the controller/runtime boundary: it validates the
 captured confirmed set before the affected path and does not grant a device
 bypass. Its bounded verification is recorded separately in the
-[runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md);
+[runtime evidence note](../../system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md);
 that note is not a complete physical-campaign result.
 
 ## State, Checkpoints, and Resume
@@ -188,7 +188,7 @@ separately preserves submitted originals and curates page-wise input into one
 published note per source. Active graph storage and reconciliation are retired;
 the ontology vocabulary remains in use.
 
-See the [Knowledge Agent](../agents/knowledge_agent.md) for the decision tools,
+See the [Knowledge Agent](../../system/agents/knowledge_agent.md) for the decision tools,
 storage contracts and source-intake boundary. Provenance is part of execution,
 while scientific correctness remains an evaluation question.
 
@@ -222,5 +222,5 @@ captures commands and output boundaries.
 
 - [Problem and contributions](01_problem_and_contributions.md)
 - [Closed-loop method](03_closed_loop_method.md)
-- [Current code snapshot](../runtime/current_code_snapshot.md)
-- [LangGraph runtime Reference](../runtime/langgraph_runtime.md)
+- [Current code snapshot](../../system/runtime/current_code_snapshot.md)
+- [LangGraph runtime Reference](../../system/runtime/langgraph_runtime.md)

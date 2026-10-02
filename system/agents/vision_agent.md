@@ -1,0 +1,567 @@
+<!-- atr-doc
+doc_type: reference
+subtype: system
+status: active
+authority: descriptive
+audience: [researcher, operator, developer, maintainer]
+scope: [agents, vision, perception, verification, decision_tools]
+summary: Bounded multimodal Vision decisions over existing capture, detector, freshness, rollout-stop, and evidence contracts.
+source_of_truth:
+  - agents/vision/agent.py
+  - agents/vision/decision.py
+  - agents/vision/module.py
+  - agents/vision/execution.py
+  - agents/vision/presentation.py
+  - agents/vision/frontend/live_report.js
+  - agents/base_agent.py
+  - orchestrator/langgraph_runtime.py
+  - backends/llm_backend.py
+  - graphs/modules/vision/module.yaml
+  - device_bridges/camera_vision/utm_runtime_bridge.py
+  - device_bridges/lerobot_bridge.py
+  - app/main.py
+  - utils/utm_clear_cycle.py
+  - utils/utm_specimen_presence.py
+  - device_bridges/camera_vision/tools.py
+last_verified: 2026-09-29
+verified_against: dd0d772
+related_docs:
+  - system/agents/README.md
+  - system/agents/agent_api_connection_matrix.md
+  - system/agents/specimen_agent.md
+  - system/agents/manipulation_agent.md
+  - system/agents/equipment_agent.md
+  - system/agents/vision_pickup_observation_runtime_guideline.txt
+supersedes: []
+-->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
+
+# Vision Agent Reference
+
+![vision agent role overview](assets/figures/vision-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
+
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Runtime status | Installed `vision@1.0.0` owner, executable module graph and owned live report; existing observation and bounded decision behavior retained |
+| LLM decision layer | Generic multimodal review implemented; revised API/local choices matched 12/13 development expectations each, with remaining errors |
+| Physical effect | Possible through existing ActiveCam move/capture/return and verified rollout-stop paths |
+| Primary handoff | `vision_signal.v1` and role-specific verification evidence to the current graph consumer |
+| Live hardware validation | Earlier reconstruction tests were non-actuating; the [later campaign archive](../../docs/paper/evidence/2026-09-28-campaign-archive-audit.md) retains Vision attempts and failures; no new visual-classifier accuracy study is claimed |
+| Freshness | Handoff evidence expires 180 seconds after observation in LIVE and TEST; safety signals retain 5 seconds |
+
+## Installed Package and Executable Structure
+
+The [Vision package](../../packages/agents/vision/package.yaml) binds the installed
+`vision@1.0.0` AgentModule to the observation-only `camera_vision@1.0.0`
+[Device Bridge](../device_bridges/utm_vision_bridge.md). Package Manager shows the
+package; Device Bridges shows its bridge and internal observation components.
+LeRobot continues to own ActiveCam movement, capture/return and rollout stop.
+The shared UTM observer remains available to Equipment without a second instance.
+
+![Vision executable operations and source-bound five-area implementation relationships](assets/figures/vision_control_areas.svg)
+
+The IDE and this light document figure use the same execution catalog. `prepare`
+admits the existing task and routes to composite `observe`, existing `clearance`,
+or a terminal result; `deliver` returns the current AgentResult. Observation,
+interlocks and bounded model review remain one coherent owner operation. CODE
+relationships expose High/Middle/Low/Guardian/Knowledge responsibilities inside
+that operation; they are not extra model calls or executable graph steps.
+
+`project_vision_report(metadata, agent_payload)` supplies the existing report API.
+Explicit metadata reports retain priority; otherwise current
+`state.latest_observations` outranks the older metadata observation. The common
+API host supplies request-only context without persisting a second report store.
+The frontend descriptor mounts the original six cards, images and UTM verification
+tabs through the shared live host. Camera polling, tab selection and controls keep
+their existing lifecycle. Removing all graph bindings makes the owner and its
+frontend asset inactive while retaining code, settings and archived evidence.
+
+Fresh software verification on 2026-09-13 completed the registered API-model
+virtual-device cycle through the next Design: 34/34 model attempts across ten
+owners, 357.934 seconds of recorded cycle time and zero physical calls. A separate
+guarded 44-test suite covered mode combinations. These are virtual equipment and
+software results, not new hardware evidence; the freshness limitation above remains.
+
+## Overview and Responsibilities
+
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
+`VisionAgent` turns a bounded observation task into current visual evidence. Existing
+code owns task resolution, camera and session identity, capture, detector facts,
+coordinates, thresholds, freshness, rollout state, and final handoff gates. The
+bounded decision layer may select an existing verification routine and may accept
+or return the raw-plus-annotated evidence from that same capture.
+
+This is not a replacement detector. The model does not estimate coordinates, edit
+thresholds, choose a mode, retimestamp evidence, grant approval, or issue arbitrary
+camera/robot/UTM/desktop commands.
+
+| Owned by Vision | Not owned |
+|---|---|
+| Observation-contract selection within the current Vision task | Experiment planning, graph routing, or another agent's task |
+| Existing capture/detector invocation through code-owned callbacks | Free-form bridge methods, driver arguments, poses, ROI, or thresholds |
+| Same-capture raw/annotated evidence review | Treating image text or model output as executable instruction |
+| Freshness, identity, contradiction, and detector hard gates | Extending TTL or treating stale evidence as current truth |
+| Vision reports, signals, decisions, and evidence provenance | Guardian/operator approval or scientific measurement |
+
+### Five-Area Responsibility Map
+
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
+The five areas are responsibility boundaries, not five sequential model calls.
+
+| Area | Vision responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | LLM selects bounded observation tools and reviews current detector evidence and same-frame images | Orchestrator owns the mission and graph route; the model cannot select another domain task or declare physical safety |
+| Middle-Level Control | Resolve tasks, dispatch capture/status/stop APIs, process detector results and artifacts, enforce interlocks and assemble handoff | Existing task resolver, capture ordering, detector result, freshness, and completion state remain authoritative |
+| Low-Level Control | Selected camera acquisition and LeRobot ActiveCam / rollout device boundaries | Bridges own ports, calibration, robot/process state, replay execution, and command acknowledgement |
+| Guardian / Safety | Identity, mode, stop flags, lease, lifecycle, freshness, interlock, decision budget, and hard-gate enforcement | No model response overrides a failed detector, missing stop acknowledgement, stale signal, or Guardian decision |
+| Knowledge / Evidence | Preserve `vision_decision.v1`, model/tool trace, raw and annotated image hashes, detector facts, and existing reports/signals | Historical, virtual, mock, or mismatched evidence is never promoted to current physical proof |
+
+## Closed-Loop Position and Handoffs
+
+After accepted placement/clearance evidence and confirmed robot termination, the
+existing sidecar invokes [Manipulation's task-result judgment](manipulation_agent.md#bounded-decision-contract)
+using the Manipulation module's model binding. Vision retains its visual facts;
+Manipulation acceptance is additionally required for task handoff. Robot stop does
+not wait for that judgment.
+
+![Vision closed-loop position and handoffs](assets/figures/vision_01_closed_loop_handoffs.svg)
+
+**Figure Vision-1.** Implementation-inspection projection of the bounded Vision
+decision layer around the existing graph and domain boundaries. Solid paths are
+current runtime/evidence flows; dashed branches are review/return or explicit
+non-LLM TEST behavior. The figure is not physical-validation evidence.
+
+| Boundary | Input/output | Authority and gate |
+|---|---|---|
+| In: runtime | `OrchestratorState`, current task, run/loop/specimen/session/mode including metadata specimen scope | Runtime supplies scope; the model cannot rewrite it |
+| In: Specimen | fabrication/ejection context and pickup target | Matching specimen and configured path required |
+| In: Manipulation | rollout/session/post-place state | Placement polling and verified stop remain code-owned |
+| In: managed clearance | completed replay, measured-home return, fresh UTM capture | No model wait while replay is running or being stopped |
+| In: detector | raw frame, annotated copy, detector facts from one capture | Both images are required and must have matching dimensions |
+| Out: graph consumers | existing `vision_report.v1`, `vision_signal.v1`, ejection/placement/clearance contracts | Existing deterministic gates decide ready/pending/blocked |
+| Out: evidence | `vision_decision.v1`, image hashes/labels, evidence refs, artifacts | Additive record; does not overwrite capture timestamps or detector truth |
+
+## Internal Workflow
+
+| Phase | Implementation | Effect boundary |
+|---|---|---|
+| Resolve | Existing Vision task and domain context | Unsupported or mismatched task remains blocked/review |
+| Select | `select_vision_tool(..., contract_id)` | JSON choice is `execute_verification` or `return_to_owner`; no driver arguments |
+| Execute | Existing code-owned callback/routine | Pickup capture may be read-only; ActiveCam may move the robot to capture and return |
+| Detect | Existing detector and hard gates | Model does not calculate boxes, coordinates, confidence, ROI, or status |
+| Review | `review_visual_evidence(..., capture, contract_id)` | JSON choice is `accept_visual_evidence` or `return_to_owner` over same-capture evidence |
+| Finalize | Existing report/signal/verification builders | Code rechecks identity, stop flags, freshness, session and domain gates |
+| Archive | Existing execution artifact path plus decision artifact | Preserve actual effects and model/tool evidence separately |
+
+![Vision decision workflow and effect boundary](assets/figures/vision_02_execution_effect_boundary.svg)
+
+**Figure Vision-2.** The model chooses only a registered local action. ActiveCam
+is deliberately shown as physical-possible because its existing routine moves the
+robot, captures, and returns it. Placement review occurs only after the verified
+rollout stop; clearance review occurs only after completed replay and measured
+return. Polling and mandatory stop/cancel paths never wait on the model.
+
+### Path-Specific Ordering
+
+| Path | Decision and evidence order | Completion rule |
+|---|---|---|
+| Pickup | Select existing verification, capture, review same-capture raw/annotated images plus detector facts | Existing pickup gates pass and evidence remains within the 180-second handoff TTL |
+| ActiveCam ejection | Select the existing composite routine, then robot move → capture → return, detector, and same-capture review | Existing ejection, artifact, camera-return and port-release gates pass; no automatic model-driven rerun |
+| Manipulation placement | Existing status/interlock and capture polling runs without LLM awaits; existing code verifies and canonically records STOPPED for the matching rollout; only then review its current raw/annotated evidence | Preserve `needs_post_place_vision` / `stopped_pending_visual_review` until acceptance; reuse a same-session verified STOPPED result without repeating the stop |
+| Post-test clearance | Existing managed replay monitoring/cancel/timeout and measured-home return complete first; then review a fresh registered clearance capture before done | Replay completed, measured home verified, detector says clear, and evidence is current and consistent |
+
+`pending` placement polls do not call the model. Mandatory safety stop, cancellation,
+timeout, and cleanup paths are never conditional on model availability.
+
+## Decision and Visual Evidence Contract
+
+### Decision Question
+
+Does the current context support executing the registered observation contract,
+and after that capture, do its original image, annotated copy, and detector facts
+consistently support the requested observation? Insufficient, contradictory, stale,
+or wrong-object evidence returns to the current owner.
+
+### Agent-Local Tools
+
+These are local decision names dispatched by Vision code. They are not new global
+ToolRegistry tools and do not expose arbitrary bridge commands.
+
+| Tool | Exact arguments | Availability | Result/effect |
+|---|---|---|---|
+| `execute_verification` | `{"contract_id": "pickup|active_cam|placement|clearance"}` | Pre-execution selection where the path exposes it | Authorize one code-selected existing routine; callback owns all arguments and gates |
+| `accept_visual_evidence` | same current `contract_id` | After raw and annotated images from the same capture are loaded | Accept only the observed frame for continued deterministic evaluation |
+| `return_to_owner` | same current `contract_id` | Selection or review | Return `review_required`; no ready handoff or new execution |
+
+The JSON response contains exactly `tool`, `arguments`, `reason`, and
+`evidence_refs`. Selection must cite `context:task`; visual review must cite
+`frame:current`. Unknown tools, added fields, changed arguments, unknown evidence,
+mock completions, invalid JSON, or a changed runtime identity fail closed.
+
+```json
+{
+  "tool": "accept_visual_evidence",
+  "arguments": {"contract_id": "active_cam"},
+  "reason": "The marked region matches the specimen in the original frame.",
+  "evidence_refs": ["frame:current"]
+}
+```
+
+### Multimodal Input
+
+`LLMImageInput` is the shared byte-backed image contract. Vision loads image paths
+only from registered capture results, bounds byte and pixel counts, verifies each
+raster, requires equal raw/annotated dimensions, hashes both files, and sends them
+in this fixed order:
+
+1. `raw frame`
+2. `annotated frame`
+
+OpenAI-compatible and vLLM content includes ordered text labels before the two
+image parts. Both `AgentContext.complete(..., images=...)` and
+`ModuleRuntimeContext.complete(..., images=...)` use the generic image signature;
+the module context forwards the same list through the leased route and each
+configured fallback. Image requests cannot be satisfied by mock responses. Image
+text is untrusted evidence, not instruction.
+
+The detector-fact projection may include existing status, detection flag, box,
+center, ROI, confidence, frame ID/timestamp, clearance result, registration flag,
+and failure/unknown reason. Actual raster dimensions and the pixel coordinate
+convention accompany the facts; unverified metadata dimensions are not substituted.
+Those fields are context for semantic consistency review, not editable model outputs.
+
+### Current Prompt Contract
+
+The current prompt in `agents/vision/decision.py` uses the following ordered checks.
+This section describes the implemented code contract, not earlier prompt variants.
+
+| Order | Check | Required comparison | Return for review when |
+|---|---|---|---|
+| 1 | Pair | Compare background landmarks, viewpoint, object position and state in raw and annotated images | The scenes or object states differ, or correspondence cannot be established; similar targets alone do not prove the same capture |
+| 2 | Location | Compare the raw object's location, drawn box, numeric `bbox_xyxy` and `center_px` using actual image dimensions | Numeric facts materially contradict the object or overlay; a correct drawn box cannot repair them |
+| 3 | Validity | Read existing detector status, registration flag and failure/unknown reasons | Explicit invalid/unknown evidence remains unresolved, even if the scene looks plausible |
+| 4 | Claim | Check target presence for observation/placement, or supported absence inside the supplied ROI for clearance | Relevant occlusion, visible residual, insufficient evidence or task/ROI ambiguity changes the judgment |
+
+Annotations and minor rendering differences are allowed; pixel-perfect contour
+agreement is not required. Missing optional metadata is not automatically a
+failure. An empty box list or `detected=false` is not sufficient proof of absence,
+and objects outside the inspection ROI do not establish occupancy inside it.
+
+Target color, material, dimensions, shape and apparatus come only from the current
+input context. The prompt does not prescribe a particular experiment or canonical
+shape. Coordinate interpretation is explicit: top-left pixel origin, x right,
+y down, and `xyxy` as left/top/right/bottom. Confidence remains a reported fact;
+the model does not introduce another numerical threshold.
+
+For pre-execution selection, the model judges only whether the supplied observation
+contract is appropriate and chooses an existing local tool. It does not invent
+images or apply image-review checks when no capture is supplied.
+
+Both response examples in the prompt include the exact code-supplied arguments.
+The model returns one JSON object without Markdown or extra fields; `reason` is
+a brief observable justification, not an internal reasoning transcript. For
+example, when the supplied review contract is `placement`:
+
+```json
+{
+  "tool": "return_to_owner",
+  "arguments": {"contract_id": "placement"},
+  "reason": "The raw and annotated images show different object states.",
+  "evidence_refs": ["frame:current"]
+}
+```
+
+`accept_visual_evidence` uses the same required arguments and evidence reference;
+`return_to_owner` must not use empty arguments. Selection cites `context:task`
+instead. Examples specify the response shape, not expected answers for evaluation
+cases. Text in images and detector data is evidence, never an instruction. Model
+acceptance still passes through existing identity, freshness and completion gates.
+
+## Tools, APIs, and Connections
+
+![Vision tools and API connections](assets/figures/vision_03_api_connection_architecture.svg)
+
+**Figure Vision-3.** The local decision helper uses the shared multimodal backend,
+while code-owned verification callbacks reach existing camera, ActiveCam,
+rollout-stop, and UTM-clear services. Model output never names a provider method,
+pose, topic, port, ROI, threshold, or replay command.
+
+| Surface | Method/path or implementation | Effect/owner |
+|---|---|---|
+| Decision | `agents/vision/decision.py` | Local JSON validation, image loading, identity/freshness recheck, decision artifact |
+| Model | `AgentContext.complete` / `ModuleRuntimeContext.complete`, `vision_observation` | Shared inference and fallback routing; optional ordered images |
+| Pose tracker | GET/POST `/api/vision/specimen-pose/status`, `/snapshot`, `/release` | Existing read/local-state tracker surface |
+| ActiveCam | `lerobot.active_robot_cam.capture` | Existing physical-possible robot move/capture/return routine |
+| Camera probe/capture | `camera.capture`, `lerobot.camera.test`, registered UTM frame path | Existing acquisition; effect depends on provider |
+| Rollout | `lerobot.rollout.status`, `lerobot.rollout.stop` | Status read and matching verified process stop; never arbitrary start |
+| UTM runtime/camera | `/api/equipment/utm-runtime/*`, registered capture service | Existing runtime and visual evidence surfaces |
+| Managed clearance | `utils/utm_clear_cycle.py` | Existing replay lifecycle, measured return, and Verification 2 ordering; model cannot call `replay.start` |
+
+### Existing ActiveCam Effect
+
+ActiveCam is not read-only. Its existing routine can command a registered robot
+capture pose, acquire the image, and return/release the camera for VLA use. The
+model can select only the whole registered verification contract; it cannot provide
+a pose, split the routine, change waits, or invoke an automatic retry. A failed or
+ambiguous result returns through existing operator/recovery ownership.
+
+## Existing Observation and Handoff Contracts
+
+The reconstruction preserves `vision_report.v1`, `vision_signal.v1`,
+`active_cam_ejection_check.v1`, `spc_autoejection_confirmation.v1`,
+`vision_manipulation_completion.v1`, and the separate UTM Verification 1/2
+records. `vision_decision.v1` is additive and records scope, checkpoint, model use,
+selected tool, reason, evidence refs, image hashes, and error/failure state.
+
+| Existing result | Meaning | Model limitation |
+|---|---|---|
+| `ready` / accepted handoff | All required current code-owned gates passed | Model acceptance alone cannot produce it |
+| `pending` | Existing routine is waiting for a real lifecycle or observation condition | Polling does not repeatedly call the model |
+| `review_required` | Model unavailable/invalid, evidence expired/contradictory, or owner review selected | Cannot be silently converted to ready |
+| `blocked` / `unknown` | Capture, detector, identity, session, stop, registration, or hard gate failed | Model cannot override or retimestamp it |
+
+## Post-Test Clearance Baseline
+
+Placement detection and Verification 2 share the fixed platen ROI
+`[200, 240, 400, 400]` in the 640 × 480 camera view through
+`utm_platen_roi_normalized()`. This applies to physical and virtual UTM capture
+routes; ActiveCam keeps its own workspace ROI. The monitor's full-height
+`x_roi` and caller-supplied overrides do not control placement inspection.
+Placement still requires a detected specimen; clearance requires supported absence.
+
+Verification 1 remains placement evidence. Verification 2 uses the separate
+post-clear detector after managed replay completion and measured robot return.
+It reuses the placement detector's high-chroma-red mask and normalized ROI crop
+path, but aggregates small residuals instead of looking only for the largest
+specimen. The fixed 640 × 480 camera profile uses a generous platen ROI
+`[200, 240, 400, 400]` (left, top, right, bottom); discarded specimens outside
+that region do not count. Green marker registration is not required. The model
+does not move the ROI or change the material/area thresholds.
+
+| Result | Existing deterministic meaning | Analysis handoff |
+|---|---|---|
+| `occupied` | Current ROI contains sufficient specimen residual | Blocked |
+| `clear` | Fresh profile-matched frame supports absence in the inspection region | Allowed only with successful replay, measured return, and accepted visual review |
+| `unknown` | Capture, ROI/signal, identity, freshness, or material evidence insufficient | Blocked |
+
+A failed capture is never absence. Verification 2 owns distinct raw/annotated
+artifacts and does not overwrite placement evidence. The model sees only the same
+capture pair selected by existing code. Black/white signal loss is rejected by
+the detector; occlusion, wrong viewpoint or an unobservable platen must still be
+rejected by the visual review. `detected=false` alone never releases Analysis.
+
+## Configuration and Modes
+
+| Setting/mode | Behavior |
+|---|---|
+| `vision_observation` | Existing model role used by the bounded decision helper |
+| `run_metadata.vision_decision_settings.timeout_s` | Per-call timeout; positive finite value no greater than 300 seconds, default 45 |
+| Normal API/vLLM runtime | Real backend decision required at an exposed decision checkpoint; invalid/mock output returns review |
+| `Mode.TEST` without `force_real_llm_in_test` | Explicit `deterministic_test`, `llm_used=false`; not visual validation |
+| Forced-real TEST fixture | Exercises the registered API/vLLM model route; must not be described as deterministic-test validation |
+| Replay/virtual evidence | Retains its original environment label; never promoted to Live physical proof |
+
+The resolved all-virtual `virtual_bridge` profile executes normal tool selection
+and visual review; only camera/robot I/O is simulated. It is distinct from an
+explicit standalone preflight. A model failure cannot become successful virtual
+preflight. See the [virtual-device contract](../runtime/runtime_ide.md#virtual-device-execution-contract).
+
+For resolved virtual placement, the camera renders the current Specimen STL using
+the existing CPU renderer and simulated red material. The request binds run,
+loop, session, specimen and candidate identity, and records the STL content digest
+separately from the parameter geometry hash. Missing or changed requested geometry
+returns unknown instead of a placeholder success. The labeled synthetic raster
+passes through the same detector and raw/annotated image-review path; it is not a
+physical observation. Clearance remains dependent on the matching virtual replay.
+
+The decision timeout does not extend camera, motion, rollout, replay, or task
+deadlines. Pickup/ActiveCam review and downstream handoff evidence use the same
+180,000-ms TTL in LIVE and TEST, measured from the original observation timestamp.
+Inference never renews this timestamp, and there is no TEST-only additional grace.
+Expiry at or after 180 seconds yields `VISION_EVIDENCE_EXPIRED`/review and requires
+a new observation through existing ownership. `VisionAgent.HANDOFF_SIGNALS`
+explicitly identifies the long-lived evidence; all other signals, including
+workspace clearance, anomaly, fixture alignment and UTM motion, retain 5,000 ms.
+The 180-second handoff budget does not replace current safety interlocks.
+
+## Safety, Recovery, and Idempotency
+
+| Condition | Required behavior |
+|---|---|
+| Stop/safe-stop/E-stop requested | Decision fails closed; mandatory cleanup/stop continues without waiting for model |
+| Run/loop/specimen/session/task/mode or metadata specimen scope changed during inference | Discard decision and return a valid blocked observation for the new scope |
+| Missing, oversized, invalid, or dimension-mismatched image pair | Return review; do not call acceptance |
+| Detector contradiction, wrong object, occlusion, or insufficient clearance evidence | `return_to_owner`/review; hard gate remains authoritative |
+| Pickup/ActiveCam evidence older than TTL after review | Reject as expired; do not retimestamp or lengthen TTL |
+| ActiveCam failure or ambiguous effect | Do not automatically rerun robot motion; use existing recovery/operator path |
+| Placement still pending | Continue code-owned polling/interlock; no LLM await |
+| Rollout stop unverified | No placement completion, regardless of image/model result |
+| Placement review delayed, rejected, or cancelled after stop | Keep the pending-visual-review handoff/status; a same-session retry reuses the verified STOPPED result without another stop call |
+| Replay incomplete or measured return missing | No clearance review or done state |
+| Mock/model error/invalid JSON/timeout | Preserve completed physical/capture facts, but leave undecided handoff in review |
+
+Completed effects are never undone or repeated merely because the model returned
+late or failed. Callers keep the deterministic final gate and existing runtime
+retry policy.
+
+## Operator and GUI Surfaces
+
+### GUI Screen Reference
+
+![vision agent report at 1920 × 1080](../../docs/gui/assets/screenshots/2026-09-29/live-vision.png)
+
+ActiveCam, placement verification and clearance evidence are separate observation slots. The retained image is historical; missing slots do not mean that a fresh check passed.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../runtime/gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
+Existing Vision, LeRobot, UTM, agent-report, event, and artifact surfaces remain
+projections over runtime state. They may display the current decision, evidence
+pair, detector facts, freshness, and owner-review reason. A UI action or image
+preview does not grant capture, motion, rollout, replay, or equipment authority.
+
+## Verification Status and Evidence
+
+The opt-in [registered multimodal verification script](../../scripts/verify_vision_multimodal.py)
+was run with `--execute` against the configured routes. All eight fixture decisions
+were accepted:
+
+| Registered route | Selection | Upright | Compressed | Synthetic empty |
+|---|---:|---:|---:|---:|
+| API `gpt-5.5` | 5.076 s | 4.058 s | 4.220 s | 11.739 s |
+| vLLM `e4b` fallback `gemma4:31b` | 4.901 s | 8.302 s | 8.380 s | 8.458 s |
+
+The run registered no hardware tools and performed no physical actuation, service
+start, or configuration edit. The upright and compressed source fixtures remained
+unchanged; the empty image was synthetic and is not UTM-clearance proof. Results
+were recorded in a temporary local report rather than a repository evidence file.
+
+An additional archived-artifact cross-check exercised 13 inputs on each backend:
+eight natural captures and five in-memory detector/image-pair perturbations.
+All 26 real calls returned without timeout; source image hashes were unchanged.
+Historical timestamps were preserved. Expected choices were declared before the
+calls and were not sent to the models. They are reference expectations, not an
+independently labelled accuracy benchmark.
+
+| Archived input / perturbation | API `gpt-5.5` | Local vLLM `gemma4:31b` |
+|---|---|---|
+| ActiveCam A/B, placement A/B, compressed reference | Accept | Accept |
+| Clear A | Accept | Accept |
+| Clear B, recorded as clear by detector | Return: possible residual | Accept |
+| Detector `unknown`, visually empty inspection region | Accept | Accept |
+| Compressed specimen falsely reported clear | Return | Return intent; invalid arguments |
+| Empty region falsely reported occupied | Return | Return intent; invalid arguments |
+| Incorrect numeric detector box | Accept; contradiction missed | Accept; contradiction missed |
+| Different-camera raw/annotated pair | Accept; mismatch missed | Accept; mismatch missed |
+| Compressed raw + upright annotated pair | Accept; mismatch missed | Accept; mismatch missed |
+
+API case latency was 4.061–9.787 seconds; local was 6.234–9.964 seconds.
+Declared semantic-choice matches were 8/13 and 9/13, respectively, with tool-choice
+agreement on 12/13 inputs. These counts do not imply valid tool execution: local
+returned empty `arguments` in its two rejection responses, omitting `contract_id`;
+strict parsing rejected both into review. API supplied valid arguments in all
+13 responses. The Clear B discrepancy lacks independent human ground truth.
+
+Both historical ActiveCam cases on both backends remained
+`VISION_EVIDENCE_EXPIRED` after model acceptance. For clearance, the helper's
+visual acceptance is not workflow completion: regression tests explicitly verify
+that detector `unknown` or occupied states still block Verification 2 and Analysis.
+Image paths/digests confirmed that intentionally mismatched pairs reached the
+model; this check does not prove that the model attended to both images.
+
+The input manifest and exact response reports were retained locally at
+`/tmp/atr-vision-crosscheck-pDiiDg/input_manifest.json`,
+`/tmp/atr-vision-multimodal-e0rujdv8/results.json` (API), and
+`/tmp/atr-vision-multimodal-jq8s8wpj/results.json` (local). These temporary files
+are not published repository evidence. Reproduction uses the verification script's
+`--artifact-manifest` and `--backend` options against available archived captures.
+
+These results describe the initial prompt. The subsequent
+[generic prompt comparison](../../docs/paper/evidence/2026-09-08-vision-generic-prompt-verification.md)
+records a new controlled baseline, the revised prompt/input context, held-out
+checks, and remaining errors. The initial 8/8 fixture result is not a claim that
+the larger cross-check passed.
+
+The combined regression run after prompt refinement over 14 files reported
+271 passes and 10 existing warnings in 14.18 seconds. Focused runs overlap this
+coverage and are not added again.
+No physical-motion or live-safety validation was performed.
+
+Earlier records for ActiveCam, placement, and UTM Verification 2 validate portions
+of the pre-existing deterministic workflow only. They do not validate the new
+multimodal decision layer. In particular, prior supervised-loop and compressed
+specimen camera evidence must not be reinterpreted as proof of model judgment,
+decision latency, or physical safety.
+
+## Limitations and Known Gaps
+
+- Pickup/ActiveCam explicitly checks expiry after model review against the shared
+  180-second handoff budget. A slower review or queue can still require owner-driven
+  reobservation. Safety signals remain short-lived and must not be inferred fresh
+  merely because associated handoff evidence remains usable.
+- Placement inspection retains its durable image proof, but existing emitted
+  signals retain their original expiry and downstream gates remain unchanged.
+- No benchmark establishes visual-decision accuracy, calibration robustness,
+  lighting robustness, latency, or safety effectiveness.
+- Initial archived cross-checks exposed missed numeric-box and cross-image contradictions.
+  Model acceptance does not guarantee pair provenance or coordinate consistency;
+  the current loader validates image structure/size and records hashes, not
+  pixel-level same-capture correspondence. These checks must not be delegated to
+  model judgment alone. The revised prompt corrected tested numeric-box and
+  different-camera cases and local rejection arguments, but a same-background
+  changed-object-state pair still escaped the local model in the development set.
+  API also returned one detector-labelled clear capture for possible residual;
+  that case lacks independent ground truth.
+- Acceptance checks semantic consistency only for the current frame; it does not
+  establish future scene state, calibrated coordinates, fixture alignment,
+  scientific measurement, or physical safety.
+- Backend/provider multimodal support and camera availability remain
+  environment-dependent.
+
+## Operator-requested archived-image recovery
+
+A stopped run can be recovered for data postprocessing using its original
+post-removal image only on explicit operator request. The private request pins
+the run, loop, specimen, completed replay session and archived-result SHA-256.
+The original raw-image SHA-256 and timestamp must match the saved review and
+fall after that replay's measured completion. Original images/results remain
+unchanged; the revised ROI overlay and both real model reviews are separate
+recovery artifacts. ROI remeasurement evaluates the original capture instant,
+not a fabricated current timestamp. Live capture freshness rules are unchanged.
+
+Accepted evidence is marked `historical_review=true` and
+`current_physical_clearance=false`: it describes the saved scene, not current
+hardware safety. The bounded recovery continues the normal Analysis/BO tail
+using the saved CSV, then generates one next Design and pauses before Specimen.
+Its temporary tool allowlist prohibits device commands and camera acquisition;
+only geometry generation and the existing nonphysical BO benchmark are allowed.
+The next-design stop request is consumed after use, not installed as a global
+or permanent stop rule. Failed/ambiguous image or task reviews remain failures.
+
+If Analysis and BO have completed but historical physical Guardian holds remain,
+an explicitly scoped `design_only` continuation may generate the next design from
+the hash-pinned accepted BO result. It retains the Guardian stop/hold, uses the
+same non-actuating tool guard, and pauses before fabrication. This is a design
+artifact operation, not clearance to resume a physical cycle.
+
+## Related Documents
+
+- [Agent Matrix](agent_api_connection_matrix.md)
+- [Specimen](specimen_agent.md)
+- [Manipulation](manipulation_agent.md)
+- [Equipment](equipment_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
+- [Legacy Vision Guideline](vision_pickup_observation_runtime_guideline.txt)
+- [Vision Camera Bridge Guide](../../docs/tutorials/device_workspace_vision_camera_bridge_usage.ko.md)

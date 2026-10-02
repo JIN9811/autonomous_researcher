@@ -10,7 +10,7 @@ scope:
   - paper_tables
 summary: Defines where canonical paper tables live and how their evidence state is maintained.
 related_docs:
-  - docs/standards/paper_documentation_standard.md
+  - system/standards/paper_documentation_standard.md
   - docs/paper/README.md
 supersedes: []
 ---

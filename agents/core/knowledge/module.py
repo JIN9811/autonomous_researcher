@@ -20,6 +20,6 @@ CORE_MODULE = AgentModule(
         "capabilities": ["knowledge_context.v1", "knowledge_report.v1"],
         "frontend": {"host": "/live", "descriptor": "graphs/modules/knowledge/ui.yaml", "asset_url": "/module-assets/knowledge/live_report.js", "namespace": "AX4LABKnowledgeUI", "factory": "createFrontend", "report_api": "/api/agents/knowledge/report"},
         "configuration": {"plan_contract": "agents/core/knowledge/plan.py", "source": "graphs/modules/knowledge/module.yaml", "activation_supported": False},
-        "documentation": "docs/agents/knowledge_agent.md",
+        "documentation": "system/agents/knowledge_agent.md",
     }, allow_nan=False),
 )

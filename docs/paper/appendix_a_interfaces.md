@@ -34,9 +34,9 @@ claim_ids:
 related_docs:
   - docs/paper/02_system_architecture.md
   - docs/paper/04_platform_architecture.md
-  - docs/agents/README.md
-  - docs/agents/agent_api_connection_matrix.md
-  - docs/runtime/current_code_snapshot.md
+  - system/agents/README.md
+  - system/agents/agent_api_connection_matrix.md
+  - system/runtime/current_code_snapshot.md
 supersedes: []
 -->
 
@@ -47,7 +47,7 @@ supersedes: []
 | At a glance | Details |
 |---|---|
 | Topic | Agent, runtime, device and knowledge interface families |
-| Evidence boundary | [Agent API matrix](../agents/agent_api_connection_matrix.md); concrete schemas remain code-owned |
+| Evidence boundary | [Agent API matrix](../../system/agents/agent_api_connection_matrix.md); concrete schemas remain code-owned |
 | Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
 
 ## Summary
@@ -56,8 +56,8 @@ This appendix connects the paper abstraction to repository interface families.
 It is a map, not a generated API specification. Exact payload fields remain in
 code schemas, manifests, and endpoint responses. The canonical per-agent role,
 API, connection, effect, and recovery contracts are maintained in the
-[Agent Reference Index](../agents/README.md) and compared in the
-[Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md);
+[Agent Reference Index](../../system/agents/README.md) and compared in the
+[Agent API and Connection Matrix](../../system/agents/agent_api_connection_matrix.md);
 this appendix summarizes those boundaries for the paper instead of duplicating
 them. The Agent Reference Index also provides the complete visual inventory of
 closed-loop, execution/effect, and connection figures.
@@ -113,11 +113,11 @@ analysis, and operator pages. The current code snapshot records counts and
 representative responses. Routes are implementation interfaces; they are not
 independent paper contributions. The Self-Evolution service and graph-relation
 review APIs are retired; historical schema/record names do not establish active
-endpoints. See [the current Knowledge contract](../knowledge/wiki_memory.md).
+endpoints. See [the current Knowledge contract](../../system/knowledge/wiki_memory.md).
 
-The working-tree [Orchestrator Agent Reference](../agents/orchestrator_agent.md)
+The working-tree [Orchestrator Agent Reference](../../system/agents/orchestrator_agent.md)
 owns the bounded Setup proposal, confirmation, and next-new-run admission
-contract. Its [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+contract. Its [verification evidence](../../system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
 is controlled/local and does not establish a device or whole-cycle interface result.
 
 ## Versioning and Compatibility
@@ -156,8 +156,8 @@ the current code snapshot.
 
 ## Related Documents
 
-- [Agent Reference Index](../agents/README.md)
-- [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md)
+- [Agent Reference Index](../../system/agents/README.md)
+- [Agent API and Connection Matrix](../../system/agents/agent_api_connection_matrix.md)
 - [System architecture](02_system_architecture.md)
 - [Platform architecture](04_platform_architecture.md)
-- [Current code snapshot](../runtime/current_code_snapshot.md)
+- [Current code snapshot](../../system/runtime/current_code_snapshot.md)

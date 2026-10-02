@@ -3568,7 +3568,7 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
             "decision_schema": "guardian_decision.v1",
             "incident_schema": "incident_record.v1",
             "tool_call_schema": "tool_call_record.v1",
-            "source_doc": "docs/runtime/guardian_graphwide_safety.md",
+            "source_doc": "system/runtime/guardian_graphwide_safety.md",
         },
         "device_data_integrity": {
             "device_health": state.get("device_health", {}),

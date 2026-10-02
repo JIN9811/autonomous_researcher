@@ -60,7 +60,7 @@ ANALYSIS_MODULE = AgentModule(
         "owned_references": {
             "objective_service": "objectives/service.py",
         },
-        "documentation": "docs/agents/analysis_agent.md",
+        "documentation": "system/agents/analysis_agent.md",
     }, allow_nan=False),
 )
 

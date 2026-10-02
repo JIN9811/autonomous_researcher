@@ -51,7 +51,7 @@ DESIGN_MODULE = AgentModule(
             "handoff": "specimen_agent",
             "direct_device_effect": False,
         },
-        "documentation": "docs/agents/design_agent.md",
+        "documentation": "system/agents/design_agent.md",
     }, allow_nan=False),
 )
 

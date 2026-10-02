@@ -381,3 +381,39 @@ def test_allowlist_rewrite_preserves_corpus_slash_and_approval_values():
     assert '"approved_corpora":["system/knowledge/wiki/"]' in result
     assert '"system/agents/owner.md":{"review":"same","sha256":"same"}' in result
     assert '"docs/paper/evidence/absent.md":{"review":"historic","sha256":"historic"}' in result
+
+
+def test_explicit_historical_document_is_accounted_not_a_current_link_pass(tmp_path):
+    content = b'# Evidence\n[old](../agents/owner.md#owner)\n'
+    put(tmp_path, 'system/evidence/report.md', content)
+    put(tmp_path, 'system/agents/owner.md', b'# Owner\n')
+    manifest = {'move_revision': 'a' * 40, 'entries': {
+        'docs/evidence/report.md': {'destination': 'system/evidence/report.md', 'disposition': 'move'},
+        'docs/agents/owner.md': {'destination': 'system/agents/owner.md', 'disposition': 'move'},
+    }, 'historical_documents': {'docs/evidence/report.md': {
+        'original_path': 'docs/evidence/report.md', 'revision': 'a' * 40,
+        'sha256': hashlib.sha256(content).hexdigest(),
+        'reason': 'Approved immutable evidence bytes',
+        'references': [{'reference': '../agents/owner.md#owner', 'base': 'document',
+                        'original_target': 'docs/agents/owner.md', 'original_resolution': 'file',
+                        'current_target': 'system/agents/owner.md', 'fragment_verified': True}],
+    }}}
+    result = audit(tmp_path, manifest)
+    assert result['checked'] == 0
+    assert len(result['historical_references']) == 1
+    assert result['metadata_errors'] == []
+    put(tmp_path, 'system/evidence/report.md', content + b'changed evidence')
+    assert audit(tmp_path, manifest)['metadata_errors']
+
+
+def test_screenshot_references_use_manifest_base_not_repository_base(tmp_path):
+    put(tmp_path, 'docs/assets/capture_manifest.json', b'{"images":[{"file":"image.png","sha256":"unchanged"}],"reused_images":"../other/capture_manifest.json"}')
+    put(tmp_path, 'docs/assets/image.png', b'fixture image')
+    put(tmp_path, 'docs/other/capture_manifest.json', b'{"images":[]}')
+    paths = ['docs/assets/capture_manifest.json', 'docs/assets/image.png', 'docs/other/capture_manifest.json']
+    manifest = {'entries': {p: {'destination': p, 'disposition': 'keep'} for p in paths}}
+    result = audit(tmp_path, manifest)
+    assert result['checked'] == 2
+    assert result['metadata_errors'] == []
+    (tmp_path / 'docs/assets/image.png').unlink()
+    assert audit(tmp_path, manifest)['metadata_errors']

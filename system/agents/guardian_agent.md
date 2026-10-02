@@ -1,0 +1,393 @@
+<!-- atr-doc
+doc_type: reference
+subtype: system
+status: active
+authority: descriptive
+audience: [researcher, reviewer, operator, developer, safety_reviewer]
+scope: [agents, guardian, safety_control_plane]
+summary: Current contract for graph-wide risk review, incidents, approvals, safety budgets, and continue/stop/error routing.
+source_of_truth:
+  - agents/core/guardian/agent.py
+  - agents/core/guardian/decision.py
+  - agents/core/guardian/execution.py
+  - agents/core/guardian/structure.py
+  - agents/core/guardian/plan.py
+  - agents/core/guardian/presentation.py
+  - agents/core/guardian/module.py
+  - agents/core/guardian/frontend/live_report.js
+  - graphs/modules/guardian/module.yaml
+  - graphs/modules/guardian/ui.yaml
+  - policies/guardian_gate.py
+  - app/controller.py
+  - app/main.py
+last_verified: 2026-09-29
+verified_against: dd0d772
+related_docs:
+  - system/agents/README.md
+  - system/agents/agent_api_connection_matrix.md
+  - system/agents/orchestrator_agent.md
+  - docs/paper/08_safety_ethics_and_limitations.md
+  - system/runtime/guardian_graphwide_safety.md
+  - system/modularity.md
+supersedes: []
+-->
+
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
+
+# Guardian Agent Reference
+
+![guardian agent role overview](assets/figures/guardian-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
+
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented / policy gates, incidents and approval coordination |
+| LLM decision layer | Advisory policy note; deterministic checks retain gating authority |
+| Physical effect | No direct motion; downstream actions can be blocked or stopped |
+| Primary handoff | Continue / stop / error decisions → Orchestrator and controller |
+| Plan boundary | Read-only queries remain; an optional reference-only declaration can be applied for pinned future runs without changing gates |
+| Verification | [Inspection, regressions and read-only re-evaluation](#current-verification) |
+| Known gap | Live safety effectiveness and physical stop latency not established |
+
+## Summary
+
+For physical Bambu printing, an unused FTPS probe failure does not block a
+verified HTTP artifact start. This exception requires a successful MQTT snapshot,
+HTTP upload route, published `project_file` command for the same artifact URL,
+and a post-publish `running` or `completed` observation within the same successful
+`PRINT_STARTED` bridge result. It applies only to that result's FTPS probe;
+unrelated results, start failures, and other safety alarms remain gated. Raw
+transport diagnostics remain in the run evidence. This is not proof of print
+completion or permission to skip subsequent specimen checks. The same evidence
+rule covers ejection-project starts, the unused `BAMBU_FTPS_STORAGE` trace entry,
+and its exact `experiment.evaluate` trace projection. These diagnostics remain
+in raw evidence but do not generate a new Guardian incident. Critical alerts and
+unrelated trace failures are not compensated.
+
+An absent SPC G-code validation result is displayed as `not_reported`, not `warn`
+or `pass`. It does not generate a generic warning incident; reported validation
+failures still reach the gate. Missing evidence is not counted as a passed
+quality check.
+
+New bridge traces mark unused FTPS storage checks as `not_used` when HTTP is the
+verified transfer route. SPC storage/readiness cards consume Bambu upload and
+post-publish evidence rather than requiring Prusa-specific storage fields.
+Explicit readiness blockers still take precedence. Historical incidents are
+retained, not rewritten by this reporting correction.
+
+Printer health checks are read-only MQTT observations, not transfer preflights.
+`device.health`, `health_only`, and `status_only` do not open FTPS sessions or
+construct upload/start/ejection gates. Upload readiness remains `not_checked`;
+an unavailable optional video proxy or an unrequested upload is not a device
+fault. MQTT failures and current device error codes remain blocking health
+failures. A terminal previous-job state alone is not a new device error.
+Guardian interprets structured health results (`ok`, `state`, `failure_code`)
+consistently with the final graph gate rather than converting dictionaries to
+strings. Actual prepare/upload/start operations retain their transport and
+safety checks.
+
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
+`GuardianAgent` is ATR's graph-wide safety review and continuation control
+plane. It evaluates current gates and recent failures, incorporates device and
+queue health, records risk/incident/approval evidence, and returns continue,
+review, stop, or error state. Orchestrator translates that state into graph
+routing; Guardian does not coordinate the full workflow or execute devices.
+
+## Scope
+
+Included are Guardian decisions, status aggregation, incidents, alerts, tool
+records, approvals, corrective actions, safety budgets, and stop authority.
+This Reference does not claim that control presence proves safety effectiveness.
+
+## Source of Truth
+
+- Agent: `agents/core/guardian/agent.py`
+- Module: `graphs/modules/guardian/module.yaml`
+- Policy: `policies/guardian_gate.py`
+- State/API aggregation: `app/controller.py`, `app/main.py`
+
+## Actual Role
+
+| Does | Does not |
+|---|---|
+| Evaluate policy, risk, evidence, failures, and health | Replace equipment-specific physical interlocks |
+| Return continue/review/stop/error decisions | Directly execute a device or recovery command |
+| Produce incidents, alerts, records, and corrective actions | Own general workflow planning |
+| Request or require operator approval | Resolve approval on behalf of the operator |
+| Enforce safety budgets and stop authority | Prove generalized laboratory safety |
+
+## Three-Level Control Classification
+
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
+| Level | Guardian responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | LLM reviews policy and failure evidence within the bounded Guardian role | May block progression but does not own normal mission planning or silently resume a stopped run |
+| Middle-Level Control | Collect health/status through APIs, calculate risk and validate/assemble continue, review, stop or error results | Model review is advisory; unknown state never becomes allow through fallback |
+| Low-Level Control | No direct device execution; hardware interlocks and effective stops remain bridge/device authority | Device-specific hard interlocks, emergency behavior, command acknowledgement, and physical stop effectiveness remain bridge/hardware authority |
+
+Guardian spans all three levels but does not collapse them. It may reject a
+High-Level route, invalidate a Middle-Level completion claim, or require fresh
+Low-Level status. It cannot replace hardware interlocks or treat a manual
+Device Workspace action as automatic-loop completion.
+
+![Guardian source-backed composite control areas](assets/figures/guardian_control_areas.svg)
+
+**Figure Guardian-3.** One composite task retains deterministic gate precedence
+and the bounded advisory call; delivery returns that task's fresh result. The
+source nodes are CODE relationships, not separately schedulable policy steps.
+
+## Closed-Loop Position and Handoffs
+
+### Plan declaration and query boundary
+
+`plan_contract()`, `resolve_plan(state)`, and `validate_plan(plan, state)` expose
+detached mandatory operator-stop/policy/reference inputs and optional advisory
+evidence context. They never apply or store a plan. Proposals cannot change
+thresholds, disable a deterministic check or operator stop, manufacture readiness,
+or widen permissions; those fields are rejected rather than ignored.
+
+The separate `validate_plan_declaration()` path accepts only the strict portable
+`ax4lab.owner_plan.v1` shape and the owner-supported
+`advisory_evidence_context`. `GET /api/modules/guardian` exposes its contract and
+Default/Configured state. Validation writes nothing; explicit module apply uses
+the existing version/configuration store for future runs. Guardian reads the
+declaration only from its matching pinned module snapshot and labels the added
+context `reference_only` inside its original advisory call. Core registration,
+operator stops, deterministic gates, thresholds, tools, and device authority do
+not move to the declaration. See the
+[Modularity Reference](../modularity.md#ide-package-and-owner-plan-lifecycle).
+
+![Guardian closed-loop position and handoffs](assets/figures/guardian_01_closed_loop_handoffs.svg)
+
+**Figure Guardian-1.** Run state, failures, health, approvals, risk, and safety
+budget converge on a graph-wide continue/review/stop/error decision that the
+Orchestrator translates into a route. This is an `inspection`-backed projection
+of baseline `0b7627b`; it does not establish live safety effectiveness.
+
+| Direction | Component | Contract/state | Purpose | Gate |
+|---|---|---|---|---|
+| In | All stages | current state, decisions, failures, evidence | graph-wide review | evidence completeness |
+| In | Device/queue services | health/status | external readiness | stale/unavailable health remains explicit |
+| In | Approval service | pending/resolved approvals | human authority | scope and expiry |
+| Out | Orchestrator | Guardian decision/contract | route translation | decision schema |
+| Out | Operator | incident, alert, approval, corrective action | review/intervention | operator authority |
+| Out | Runtime | continue, review, stop, error | cycle or terminal route | safety budget/policy |
+
+## Inputs and Outputs
+
+Inputs include `OrchestratorState`, latest stage reports, device health, recent
+failures, tool-call records, approval queue, experiment constraints, loop count,
+safe-stop state, and evidence context.
+
+Outputs include Guardian gate results/decisions/contracts, risk vectors,
+incident and hardware-alert records, blocked tool-call records, corrective
+actions, approval requests, safety-budget state, and a route decision consumed
+by Orchestrator.
+
+## Internal Execution
+
+| Step | Kind | Consumes | Produces/decides | Failure boundary |
+|---|---|---|---|---|
+| `01_check_safety_gates` | internal | stage/risk/evidence/health | pass/block/review facts | unknown or failed gate is not allow |
+| `02_review_recent_failures` | internal | errors/incidents/retries | failure context/corrective action | repeated/major failure escalates |
+| `03_decide_continue_stop_error` | internal | gate + failure + budget | continue/stop/error/review | invalid decision routes to error/review |
+
+![Guardian internal execution and effect boundary](assets/figures/guardian_02_execution_effect_boundary.svg)
+
+**Figure Guardian-2.** Three manifest steps combine bounded health and queue
+reads with deterministic policy, approval, failure, and safety-budget gates;
+model review remains advisory. Guardian can block or stop downstream work but
+has no direct device-action edge. This `inspection` figure describes internal
+contract structure, not independently scheduled graph nodes.
+
+### Execution trace details
+
+| Condition | State and evidence read | Decision | Persisted evidence | Resume requirement |
+|---|---|---|---|---|
+| Known safe continuation | current reports, fresh health, valid approvals, available budget | continue | gate history and decision contract | Orchestrator translates only the recorded decision |
+| Missing or expired approval | scoped request and validity window | review/wait | pending or expired approval state | new operator resolution bound to current action/run |
+| Stale or unavailable health | last health timestamp and capability status | review/stop | degraded health and blocker | fresh bounded health evidence |
+| Unknown external effect | command, timeout, device/proof mismatch | stop/review | incident, tool record, uncertainty state | independent device and proof inspection |
+| Repeated or major failure | failure history, retry count, corrective actions | stop/error | incident and budget consumption | operator review and accepted corrective action |
+| Exhausted safety budget | current budget and cycle context | stop/error | terminal budget decision | new governed run or explicitly authorized policy change |
+
+Unknown state never becomes an allow decision through model fallback. Approval
+resolution, incident notes, and corrective action may add evidence, but they do
+not rewrite the original failure or gate history.
+
+### BO admission and historical evidence
+
+BO readiness is an Analysis-owned claim, not a conclusion inferred from the
+absence of warnings. Guardian checks the canonical `quality_gate`, `bo_handoff`
+and `bo_observation` readiness fields; missing, malformed or contradictory
+claims do not become permission to update BO. Legacy readiness fields remain
+compatible, with an explicit negative claim taking precedence.
+
+Reason classification uses BO domain tokens/codes rather than matching `BO`
+inside unrelated words such as `boundary`. Knowledge's archived incident
+evidence remains available for audit and retrieval, but is not recursively
+reissued as a new current-stage alarm. Current failures, active hardware
+alerts, stop requests and approval requirements retain their gating authority.
+
+## API Surface
+
+| Class | Method | Path/family | Handler/service | Effect | Notes |
+|---|---|---|---|---|---|
+| owned | GET | `/api/guardian/status` | Guardian status aggregation | read_only | current graph-wide report |
+| owned | GET | `/api/runs/{run_id}/guardian/status` | run Guardian report | read_only | run-scoped evidence |
+| operator | POST | `/api/guardian/incidents/{incident_id}/notes` | incident service | local_state | appends operator note |
+| operator | POST | `/api/runs/{run_id}/guardian/incidents/{incident_id}/notes` | run incident service | local_state | run-scoped note |
+| shared | GET/POST | `/api/runs/{run_id}/approvals*` | approval service | read_only/local_state/physical_possible | request/list/resolve |
+| operator | POST | `/api/approvals/{approval_id}/approve`, `/api/approvals/{approval_id}/reject`, `/api/approvals/{approval_id}/revise` | compatibility approval service | local_state/physical_possible | explicit human resolution |
+
+## Tools and Connections
+
+| Tool/service | Registry/implementation | Boundary | Mode | Effect | Evidence |
+|---|---|---|---|---|---|
+| `device.health` | registered tool/bridge registry | in-process to device status | all | read_only | health snapshot |
+| `experiment.queue.status` | experiment queue tool | in-process | all | read_only | queue status |
+| LLM role | Runtime call: `guardian_reasoning`; module declaration: `guardian_review` | selected model backend | configured | model | advisory policy note; role names are reported separately rather than assumed identical |
+| Policy gate | `policies/guardian_gate.py` | deterministic/in-process | all | local_state | gate decision |
+| Approval service | controller/API | human boundary | live/configured | physical_possible | request and resolution |
+
+Guardian LLM work has the highest shared lease priority (`0`) relative to active
+workflow (`10`), operator chat (`20`), and background work (`30`). The priority
+class does not imply that the retired Knowledge reconciliation worker runs.
+
+## State, Events, Artifacts, and Storage
+
+Guardian state is stored in run metadata and events: gate history, contracts,
+latest decision, incidents, alerts, tool-call records, approvals, corrective
+actions, safety budgets, and handoff status. Run-scoped APIs provide status and
+notes. A GUI card is a view over server state, not the source of authority.
+
+## Modes and Fallbacks
+
+Policy review applies to Test, Replay, Simulation, and Live with environment-
+appropriate evidence. Test/simulation decisions do not validate Live safety.
+Unavailable model advice cannot bypass deterministic policy. Unavailable
+device health is degraded/uncertain state, not healthy state.
+
+## Safety, Approval, and Effect Boundary
+
+Guardian can block or stop downstream effects but does not operate equipment.
+Approvals bind to action, run/cycle, parameters, device, scope, and validity;
+approval resolution remains human/operator authority. Safety-budget exhaustion,
+missing evidence, stale health, or unknown effect routes to review/stop/error.
+
+## Errors and Recovery
+
+| Failure | Result | Recovery | Prohibited action |
+|---|---|---|---|
+| Missing/stale health | uncertain/review | refresh bounded health evidence | assume healthy |
+| Policy/schema failure | block/error | correct input and re-evaluate | bypass gate |
+| Pending/expired approval | wait/review | obtain current scoped decision | reuse stale approval |
+| Repeated major incident | stop/error | operator review and corrective action | unbounded retry |
+| Unknown external effect | stop/review | independently inspect state/proof | automatic allow/repeat |
+
+## Operator and GUI Surfaces
+
+### GUI Screen Reference
+
+![guardian agent report at 1920 × 1080](../../docs/gui/assets/screenshots/2026-09-29/live-guardian.png)
+
+Safety and decision evidence belong to the selected run/stage. Empty decision or heartbeat projections in this completed-session view must not be read as proof of hardware safety.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../runtime/gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
+In the 2026-09-06 working-tree update, `decision=continue` with `action=recover`
+or `action=retry` is a review hold, not a completed experiment. The runtime stays
+at Guardian, preserves the specimen and loop number, sets `is_paused`, and
+publishes `guardian_recovery_wait` plus an `operator_input_required` event. The
+Live planning tail remains alive while waiting and honors stop controls.
+Normal continuation still follows the configured next-cycle route; safe stop
+still terminates. Resume only re-evaluates Guardian: it does not clear alarms,
+waive physical interlocks, restart fabrication, or implement a recovery action.
+Unresolved pressure causes another hold. Operators must reconcile the cause
+and evidence before proceeding; this is not an automatic stage-retry workflow.
+
+An agent's `safe_stop_recommended` is classified as
+`SYSTEM_SAFE_STOP_RECOMMENDED`, not `OPERATOR_STOP_REQUESTED`. Both can block
+progression, but only the latter describes an operator stop request. An automatic
+review failure must not be presented as evidence that the user pressed Stop.
+
+The Live GUI dashboard keeps Current Decision, Gate Checks, Device & Stop
+Verification, Approval Queue, and Incident History visible. Recorded decisions
+and their reasons are separate from the monitor status; missing decisions display
+`Not evaluated`, never a generic orchestration instruction. Compact counters and
+scrollable tables preserve recorded gate, device, approval, and incident evidence
+without collapsing the core status panels. This is a presentation-only view;
+approval actions and safety enforcement retain their existing paths.
+
+Live GUI exposes Guardian report, risk, incidents, approvals, tool records,
+hardware alerts, corrective actions, and budget state. Approval panels resolve
+server-side requests. Incident-note APIs append operator context without
+rewriting the original incident.
+
+## Current Verification
+
+The 2026-09-14 core-owner plan regression passed 150 focused owner, declaration,
+package, and module-API tests with 10 existing warning messages; the Package
+Manager/editor suite passed 37 Node tests. Controlled five-route and isolated
+browser/API checks exercised configured/default behavior without a physical
+call. Exact scope and commands are in the
+[implementation plan](../retained-history/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
+
+The 2026-09-13 BO-admission correction passed 48 focused Guardian/Knowledge
+checks and 32 additional Guardian agent, action-shield and fault-matrix checks.
+They cover the curve-boundary warning, canonical and legacy readiness, historical
+evidence isolation and retained current BO/data, stop and approval blockers.
+Both runs reported five existing schema-field warnings. These non-actuating
+regressions are not physical safety validation; registered-model cycle evidence
+is tracked in the [implementation verification record](../retained-history/superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
+
+The 2026-09-07 working-tree correction preserves unavailable-link diagnostics
+from Equipment transitions explicitly marked `phase: vision`,
+`kind: vision_observation`, and `blocking: false` as warnings. It does not
+downgrade required vision gates, explicit blocking severity, physical failures,
+or stop requests. Unit regressions cover both the optional observation and
+mandatory/safety cases. Read-only re-evaluation of the Equipment result from
+`run-20260906T151117Z-8690f9` allows progression with warnings; this is a policy
+re-evaluation, not proof that the paused live run resumed. Original gate records
+remain historical evidence and must not be rewritten as successful execution.
+
+The UTM2 correction also applies same-capture recovery handling to both
+`observation.utm_clear_verification` and `utm_verification_2.record.evidence`,
+in addition to the existing UTM1 `observation.raw_capture` path. Only earlier
+`ROS_IMAGE_TIMEOUT` attempts are superseded, and only when that capture and its
+final, matching-topic frame read succeed. Failed final reads, unrelated captures,
+and non-timeout safety failures remain blocking; source evidence is unchanged.
+Read-only re-evaluation of the complete Vision result from
+`run-20260906T152525Z-11e1ae` returns `allow` after this correction. The original
+live run paused at Guardian and was not resumed; this is not an Analysis/BO or
+full-cycle success claim.
+
+Verified against `GuardianAgent`, all three module internal steps, two declared
+tools, policy gate, status aggregation, incident and approval endpoints at
+baseline `0b7627b`. No paper-scoped live safety-effectiveness record exists.
+
+## Limitations and Known Gaps
+
+Hazard coverage, calibration, operator workload, adversarial robustness, and
+physical stop latency are not established by this Reference. Domain interlocks
+remain external requirements.
+
+## Related Documents
+
+- [Agent Matrix](agent_api_connection_matrix.md)
+- [Orchestrator Agent](orchestrator_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
+- [Safety, Ethics, and Limitations](../../docs/paper/08_safety_ethics_and_limitations.md)
+- [Guardian Graph-wide Safety](../runtime/guardian_graphwide_safety.md)
+- [Security Policy](../../.github/SECURITY.md)

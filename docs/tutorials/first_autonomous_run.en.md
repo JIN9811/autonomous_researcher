@@ -15,8 +15,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -31,7 +31,7 @@ find its design, analysis and optimization evidence. This walkthrough does not
 require a printer or robot. A virtual result is not a physical experiment result.
 
 You need a configured AX4LAB installation, a reachable LLM backend and a browser.
-If installation is incomplete, follow [Requirements](../../REQUIREMENTS.md) first.
+If installation is incomplete, follow [Requirements](../project/REQUIREMENTS.md) first.
 Use a desktop viewport of 1920 × 1080 to match the figures. Screenshot numbers and
 saved settings belong to the captured installation; do not copy them blindly.
 
@@ -76,7 +76,7 @@ Do not choose another profile just because it contains the word “test”:
 | Installed Printer | Slices, then sends an ejection-only artifact; print body/cooling skipped | Vision, manipulation and UTM can be real |
 | Physical Print | Full sliced print, cooling and configured ejection | Vision, manipulation and UTM can be real |
 
-The saved per-agent overrides also matter. See [Test Mode](../runtime/test_mode.md).
+The saved per-agent overrides also matter. See [Test Mode](../../system/runtime/test_mode.md).
 
 ## Step 3 — Open the Live conversation
 

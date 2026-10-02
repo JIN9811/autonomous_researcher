@@ -12,8 +12,8 @@ expected evidence and a recovery checkpoint.
 | Configure the UTM camera and distinguish pose tests from run evidence | [Vision](device_workspace_vision_camera_bridge_usage.en.md) | [비전](device_workspace_vision_camera_bridge_usage.ko.md) |
 
 For a map of every page rather than a procedure, see
-[GUI Structure and Screen Reference](../gui/visual_structure.md).
-For installation, begin with [Requirements](../../REQUIREMENTS.md).
+[GUI Structure and Screen Reference](../../system/runtime/gui/visual_structure.md).
+For installation, begin with [Requirements](../project/REQUIREMENTS.md).
 
 ## Before following a screenshot
 

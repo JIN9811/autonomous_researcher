@@ -77,7 +77,7 @@ BO_MODULE = AgentModule(
             "workspace_template": "web/templates/bo.html",
             "workspace_assets": ["web/static/bo.js", "web/static/bo_visualization.js"],
         },
-        "documentation": "docs/agents/bo_agent.md",
+        "documentation": "system/agents/bo_agent.md",
     }, allow_nan=False),
 )
 

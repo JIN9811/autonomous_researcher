@@ -14,15 +14,15 @@ scope:
   - paper
 summary: Paper-first landing page for the Autonomous Researcher Framework system and supporting platform.
 related_docs:
-  - README.ko.md
+  - docs/README.ko.md
   - docs/paper/README.md
   - docs/README.md
-  - docs/standards/paper_documentation_standard.md
-  - docs/runtime/current_code_snapshot.md
-  - docs/runtime/three_level_control_model.md
-  - docs/modularity.md
-  - CONTRIBUTING.md
-  - SECURITY.md
+  - system/standards/paper_documentation_standard.md
+  - system/runtime/current_code_snapshot.md
+  - system/runtime/three_level_control_model.md
+  - system/modularity.md
+  - docs/project/CONTRIBUTING.md
+  - .github/SECURITY.md
 supersedes: []
 -->
 
@@ -36,13 +36,13 @@ supersedes: []
 
 <p>
   <a href="README.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or later"></a>
-  <a href="docs/agents/agent_api_connection_matrix.md"><img src="https://img.shields.io/badge/FastAPI-10324D?style=flat&amp;logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
-  <a href="docs/runtime/langgraph_runtime.md"><img src="https://img.shields.io/badge/LangGraph-10324D?style=flat&amp;logo=langgraph&amp;logoColor=white" alt="LangGraph"></a>
-  <a href="docs/device_bridges/lerobot_bridge.md"><img src="https://img.shields.io/badge/LeRobot-10324D?style=flat&amp;logo=huggingface&amp;logoColor=white" alt="LeRobot"></a>
+  <a href="system/agents/agent_api_connection_matrix.md"><img src="https://img.shields.io/badge/FastAPI-10324D?style=flat&amp;logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
+  <a href="system/runtime/langgraph_runtime.md"><img src="https://img.shields.io/badge/LangGraph-10324D?style=flat&amp;logo=langgraph&amp;logoColor=white" alt="LangGraph"></a>
+  <a href="system/device_bridges/lerobot_bridge.md"><img src="https://img.shields.io/badge/LeRobot-10324D?style=flat&amp;logo=huggingface&amp;logoColor=white" alt="LeRobot"></a>
   <a href="README.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
 </p>
 
-<p align="center"><a href="README.ko.md">Korean</a></p>
+<p align="center"><a href="docs/README.ko.md">Korean</a></p>
 
 ### Simple hardware. Structured intelligence. Self-driving laboratories.
 
@@ -70,10 +70,10 @@ supersedes: []
 |:---:|:---:|
 | **[Paper overview](docs/paper/README.md)** | Research motivation, contributions, and the paper reading path. |
 | **[System architecture](docs/paper/02_system_architecture.md)** | Orchestration, agent responsibilities, and execution interfaces. |
-| **[Modularity](docs/modularity.md)** | Core and specialist ownership, packages, bridges, and configuration lifecycle. |
-| **[Agent references](docs/agents/README.md)** | Each agent's role, LLM decisions, tools, and verification. |
-| **[Device bridges](docs/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
-| **[Runtime IDE](docs/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
+| **[Modularity](system/modularity.md)** | Core and specialist ownership, packages, bridges, and configuration lifecycle. |
+| **[Agent references](system/agents/README.md)** | Each agent's role, LLM decisions, tools, and verification. |
+| **[Device bridges](system/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
+| **[Runtime IDE](system/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
 | **[Results and evidence](docs/paper/06_evaluation_and_results.md)** | Demonstrated outcomes and their supporting artifacts. |
 | **[Setup and operation](install/README.md)** | Installation, configuration, and operator workflows. |
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
@@ -118,9 +118,9 @@ interfaces and agent-owned procedures while retaining existing instruments.
 
 | System contribution | How it addresses the barrier | Read more |
 |---|---|---|
-| Hierarchical automation and Device Bridges | High-Level decisions, Middle-Level procedures, and Low-Level tools separate research logic from API, desktop, and robot interfaces, enabling existing equipment to participate. | [Equipment interfaces](docs/device_bridges/README.md) |
-| Multi-agent coordination | Specialist agents own task decisions, procedures, and evidence contracts; orchestration plans compose their capabilities so changes can be localized to the affected agents and interfaces. | [Agent responsibilities](docs/agents/README.md) |
-| VLA-based physical integration | A learned-policy robot arm connects otherwise manual handling stages, offering an alternative to task-specific transfer fixtures; LeRobot separates supported robot integration from task coordination. | [Manipulation](docs/agents/manipulation_agent.md) |
+| Hierarchical automation and Device Bridges | High-Level decisions, Middle-Level procedures, and Low-Level tools separate research logic from API, desktop, and robot interfaces, enabling existing equipment to participate. | [Equipment interfaces](system/device_bridges/README.md) |
+| Multi-agent coordination | Specialist agents own task decisions, procedures, and evidence contracts; orchestration plans compose their capabilities so changes can be localized to the affected agents and interfaces. | [Agent responsibilities](system/agents/README.md) |
+| VLA-based physical integration | A learned-policy robot arm connects otherwise manual handling stages, offering an alternative to task-specific transfer fixtures; LeRobot separates supported robot integration from task coordination. | [Manipulation](system/agents/manipulation_agent.md) |
 
 The contribution is their **integration into a reusable research framework**:
 simple hardware, advanced software coordination, and experiment feedback through
@@ -143,7 +143,7 @@ contribute capabilities to that plan rather than defining one fixed sequence.
 </p>
 
 - Task routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
-- Plan configuration and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
+- Plan configuration and execution monitoring — [Runtime IDE](system/runtime/runtime_ide.md).
 
 ### Agents
 
@@ -154,7 +154,7 @@ stages. LLM decisions use the owning agent's permitted tools and evidence.
 
 ![High-Level decisions, Middle-Level procedures, and Low-Level tools with cross-cutting Guardian/Safety and Knowledge/Evidence](docs/assets/presentation/agent-architecture.webp)
 
-- Responsibility levels and shared evidence — [Control model](docs/runtime/three_level_control_model.md).
+- Responsibility levels and shared evidence — [Control model](system/runtime/three_level_control_model.md).
 
 ### Integration
 
@@ -165,7 +165,7 @@ the research plan.
 
 ![Agent tools and Device Bridges connect learned robot policies, API-controlled devices, and PC-operated instruments](docs/assets/presentation/integration-architecture.webp)
 
-- Tool calls, contracts, and external connections — [API and connection matrix](docs/agents/agent_api_connection_matrix.md).
+- Tool calls, contracts, and external connections — [API and connection matrix](system/agents/agent_api_connection_matrix.md).
 
 ## Orchestration Route
 
@@ -174,7 +174,7 @@ the research plan.
 The main GUI's runtime map shows the configured agent handoffs and conditional
 returns, alongside control, device-bridge and evidence connections.
 
-- Graph configuration and runtime inspection — [Runtime map and IDE](docs/runtime/runtime_ide.md).
+- Graph configuration and runtime inspection — [Runtime map and IDE](system/runtime/runtime_ide.md).
 
 ## Demonstration and Evidence
 
@@ -196,12 +196,12 @@ of the platform**.
 | What completed in the recorded cycle? | [Closed-loop results](docs/paper/06_evaluation_and_results.md) |
 | Which artifacts support each claim? | [Claim–evidence map](docs/paper/09_claim_evidence_traceability.md) |
 | How can the checks be reproduced? | [Reproducibility](docs/paper/07_reproducibility.md) |
-| Where are per-cycle outputs retained? | [Loop artifact archiving](docs/runtime/loop_artifact_archiving.md) |
+| Where are per-cycle outputs retained? | [Loop artifact archiving](system/runtime/loop_artifact_archiving.md) |
 
 Agent-local API, local-model, and virtual-device checks are reported in the
 individual references. They do not replace physical validation. Comparative
 cost, causal scientific benefit, and reliability across independent campaigns
-remain evaluation work. The [documentation audit](docs/maintenance/code_documentation_audit_20260928.md)
+remain evaluation work. The [documentation audit](system/maintenance/code_documentation_audit_20260928.md)
 separates main-code implementation, tests, campaign evidence and isolated RPT development.
 
 ## Agent References
@@ -211,16 +211,16 @@ workflow, tools, interfaces, artifacts, and verification.
 
 | Agent | Responsibility | Detailed reference |
 |---|---|---|
-| Orchestrator | Interpret scoped intent, coordinate handoffs, and admit confirmed Setup only for the next new run | [Orchestrator](docs/agents/orchestrator_agent.md) |
-| Design | Review candidate suitability and emit design specifications | [Design](docs/agents/design_agent.md) |
-| Specimen Making | Evaluate fabrication suitability and call preparation tools | [Specimen Making](docs/agents/specimen_agent.md) |
-| Vision | Capture observations and review visual evidence | [Vision](docs/agents/vision_agent.md) |
-| Manipulation | Select robot skills and review transfer completion | [Manipulation](docs/agents/manipulation_agent.md) |
-| Lab Equipment | Execute stored workflows and review acquisition results | [Lab Equipment](docs/agents/equipment_agent.md) |
-| Analysis | Parse measurements, compute properties and SEA, and publish evidence for BO | [Analysis](docs/agents/analysis_agent.md) |
-| Knowledge | Curate Markdown knowledge and retrieve scoped context | [Knowledge](docs/agents/knowledge_agent.md) |
-| Bayesian Optimization | Select optimization strategy and review numerical proposals | [BO](docs/agents/bo_agent.md) |
-| Guardian | Review execution evidence and advise continuation | [Guardian](docs/agents/guardian_agent.md) |
+| Orchestrator | Interpret scoped intent, coordinate handoffs, and admit confirmed Setup only for the next new run | [Orchestrator](system/agents/orchestrator_agent.md) |
+| Design | Review candidate suitability and emit design specifications | [Design](system/agents/design_agent.md) |
+| Specimen Making | Evaluate fabrication suitability and call preparation tools | [Specimen Making](system/agents/specimen_agent.md) |
+| Vision | Capture observations and review visual evidence | [Vision](system/agents/vision_agent.md) |
+| Manipulation | Select robot skills and review transfer completion | [Manipulation](system/agents/manipulation_agent.md) |
+| Lab Equipment | Execute stored workflows and review acquisition results | [Lab Equipment](system/agents/equipment_agent.md) |
+| Analysis | Parse measurements, compute properties and SEA, and publish evidence for BO | [Analysis](system/agents/analysis_agent.md) |
+| Knowledge | Curate Markdown knowledge and retrieve scoped context | [Knowledge](system/agents/knowledge_agent.md) |
+| Bayesian Optimization | Select optimization strategy and review numerical proposals | [BO](system/agents/bo_agent.md) |
+| Guardian | Review execution evidence and advise continuation | [Guardian](system/agents/guardian_agent.md) |
 
 ## Platform Contribution
 
@@ -230,41 +230,41 @@ demonstrated system reusable; compatibility with another laboratory still
 requires integration and validation.
 
 [Platform architecture](docs/paper/04_platform_architecture.md) ·
-[Runtime IDE](docs/runtime/runtime_ide.md) ·
+[Runtime IDE](system/runtime/runtime_ide.md) ·
 [Interface contracts](docs/paper/appendix_a_interfaces.md)
 
 ## Device Bridge References
 
 | Capability | Interface role | Reference |
 |---|---|---|
-| Printer fleet | Select and coordinate printer providers | [Printer Fleet](docs/device_bridges/printer_fleet_bridge.md) |
-| Bambu Lab | Printer control and fabrication artifacts | [Bambu X2D](docs/device_bridges/bambu_x2d_bridge.md) |
-| Prusa | Printer provider integration | [Prusa MK4S](docs/device_bridges/prusa_mk4s_bridge.md) |
-| Robotics | Learned-policy execution, replay, and robot workspaces | [LeRobot](docs/device_bridges/lerobot_bridge.md) |
-| Desktop instruments | Stored GUI workflows and acquisition | [Windows PyAutoGUI](docs/device_bridges/windows_pyautogui_bridge.md) |
-| Test-area vision | Camera observations and verification evidence | [UTM Vision](docs/device_bridges/utm_vision_bridge.md) |
-| Virtual devices | Deterministic substitutes for non-hardware tests | [Base and Simulators](docs/device_bridges/base_simulator_bridges.md) |
+| Printer fleet | Select and coordinate printer providers | [Printer Fleet](system/device_bridges/printer_fleet_bridge.md) |
+| Bambu Lab | Printer control and fabrication artifacts | [Bambu X2D](system/device_bridges/bambu_x2d_bridge.md) |
+| Prusa | Printer provider integration | [Prusa MK4S](system/device_bridges/prusa_mk4s_bridge.md) |
+| Robotics | Learned-policy execution, replay, and robot workspaces | [LeRobot](system/device_bridges/lerobot_bridge.md) |
+| Desktop instruments | Stored GUI workflows and acquisition | [Windows PyAutoGUI](system/device_bridges/windows_pyautogui_bridge.md) |
+| Test-area vision | Camera observations and verification evidence | [UTM Vision](system/device_bridges/utm_vision_bridge.md) |
+| Virtual devices | Deterministic substitutes for non-hardware tests | [Base and Simulators](system/device_bridges/base_simulator_bridges.md) |
 
 ## Getting Started
 
 For a screenshot-based tour of the existing application, see
-[GUI Structure and Screen Reference](docs/gui/visual_structure.md):
+[GUI Structure and Screen Reference](system/runtime/gui/visual_structure.md):
 Main/Live navigation, agent reports, device workspaces, Runtime IDE and Replay
 at 1920 × 1080.
 
 | Reader | Start here |
 |---|---|
 | Researcher or reviewer | [Problem and contributions](docs/paper/01_problem_and_contributions.md) → [Results](docs/paper/06_evaluation_and_results.md) |
-| Operator | [Installation](install/README.md) → [First-run tutorial](docs/tutorials/first_autonomous_run.en.md) → [Device bridges](docs/device_bridges/README.md) |
-| Developer | [Runtime reference](docs/runtime/current_code_snapshot.md) → [Agent APIs](docs/agents/agent_api_connection_matrix.md) |
-| Contributor | [Contributing](CONTRIBUTING.md) → [Documentation rules](docs/standards/documentation_standard.md) |
+| Operator | [Installation](install/README.md) → [First-run tutorial](docs/tutorials/first_autonomous_run.en.md) → [Device bridges](system/device_bridges/README.md) |
+| Developer | [Runtime reference](system/runtime/current_code_snapshot.md) → [Agent APIs](system/agents/agent_api_connection_matrix.md) |
+| Contributor | [Contributing](docs/project/CONTRIBUTING.md) → [Documentation rules](system/standards/documentation_standard.md) |
 
 Consult [operational limitations](docs/paper/08_safety_ethics_and_limitations.md)
-before connecting physical equipment. [Security policy](SECURITY.md) covers
+before connecting physical equipment. [Security policy](.github/SECURITY.md) covers
 vulnerability reporting.
 
 ## Citation and License
 
-Use the repository's [citation metadata](CITATION.cff) and [license](LICENSE).
+Use the repository's [citation metadata](docs/paper/CITATION.cff) and [license](runtime/LICENSE).
 The [paper package](docs/paper/README.md) is a working research narrative;
 publication metadata is recorded only when available.

@@ -32,7 +32,7 @@ related_docs:
   - docs/paper/02_system_architecture.md
   - docs/paper/appendix_a_interfaces.md
   - docs/paper/appendix_b_hardware_and_deployment.md
-  - docs/runtime/current_code_snapshot.md
+  - system/runtime/current_code_snapshot.md
 supersedes: []
 -->
 
@@ -90,7 +90,7 @@ An extension is system-compatible only when it:
 | Execution graph | Versioned graph configuration | Valid nodes, handlers, transitions, safety metadata | Adapts workflow without hiding control flow | Architecture inspected |
 | Model backend | Routed provider/model adapter | Bounded completion contract, readiness, priority lease where applicable | Replaces inference implementation | Architecture inspected |
 | Device bridge | Capability-oriented adapter | Allowlisted actions, dry run, proof, timeout, authentication | Connects physical or external tools | Architecture inspected; broad live reliability not evaluated |
-| Knowledge storage and source intake | Markdown/JSONL, local audit and Source Library contracts | Ontology, provenance, caller scope and write receipts | Preserves originals, derived notes and reusable context | [Knowledge Reference](../agents/knowledge_agent.md) |
+| Knowledge storage and source intake | Markdown/JSONL, local audit and Source Library contracts | Ontology, provenance, caller scope and write receipts | Preserves originals, derived notes and reusable context | [Knowledge Reference](../../system/agents/knowledge_agent.md) |
 | Operator workspace | FastAPI route plus static/template surface | API authorization, explicit mutation, audit event | Exposes control and review | Route surface inspected; browser coverage varies |
 
 ## Module and Graph Contracts
@@ -150,8 +150,8 @@ underlying service requires it. The current Knowledge workspace exposes shared
 Wiki, scoped Memory, Source Library, Agent Delivery and Ontology. Source intake preserves originals and
 publishes derived notes only through validated agent-local tools; retrieval
 retains source citations and caller scope. Ontology is the shared vocabulary,
-not an active graph database. See the [Knowledge Reference](../agents/knowledge_agent.md)
-and [Wiki and Memory](../knowledge/wiki_memory.md). This current UI clarification
+not an active graph database. See the [Knowledge Reference](../../system/agents/knowledge_agent.md)
+and [Wiki and Memory](../../system/knowledge/wiki_memory.md). This current UI clarification
 is based on `web/templates/knowledge.html` at `dd0d772`, not a new browser test.
 
 ## Deployment Topology
@@ -204,4 +204,4 @@ evaluation chapter.
 - [System architecture](02_system_architecture.md)
 - [Interface appendix](appendix_a_interfaces.md)
 - [Deployment appendix](appendix_b_hardware_and_deployment.md)
-- [Current code snapshot](../runtime/current_code_snapshot.md)
+- [Current code snapshot](../../system/runtime/current_code_snapshot.md)

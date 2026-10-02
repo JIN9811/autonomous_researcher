@@ -9,4 +9,4 @@ already tracked here are compatibility source code; `.gitignore` explicitly
 retains `memory/*.py` and this README.
 
 Keep runtime data private. Review source changes normally, and follow the
-[publication boundary](../docs/knowledge/publication.md) before exporting evidence.
+[publication boundary](../system/knowledge/publication.md) before exporting evidence.

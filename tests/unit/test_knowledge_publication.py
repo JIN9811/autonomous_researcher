@@ -240,7 +240,7 @@ def test_nested_private_paths_override_hash_approval(repo, guard, path, outgoing
 
 
 def test_only_frozen_manifest_source_and_sentinel_pairs_are_public(guard):
-    inventory = json.loads((SCRIPT.parents[1] / "docs/maintenance/repository_layout_manifest.json").read_text())
+    inventory = json.loads((SCRIPT.parents[1] / "system/maintenance/repository_layout_manifest.json").read_text())
     sources = {"memory/__init__.py", "memory/experiment_db.py", "memory/failure_memory.py",
                "memory/retrieval.py", "memory/schemas.py", "memory/README.md",
                "runs/README.md", "artifacts/README.md", "outputs/README.md", "user_files/README.md"}
@@ -362,8 +362,8 @@ def test_exact_large_asset_relocation_proof(repo, guard, relocation, outgoing, c
 
 def test_real_piper_record_matches_frozen_inventory_and_asset(guard):
     root = SCRIPT.parents[1]
-    manifest = json.loads((root / "docs/knowledge/publication_allowlist.json").read_text())
-    inventory = json.loads((root / "docs/maintenance/repository_layout_manifest.json").read_text())
+    manifest = json.loads((root / "system/knowledge/publication_allowlist.json").read_text())
+    inventory = json.loads((root / "system/maintenance/repository_layout_manifest.json").read_text())
     source = "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx"
     expected = {"source": source, "destination": "runtime/" + source,
                 "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51", "size": 63201294,
@@ -411,7 +411,7 @@ def test_task_files_pass_real_staged_and_outgoing_guard(repo, guard, outgoing, l
                  "tests/unit/test_knowledge_publication.py", ".github/workflows/knowledge-publication.yml"):
         stage(repo, path, (root / path).read_text())
     stage(repo, f"{layout}/knowledge/publication_allowlist.json",
-          (root / "docs/knowledge/publication_allowlist.json").read_text())
+          (root / "system/knowledge/publication_allowlist.json").read_text())
     result = inspect_mode(guard, repo, base, outgoing)
     assert result["ok"], result
     assert result["checked"] == 5

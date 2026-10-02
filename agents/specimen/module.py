@@ -42,7 +42,7 @@ SPECIMEN_MODULE = AgentModule(
             "bridge_modules": ["printer_fleet"], "bridge_source": "device_bridges/",
             "handoff": "vision_agent", "direct_device_effect": True,
         },
-        "documentation": "docs/agents/specimen_agent.md",
+        "documentation": "system/agents/specimen_agent.md",
     }, allow_nan=False),
 )
 

@@ -32,7 +32,7 @@ MANIPULATION_MODULE = AgentModule(
             "shared_bridge_sources": ["device_bridges/lerobot/bridge.py"],
             "direct_device_effect": True,
             "device_ownership": "Registered LeRobot and robot executors retain existing device execution"},
-        "documentation": "docs/agents/manipulation_agent.md",
+        "documentation": "system/agents/manipulation_agent.md",
     }, allow_nan=False),
 )
 

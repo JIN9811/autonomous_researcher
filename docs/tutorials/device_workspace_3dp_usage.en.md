@@ -13,8 +13,8 @@ source_of_truth:
 last_verified: 2026-09-29
 verified_against: fcfba9f
 related_docs:
-  - docs/gui/visual_structure.md
-  - docs/runtime/test_mode.md
+  - system/runtime/gui/visual_structure.md
+  - system/runtime/test_mode.md
 supersedes: []
 -->
 
@@ -149,7 +149,7 @@ Standalone preparation exposes **Pre-start Check**, **Print Command Draft**,
 - Upload-path probing and transfer can contact/write to the printer.
 
 Use the exact prepared artifact and current approvals; never substitute an older
-success record. Refer to the [Bambu bridge](../device_bridges/bambu_x2d_bridge.md)
+success record. Refer to the [Bambu bridge](../../system/device_bridges/bambu_x2d_bridge.md)
 for transport, cleanup and completion contracts.
 
 ## Step 7 — Watch the run-owned SPC evidence
@@ -180,8 +180,8 @@ validation result. Keep a slicing-only test explicitly labeled as such.
 
 ## Further reading
 
-- [Printer fleet](../device_bridges/printer_fleet_bridge.md)
-- [Bambu settings and implementation](../device_bridges/bambu_x2d_bridge.md)
-- [SPC agent evidence](../agents/specimen_agent.md)
-- [Execution profiles](../runtime/test_mode.md)
+- [Printer fleet](../../system/device_bridges/printer_fleet_bridge.md)
+- [Bambu settings and implementation](../../system/device_bridges/bambu_x2d_bridge.md)
+- [SPC agent evidence](../../system/agents/specimen_agent.md)
+- [Execution profiles](../../system/runtime/test_mode.md)
 - [Operator walkthroughs](user_manual.en.md)

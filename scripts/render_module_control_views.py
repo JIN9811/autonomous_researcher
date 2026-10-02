@@ -40,7 +40,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     paths = current_paths()
     parser.add_argument('--runtime-root', type=Path, default=paths.runtime_root)
-    parser.add_argument('--output-dir', type=Path, default=paths.repository_root / 'docs/agents/assets/figures')
+    parser.add_argument('--output-dir', type=Path, default=paths.system_root / 'agents/assets/figures')
     parser.add_argument('modules', nargs='*', choices=['design', 'orchestrator', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'bo', 'knowledge', 'guardian'])
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)

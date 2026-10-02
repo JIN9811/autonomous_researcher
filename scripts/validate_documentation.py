@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import re
 from collections import Counter
@@ -61,16 +62,16 @@ SNAPSHOT_LABELS = {
     "stage_dispatch_edges": "stage_dispatch edges",
 }
 AGENT_REFERENCE_PATHS = {
-    "orchestrator": "docs/agents/orchestrator_agent.md",
-    "design": "docs/agents/design_agent.md",
-    "specimen": "docs/agents/specimen_agent.md",
-    "vision": "docs/agents/vision_agent.md",
-    "manipulation": "docs/agents/manipulation_agent.md",
-    "equipment": "docs/agents/equipment_agent.md",
-    "analysis": "docs/agents/analysis_agent.md",
-    "knowledge": "docs/agents/knowledge_agent.md",
-    "bo": "docs/agents/bo_agent.md",
-    "guardian": "docs/agents/guardian_agent.md",
+    "orchestrator": "system/agents/orchestrator_agent.md",
+    "design": "system/agents/design_agent.md",
+    "specimen": "system/agents/specimen_agent.md",
+    "vision": "system/agents/vision_agent.md",
+    "manipulation": "system/agents/manipulation_agent.md",
+    "equipment": "system/agents/equipment_agent.md",
+    "analysis": "system/agents/analysis_agent.md",
+    "knowledge": "system/agents/knowledge_agent.md",
+    "bo": "system/agents/bo_agent.md",
+    "guardian": "system/agents/guardian_agent.md",
 }
 AGENT_REFERENCE_FIGURES = {
     "orchestrator": (
@@ -135,13 +136,13 @@ AGENT_REFERENCE_TITLES = {
     "guardian": "Guardian",
 }
 DEVICE_BRIDGE_REFERENCE_PATHS = {
-    "printer_fleet": "docs/device_bridges/printer_fleet_bridge.md",
-    "bambu_x2d": "docs/device_bridges/bambu_x2d_bridge.md",
-    "prusa_mk4s": "docs/device_bridges/prusa_mk4s_bridge.md",
-    "lerobot": "docs/device_bridges/lerobot_bridge.md",
-    "windows_pyautogui": "docs/device_bridges/windows_pyautogui_bridge.md",
-    "utm_vision": "docs/device_bridges/utm_vision_bridge.md",
-    "base_simulator": "docs/device_bridges/base_simulator_bridges.md",
+    "printer_fleet": "system/device_bridges/printer_fleet_bridge.md",
+    "bambu_x2d": "system/device_bridges/bambu_x2d_bridge.md",
+    "prusa_mk4s": "system/device_bridges/prusa_mk4s_bridge.md",
+    "lerobot": "system/device_bridges/lerobot_bridge.md",
+    "windows_pyautogui": "system/device_bridges/windows_pyautogui_bridge.md",
+    "utm_vision": "system/device_bridges/utm_vision_bridge.md",
+    "base_simulator": "system/device_bridges/base_simulator_bridges.md",
 }
 DEVICE_BRIDGE_REFERENCE_TITLES = {
     "printer_fleet": "Printer Fleet",
@@ -240,7 +241,7 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("device_bridges/simulator/printer_sim.py", "class PrinterSimulator(BaseBridge):"),
     ),
 }
-RUNTIME_IDE_REFERENCE_PATH = "docs/runtime/runtime_ide.md"
+RUNTIME_IDE_REFERENCE_PATH = "system/runtime/runtime_ide.md"
 RUNTIME_IDE_REQUIRED_SECTIONS = (
     "Summary",
     "Scope",
@@ -288,10 +289,10 @@ RUNTIME_IDE_SOURCE_CONTRACTS = (
     ),
 )
 RUNTIME_IDE_NAVIGATION_LINKS = {
-    "README.md": "docs/runtime/runtime_ide.md",
-    "README.ko.md": "docs/runtime/runtime_ide.md",
-    "docs/README.md": "runtime/runtime_ide.md",
-    "docs/runtime/langgraph_runtime.md": "runtime_ide.md",
+    "README.md": "system/runtime/runtime_ide.md",
+    "docs/README.ko.md": "../system/runtime/runtime_ide.md",
+    "docs/README.md": "../system/runtime/runtime_ide.md",
+    "system/runtime/langgraph_runtime.md": "runtime_ide.md",
 }
 
 
@@ -425,7 +426,7 @@ def _validate_agent_reference_figures(
     errors: list[str] = []
     targets = set(_markdown_link_targets(body))
     title = AGENT_REFERENCE_TITLES[agent_id]
-    figure_root = root / "docs/agents/assets/figures"
+    figure_root = root / "system/agents/assets/figures"
     for index, stem in enumerate(AGENT_REFERENCE_FIGURES[agent_id], start=1):
         source = figure_root / f"{stem}.dot"
         rendering = figure_root / f"{stem}.svg"
@@ -479,7 +480,7 @@ def _validate_device_bridge_reference(
 
     targets = set(_markdown_link_targets(body))
     title = DEVICE_BRIDGE_REFERENCE_TITLES[bridge_id]
-    figure_root = root / "docs/device_bridges/assets/figures"
+    figure_root = root / "system/device_bridges/assets/figures"
     for index, stem in enumerate(DEVICE_BRIDGE_REFERENCE_FIGURES[bridge_id], start=1):
         source = figure_root / f"{stem}.dot"
         rendering = figure_root / f"{stem}.svg"
@@ -536,7 +537,7 @@ def _validate_runtime_ide_reference(
         previous_position = max(previous_position, position)
 
     targets = set(_markdown_link_targets(body))
-    figure_root = root / "docs/runtime/assets/figures"
+    figure_root = root / "system/runtime/assets/figures"
     expected_stems = set(RUNTIME_IDE_REFERENCE_FIGURES)
     for index, stem in enumerate(RUNTIME_IDE_REFERENCE_FIGURES, start=1):
         source = figure_root / f"{stem}.dot"
@@ -589,6 +590,30 @@ def validate_document(path: Path, root: Path) -> list[str]:
         metadata, body = split_front_matter(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError, yaml.YAMLError) as exc:
         return [f"{label}: {exc}"]
+
+    # Immutable evidence/legal documents retain original navigation bytes.
+    # Validate their exact historical receipt, then project references only for
+    # governance checks; the full audit reports them separately from live links.
+    inventory_path = root / 'system/maintenance/repository_layout_manifest.json'
+    provenance_verified = False
+    if inventory_path.is_file():
+        from tools.repository_layout.checks import document_locations, historical_reference_errors
+        from tools.repository_layout.move_files import rewrite_document_references
+        inventory = json.loads(inventory_path.read_text())
+        locations = document_locations(inventory)
+        historical = next((old for old in inventory.get('historical_documents', {})
+                           if locations.get(old) == label), None)
+        if historical:
+            failures = historical_reference_errors(root, historical, label, inventory)
+            if failures:
+                return [f'{label}: {error}' for error in failures]
+            projected, _ = rewrite_document_references(path.read_text(), historical, label, locations)
+            metadata, body = split_front_matter(projected)
+        if '.git' in _path_values(metadata.get('source_of_truth')):
+            # Exact repository provenance sentinel: no .git mount is needed in
+            # a tracked-only snapshot whose inventory baseline was checked.
+            if re.fullmatch('[0-9a-f]{40}', inventory.get('baseline_commit', '')):
+                provenance_verified = True
 
     errors: list[str] = []
     for field in sorted(REQUIRED_FIELDS):
@@ -644,7 +669,11 @@ def validate_document(path: Path, root: Path) -> list[str]:
     ):
         errors.append(f"{label}: superseded document requires a replacement path")
 
-    errors.extend(_validate_paths(metadata, root, label))
+    path_metadata = metadata
+    if provenance_verified:
+        path_metadata = {**metadata, 'source_of_truth': [value for value in
+            _path_values(metadata['source_of_truth']) if value != '.git']}
+    errors.extend(_validate_paths(path_metadata, root, label))
     errors.extend(_validate_local_links(path, body, root, label))
     errors.extend(_validate_agent_reference_figures(path, body, root, label))
     errors.extend(_validate_device_bridge_reference(path, body, root, label))
@@ -781,7 +810,7 @@ def _validate_device_bridge_navigation(
                     f"exactly {len(DEVICE_BRIDGE_REFERENCE_PATHS)} rows; found {len(table_rows)}"
                 )
 
-    index_path = "docs/device_bridges/README.md"
+    index_path = "system/device_bridges/README.md"
     if index_path not in documents:
         return errors
     index = root / index_path
@@ -850,7 +879,7 @@ def _validate_device_bridge_figure_inventory(
     required_paths = set(DEVICE_BRIDGE_REFERENCE_PATHS.values())
     if not required_paths.issubset(set(documents)):
         return []
-    figure_root = root / "docs/device_bridges/assets/figures"
+    figure_root = root / "system/device_bridges/assets/figures"
     if not figure_root.is_dir():
         return []
     expected = {
@@ -928,7 +957,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("docs/document_manifest.yaml"),
+        default=Path("system/document_manifest.yaml"),
     )
     args = parser.parse_args(argv)
 

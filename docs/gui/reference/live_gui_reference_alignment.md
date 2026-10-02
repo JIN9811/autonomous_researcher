@@ -9,8 +9,8 @@ agent references remain authoritative.
 
 - `web/templates/planning.html`, `web/static/planning.js`, `web/static/styles.css`
 - `app/main.py`, `app/controller.py`, `app/planning_setup.py`
-- [Agent References](../../agents/README.md)
-- [Runtime IDE](../../runtime/runtime_ide.md)
+- [Agent References](../../../system/agents/README.md)
+- [Runtime IDE](../../../system/runtime/runtime_ide.md)
 
 ## Current Experimental Setup and Chat Boundary
 
@@ -22,18 +22,18 @@ A manually reopened summary follows the same three-bubble rule and remains open
 on subsequent refreshes.
 
 Knowledge cards retain activity, memory and retrieval evidence. The
-[Wiki and Memory](../../knowledge/wiki_memory.md) integration adds the shared
+[Wiki and Memory](../../../system/knowledge/wiki_memory.md) integration adds the shared
 Wiki, scoped private-memory actions and delivery receipts; its browser rendering
-has a limited read-only Wiki screenshot in the [2026-09-29 GUI collection](../visual_structure.md). That capture does not verify authenticated private-memory, delivery, or write flows. The existing Knowledge Workspace keeps Source Library,
+has a limited read-only Wiki screenshot in the [2026-09-29 GUI collection](../../../system/runtime/gui/visual_structure.md). That capture does not verify authenticated private-memory, delivery, or write flows. The existing Knowledge Workspace keeps Source Library,
 execution Markdown and ontology alongside the new views. Knowledge-bound Chat
 HTML is excluded from persistent browser snapshots, while the server transcript
 and existing three-expanded-message interaction remain intact. Retired graph
 relation summaries are not polled, and relation review cards/links are absent.
 Operator Attention covers approvals, agent questions and runtime faults, not
-retired relation queues. See the [Knowledge Agent](../../agents/knowledge_agent.md)
+retired relation queues. See the [Knowledge Agent](../../../system/agents/knowledge_agent.md)
 for the current workspace and API boundaries.
 
-New run/session identifiers use [date, KST time, and the known purpose](../../runtime/logging.md#readable-run-and-session-names).
+New run/session identifiers use [date, KST time, and the known purpose](../../../system/runtime/logging.md#readable-run-and-session-names).
 An already-created planning session or run keeps its identity when the operator
 later selects a mode; this naming change does not replace the canonical Setup store.
 
@@ -69,7 +69,7 @@ Focused static-fixture browser evidence covered this allocation and internal
 scroll at 1440x960, 1440x480, and 390x640, including the last block's keyboard
 actions and the same Chat context. It is not evidence of an operating GUI
 service, live owner readiness, a full-page mobile layout pass, or hardware.
-The related [bounded verification evidence](../../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+The related [bounded verification evidence](../../../system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
 records the aggregate/provider scope separately; it is not browser or service proof.
 
 ## Report and Backend Boundary

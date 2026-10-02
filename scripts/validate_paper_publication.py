@@ -28,15 +28,15 @@ EVIDENCE_ENVIRONMENTS = {
     "browser",
     "live",
 }
-REQUIRED_ROOT_FILES = (
+REQUIRED_PUBLICATION_FILES = (
     "README.md",
-    "README.ko.md",
-    "CITATION.cff",
-    "LICENSE",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "CHANGELOG.md",
-    "REQUIREMENTS.md",
+    "docs/README.ko.md",
+    "docs/paper/CITATION.cff",
+    "runtime/LICENSE",
+    "docs/project/CONTRIBUTING.md",
+    ".github/SECURITY.md",
+    "docs/project/CHANGELOG.md",
+    "docs/project/REQUIREMENTS.md",
 )
 REQUIRED_PAPER_FILES = (
     "docs/paper/README.md",
@@ -264,7 +264,7 @@ def _validate_readme_order(root: Path) -> list[str]:
 
 
 def _validate_public_paths(root: Path) -> list[str]:
-    paths = [root / "README.md", root / "README.ko.md"]
+    paths = [root / "README.md", root / "docs/README.ko.md"]
     paper_root = root / "docs/paper"
     if paper_root.is_dir():
         paths.extend(sorted(paper_root.rglob("*.md")))
@@ -300,7 +300,7 @@ def validate_paper_structure(root: Path) -> list[str]:
     """Return missing-file, narrative-order, figure, and privacy defects."""
 
     errors: list[str] = []
-    for relative_path in (*REQUIRED_ROOT_FILES, *REQUIRED_PAPER_FILES):
+    for relative_path in (*REQUIRED_PUBLICATION_FILES, *REQUIRED_PAPER_FILES):
         if not (root / relative_path).is_file():
             errors.append(f"missing required publication file: {relative_path}")
     errors.extend(_validate_readme_order(root))

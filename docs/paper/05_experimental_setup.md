@@ -13,7 +13,7 @@ scope:
   - evaluation_protocol
 summary: Defines the environments, units of evaluation, controls, and evidence collection required for ATR experiments.
 source_of_truth:
-  - REQUIREMENTS.md
+  - docs/project/REQUIREMENTS.md
   - configs
   - graphs/configs/atr_closed_loop.yaml
   - tests
@@ -66,7 +66,7 @@ The working-tree Orchestrator Setup contract also has a bounded verification
 record for next-new-run admission and provider-case aggregation. It belongs to
 the `test`/controlled-local boundary, not to this chapter's live-environment
 rows or a complete campaign result; see the
-[runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
+[runtime evidence note](../../system/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
 
 The application setup combines existing instruments with VLA-enabled robot
 manipulation and structured software coordination. To evaluate the hardware
@@ -99,7 +99,7 @@ These are evidence classes, not guarantees from the runtime's mode string.
 ATR's `test` mode can select installed-printer or physical-print profiles with
 real effects; only a resolved all-virtual device profile supplies simulated I/O.
 Record the actual device/model boundary, as the September 7 mixed-mode records do.
-See [Test Mode](../runtime/test_mode.md).
+See [Test Mode](../../system/runtime/test_mode.md).
 
 ## Units of Evaluation
 

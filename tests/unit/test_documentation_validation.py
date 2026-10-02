@@ -131,7 +131,7 @@ TEST_AGENT_TITLES = {
 
 TEST_DEVICE_BRIDGE_REFERENCES = {
     "printer_fleet": (
-        "docs/device_bridges/printer_fleet_bridge.md",
+        "system/device_bridges/printer_fleet_bridge.md",
         "Printer Fleet",
         (
             "printer_fleet_01_system_handoffs",
@@ -140,7 +140,7 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
         ),
     ),
     "bambu_x2d": (
-        "docs/device_bridges/bambu_x2d_bridge.md",
+        "system/device_bridges/bambu_x2d_bridge.md",
         "Bambu X2D",
         (
             "bambu_x2d_01_system_handoffs",
@@ -149,7 +149,7 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
         ),
     ),
     "prusa_mk4s": (
-        "docs/device_bridges/prusa_mk4s_bridge.md",
+        "system/device_bridges/prusa_mk4s_bridge.md",
         "Prusa MK4S",
         (
             "prusa_mk4s_01_system_handoffs",
@@ -158,7 +158,7 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
         ),
     ),
     "lerobot": (
-        "docs/device_bridges/lerobot_bridge.md",
+        "system/device_bridges/lerobot_bridge.md",
         "LeRobot",
         (
             "lerobot_01_system_handoffs",
@@ -167,7 +167,7 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
         ),
     ),
     "windows_pyautogui": (
-        "docs/device_bridges/windows_pyautogui_bridge.md",
+        "system/device_bridges/windows_pyautogui_bridge.md",
         "Windows PyAutoGUI",
         (
             "windows_pyautogui_01_system_handoffs",
@@ -176,7 +176,7 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
         ),
     ),
     "utm_vision": (
-        "docs/device_bridges/utm_vision_bridge.md",
+        "system/device_bridges/utm_vision_bridge.md",
         "UTM Vision",
         (
             "utm_vision_01_system_handoffs",
@@ -185,7 +185,7 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
         ),
     ),
     "base_simulator": (
-        "docs/device_bridges/base_simulator_bridges.md",
+        "system/device_bridges/base_simulator_bridges.md",
         "Base Simulator",
         (
             "base_simulator_01_system_handoffs",
@@ -330,12 +330,12 @@ def _write_manifest(
     }
     if snapshot_expected is not None:
         manifest["snapshot"] = {
-            "document": "docs/runtime/current_code_snapshot.md",
+            "document": "system/runtime/current_code_snapshot.md",
             "expected": snapshot_expected,
         }
     return _write(
         root,
-        "docs/document_manifest.yaml",
+        "system/document_manifest.yaml",
         yaml.safe_dump(manifest, sort_keys=False),
     )
 
@@ -354,8 +354,8 @@ def _write_agent_reference(
     title = TEST_AGENT_TITLES[agent_id]
     figures: list[str] = []
     for index, stem in enumerate(stems, start=1):
-        _write(root, f"docs/agents/assets/figures/{stem}.dot", "digraph G {}\n")
-        _write(root, f"docs/agents/assets/figures/{stem}.svg", "<svg/>\n")
+        _write(root, f"system/agents/assets/figures/{stem}.dot", "digraph G {}\n")
+        _write(root, f"system/agents/assets/figures/{stem}.svg", "<svg/>\n")
         figures.extend(
             (
                 f"![{title} figure {index}](assets/figures/{stem}.svg)",
@@ -363,7 +363,7 @@ def _write_agent_reference(
             )
         )
     body = VALID_REFERENCE + "\n" + "\n\n".join(figures) + "\n"
-    return _write(root, f"docs/agents/{agent_id}_agent.md", body)
+    return _write(root, f"system/agents/{agent_id}_agent.md", body)
 
 
 def _write_device_bridge_reference(root: Path, bridge_id: str) -> Path:
@@ -376,8 +376,8 @@ def _write_device_bridge_reference(root: Path, bridge_id: str) -> Path:
     path, title, stems = TEST_DEVICE_BRIDGE_REFERENCES[bridge_id]
     figures: list[str] = []
     for index, stem in enumerate(stems, start=1):
-        _write(root, f"docs/device_bridges/assets/figures/{stem}.dot", "digraph G {}\n")
-        _write(root, f"docs/device_bridges/assets/figures/{stem}.svg", "<svg/>\n")
+        _write(root, f"system/device_bridges/assets/figures/{stem}.dot", "digraph G {}\n")
+        _write(root, f"system/device_bridges/assets/figures/{stem}.svg", "<svg/>\n")
         figures.extend(
             (
                 f"![{title} figure {index}](assets/figures/{stem}.svg)",
@@ -398,8 +398,8 @@ def _write_runtime_ide_reference(root: Path) -> Path:
     _write(root, "docs/related.md", "# Related\n")
     figures: list[str] = []
     for index, stem in enumerate(TEST_RUNTIME_IDE_FIGURES, start=1):
-        _write(root, f"docs/runtime/assets/figures/{stem}.dot", "digraph G {}\n")
-        _write(root, f"docs/runtime/assets/figures/{stem}.svg", "<svg/>\n")
+        _write(root, f"system/runtime/assets/figures/{stem}.dot", "digraph G {}\n")
+        _write(root, f"system/runtime/assets/figures/{stem}.svg", "<svg/>\n")
         figures.extend(
             (
                 f"![Runtime IDE figure {index}](assets/figures/{stem}.svg)",
@@ -411,7 +411,7 @@ def _write_runtime_ide_reference(root: Path) -> Path:
         for heading in TEST_RUNTIME_IDE_SECTIONS
     )
     body = VALID_REFERENCE + "\n" + sections + "\n\n" + "\n\n".join(figures) + "\n"
-    return _write(root, "docs/runtime/runtime_ide.md", body)
+    return _write(root, "system/runtime/runtime_ide.md", body)
 
 
 def _load_validator():
@@ -540,7 +540,7 @@ def test_simple_agent_reference_requires_two_complete_figure_pairs(tmp_path: Pat
 
     source = (
         tmp_path
-        / "docs/agents/assets/figures/orchestrator_01_closed_loop_handoffs.dot"
+        / "system/agents/assets/figures/orchestrator_01_closed_loop_handoffs.dot"
     )
     source.unlink()
     errors = module.validate_document(document, tmp_path)
@@ -576,7 +576,7 @@ def test_agent_reference_rejects_missing_rendering_link_and_caption(
     document = _write_agent_reference(tmp_path, "design")
     rendering = (
         tmp_path
-        / "docs/agents/assets/figures/design_01_closed_loop_handoffs.svg"
+        / "system/agents/assets/figures/design_01_closed_loop_handoffs.svg"
     )
     rendering.unlink()
     text = document.read_text(encoding="utf-8")
@@ -623,7 +623,7 @@ def test_manifest_accepts_root_readme_links_for_all_canonical_agents(
 ) -> None:
     module = _load_validator()
     links = "\n".join(
-        f"[{agent_id}](docs/agents/{agent_id}_agent.md)"
+        f"[{agent_id}](system/agents/{agent_id}_agent.md)"
         for agent_id in TEST_AGENT_FIGURES
     )
     _write(tmp_path, "README.md", VALID_INDEX + "\n" + links + "\n")
@@ -653,8 +653,8 @@ def test_device_bridge_reference_requires_all_sections_in_order(tmp_path: Path) 
 def test_device_bridge_reference_requires_figure_source_and_rendering(tmp_path: Path) -> None:
     module = _load_validator()
     document = _write_device_bridge_reference(tmp_path, "bambu_x2d")
-    source = tmp_path / "docs/device_bridges/assets/figures/bambu_x2d_01_system_handoffs.dot"
-    rendering = tmp_path / "docs/device_bridges/assets/figures/bambu_x2d_02_execution_effect_boundary.svg"
+    source = tmp_path / "system/device_bridges/assets/figures/bambu_x2d_01_system_handoffs.dot"
+    rendering = tmp_path / "system/device_bridges/assets/figures/bambu_x2d_02_execution_effect_boundary.svg"
     source.unlink()
     rendering.unlink()
 
@@ -692,7 +692,7 @@ def test_device_bridge_reference_detects_registered_tool_or_api_drift(tmp_path: 
     errors = module.validate_document(document, tmp_path)
 
     assert errors == [
-        "docs/device_bridges/lerobot_bridge.md: missing device bridge source "
+        "system/device_bridges/lerobot_bridge.md: missing device bridge source "
         'contract in device_bridges/lerobot/tools.py: registry.register("lerobot.rollout.start"'
     ]
 
@@ -711,7 +711,7 @@ def test_manifest_requires_root_readme_links_for_all_device_bridges(tmp_path: Pa
     assert [
         error for error in errors if "missing root README device bridge link" in error
     ] == [
-        f"docs/document_manifest.yaml: missing root README device bridge link: {path}"
+        f"system/document_manifest.yaml: missing root README device bridge link: {path}"
         for path, _title, _stems in TEST_DEVICE_BRIDGE_REFERENCES.values()
     ]
 
@@ -719,8 +719,8 @@ def test_manifest_requires_root_readme_links_for_all_device_bridges(tmp_path: Pa
 def test_manifest_requires_device_bridge_index_reference_and_figure_links(tmp_path: Path) -> None:
     module = _load_validator()
     _write(tmp_path, "README.md", VALID_INDEX)
-    _write(tmp_path, "docs/device_bridges/README.md", VALID_INDEX)
-    documents = ["README.md", "docs/device_bridges/README.md"]
+    _write(tmp_path, "system/device_bridges/README.md", VALID_INDEX)
+    documents = ["README.md", "system/device_bridges/README.md"]
     for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
         document = _write_device_bridge_reference(tmp_path, bridge_id)
         documents.append(document.relative_to(tmp_path).as_posix())
@@ -731,13 +731,13 @@ def test_manifest_requires_device_bridge_index_reference_and_figure_links(tmp_pa
     assert [
         error for error in errors if "missing device bridge index reference link" in error
     ] == [
-        f"docs/document_manifest.yaml: missing device bridge index reference link: {Path(path).name}"
+        f"system/document_manifest.yaml: missing device bridge index reference link: {Path(path).name}"
         for path, _title, _stems in TEST_DEVICE_BRIDGE_REFERENCES.values()
     ]
     assert [
         error for error in errors if "missing device bridge index figure link" in error
     ] == [
-        f"docs/document_manifest.yaml: missing device bridge index figure link: assets/figures/{stem}.svg"
+        f"system/document_manifest.yaml: missing device bridge index figure link: assets/figures/{stem}.svg"
         for _path, _title, stems in TEST_DEVICE_BRIDGE_REFERENCES.values()
         for stem in stems
     ]
@@ -763,7 +763,7 @@ def test_manifest_rejects_duplicate_device_bridge_root_table_row(tmp_path: Path)
     errors = module.validate_manifest(tmp_path, manifest)
 
     assert errors == [
-        "docs/document_manifest.yaml: root README device bridge table must contain "
+        "system/document_manifest.yaml: root README device bridge table must contain "
         "exactly 7 rows; found 8"
     ]
 
@@ -779,8 +779,8 @@ def test_manifest_rejects_undeclared_device_bridge_figure_assets(tmp_path: Path)
     for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
         document = _write_device_bridge_reference(tmp_path, bridge_id)
         documents.append(document.relative_to(tmp_path).as_posix())
-    _write(tmp_path, "docs/device_bridges/assets/figures/untracked_figure.dot", "digraph G {}\n")
-    _write(tmp_path, "docs/device_bridges/assets/figures/untracked_figure.svg", "<svg/>\n")
+    _write(tmp_path, "system/device_bridges/assets/figures/untracked_figure.dot", "digraph G {}\n")
+    _write(tmp_path, "system/device_bridges/assets/figures/untracked_figure.svg", "<svg/>\n")
     manifest = _write_manifest(tmp_path, documents)
 
     errors = module.validate_manifest(tmp_path, manifest)
@@ -816,18 +816,18 @@ def test_runtime_ide_reference_requires_figure_pairs_embeds_and_captions(
 ) -> None:
     module = _load_validator()
     document = _write_runtime_ide_reference(tmp_path)
-    source = tmp_path / "docs/runtime/assets/figures/runtime_ide_01_system_boundaries.dot"
-    rendering = tmp_path / "docs/runtime/assets/figures/runtime_ide_02_config_activation_flow.svg"
+    source = tmp_path / "system/runtime/assets/figures/runtime_ide_01_system_boundaries.dot"
+    rendering = tmp_path / "system/runtime/assets/figures/runtime_ide_02_config_activation_flow.svg"
     source.unlink()
     rendering.unlink()
     _write(
         tmp_path,
-        "docs/runtime/assets/figures/runtime_ide_untracked.dot",
+        "system/runtime/assets/figures/runtime_ide_untracked.dot",
         "digraph G {}\n",
     )
     _write(
         tmp_path,
-        "docs/runtime/assets/figures/runtime_ide_untracked.svg",
+        "system/runtime/assets/figures/runtime_ide_untracked.svg",
         "<svg/>\n",
     )
     text = document.read_text(encoding="utf-8")
@@ -866,15 +866,15 @@ def test_runtime_ide_reference_detects_high_consequence_source_drift(
 def test_manifest_requires_runtime_ide_navigation_links(tmp_path: Path) -> None:
     module = _load_validator()
     _write(tmp_path, "README.md", VALID_INDEX)
-    _write(tmp_path, "README.ko.md", VALID_INDEX)
+    _write(tmp_path, "docs/README.ko.md", VALID_INDEX)
     _write(tmp_path, "docs/README.md", VALID_INDEX)
-    _write(tmp_path, "docs/runtime/langgraph_runtime.md", VALID_REFERENCE)
+    _write(tmp_path, "system/runtime/langgraph_runtime.md", VALID_REFERENCE)
     document = _write_runtime_ide_reference(tmp_path)
     documents = [
         "README.md",
-        "README.ko.md",
+        "docs/README.ko.md",
         "docs/README.md",
-        "docs/runtime/langgraph_runtime.md",
+        "system/runtime/langgraph_runtime.md",
         document.relative_to(tmp_path).as_posix(),
     ]
     manifest = _write_manifest(tmp_path, documents)
@@ -922,12 +922,12 @@ def test_manifest_rejects_stale_snapshot_values(tmp_path: Path) -> None:
     module = _load_validator()
     _write(
         tmp_path,
-        "docs/runtime/current_code_snapshot.md",
+        "system/runtime/current_code_snapshot.md",
         VALID_SNAPSHOT.replace("Graph nodes: 19", "Graph nodes: 18"),
     )
     manifest = _write_manifest(
         tmp_path,
-        ["docs/runtime/current_code_snapshot.md"],
+        ["system/runtime/current_code_snapshot.md"],
         snapshot_expected={
             "api_routes": 332,
             "app_routes": 339,
@@ -944,10 +944,10 @@ def test_manifest_rejects_stale_snapshot_values(tmp_path: Path) -> None:
 
 def test_valid_manifest_has_no_errors(tmp_path: Path) -> None:
     module = _load_validator()
-    _write(tmp_path, "docs/runtime/current_code_snapshot.md", VALID_SNAPSHOT)
+    _write(tmp_path, "system/runtime/current_code_snapshot.md", VALID_SNAPSHOT)
     manifest = _write_manifest(
         tmp_path,
-        ["docs/runtime/current_code_snapshot.md"],
+        ["system/runtime/current_code_snapshot.md"],
         snapshot_expected={
             "api_routes": 332,
             "app_routes": 339,
