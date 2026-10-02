@@ -33391,6 +33391,474 @@
   ],
   "privacy": "Committed public objects only; no private store inventory",
   "runtime_phase": {
+    "reference_finalization": {
+      "reviewed_checkpoint": "10a8b8c9cb7321064049746bd76bbc0e4b5625b6",
+      "proof_sha256": "b231c2bd11096a7db6578aaa24a5f1cd95b8c59e316d1e3883b7e60c8a95f0bc",
+      "review_sha256": "c7017424ad62db50677dbebe004615db488d64272c59c5316ef30b1ae23cfa48",
+      "source_rebindings": [
+        {
+          "page": "system/knowledge/wiki/agent-contracts.md",
+          "source": "system/agents/agent_api_connection_matrix.md",
+          "before_sha256": "973e2e0c531d18485b1044e0113fdc06aa4e3b8263862c6740cd1283f70194ef",
+          "after_sha256": "0f2f026a8e854f93de40c3408949ea34569f4fbdf95fc4293d1b3df225a5706e"
+        },
+        {
+          "page": "system/knowledge/wiki/agent-contracts.md",
+          "source": "system/runtime/three_level_control_model.md",
+          "before_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+          "after_sha256": "0dbdf7322e0b970584a38ae8c181d18486a565285af73d8185371afdcea81127"
+        },
+        {
+          "page": "system/knowledge/wiki/agent-contracts.md",
+          "source": "system/modularity.md",
+          "before_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+          "after_sha256": "ff6824f4c5d698782a4a4ab16dbdaddc10e217b2fee1806bbcd101da9d712228"
+        },
+        {
+          "page": "system/knowledge/wiki/analysis-role.md",
+          "source": "system/agents/analysis_agent.md",
+          "before_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+          "after_sha256": "fd0e6921b8443f318e3cb2139e614482288c828d8633fac1746bddd0fa04a6cd"
+        },
+        {
+          "page": "system/knowledge/wiki/artifacts.md",
+          "source": "system/runtime/loop_artifact_archiving.md",
+          "before_sha256": "96868e8b3e73bc37373a9b3bf279c4b7a30a09c4081aabc589a2dccf2bd4e25f",
+          "after_sha256": "ca9b6a4d61d245290eb70e7cb9eda8aaf12cec4fea0ee0ff64427db508be3fa0"
+        },
+        {
+          "page": "system/knowledge/wiki/artifacts.md",
+          "source": "system/knowledge/publication.md",
+          "before_sha256": "45d6b053ad1f4632f089b80bec6e0729783d2ed1d4328170a992c23fba52ffe4",
+          "after_sha256": "7ade193566f19bc57065f60f3a263785bf45e9fa7a5b285f18e547213c870931"
+        },
+        {
+          "page": "system/knowledge/wiki/bo-role.md",
+          "source": "system/agents/bo_agent.md",
+          "before_sha256": "19b5aa92d2356bb70995b60925e727afcc13445e3a87da836a842f4d7c14abf7",
+          "after_sha256": "0aa6e34c8c4bacc0b172b5d9a1d51d94a831cbf1ebcb526185716501e645aff9"
+        },
+        {
+          "page": "system/knowledge/wiki/bo-visualization.md",
+          "source": "system/agents/bo_agent.md",
+          "before_sha256": "19b5aa92d2356bb70995b60925e727afcc13445e3a87da836a842f4d7c14abf7",
+          "after_sha256": "0aa6e34c8c4bacc0b172b5d9a1d51d94a831cbf1ebcb526185716501e645aff9"
+        },
+        {
+          "page": "system/knowledge/wiki/bo-visualization.md",
+          "source": "system/agents/analysis_agent.md",
+          "before_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+          "after_sha256": "fd0e6921b8443f318e3cb2139e614482288c828d8633fac1746bddd0fa04a6cd"
+        },
+        {
+          "page": "system/knowledge/wiki/closed-loop.md",
+          "source": "system/agents/agent_api_connection_matrix.md",
+          "before_sha256": "973e2e0c531d18485b1044e0113fdc06aa4e3b8263862c6740cd1283f70194ef",
+          "after_sha256": "0f2f026a8e854f93de40c3408949ea34569f4fbdf95fc4293d1b3df225a5706e"
+        },
+        {
+          "page": "system/knowledge/wiki/closed-loop.md",
+          "source": "system/agents/equipment_agent.md",
+          "before_sha256": "21de8d0387ce55d54c666d687dcddbc443ced70cfcdaade3f0687f12fc63a396",
+          "after_sha256": "ef49a454b482be24ec5fd6ae347e287cca26383f285165b9ec8de2ef3f7f9a8e"
+        },
+        {
+          "page": "system/knowledge/wiki/closed-loop.md",
+          "source": "system/agents/bo_agent.md",
+          "before_sha256": "19b5aa92d2356bb70995b60925e727afcc13445e3a87da836a842f4d7c14abf7",
+          "after_sha256": "0aa6e34c8c4bacc0b172b5d9a1d51d94a831cbf1ebcb526185716501e645aff9"
+        },
+        {
+          "page": "system/knowledge/wiki/closed-loop.md",
+          "source": "system/agents/orchestrator_agent.md",
+          "before_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+          "after_sha256": "0ead09417efae55effb2c035e52c34390861e6b3946cd70c79a447f8c771e39e"
+        },
+        {
+          "page": "system/knowledge/wiki/control-levels.md",
+          "source": "system/runtime/three_level_control_model.md",
+          "before_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+          "after_sha256": "0dbdf7322e0b970584a38ae8c181d18486a565285af73d8185371afdcea81127"
+        },
+        {
+          "page": "system/knowledge/wiki/design-role.md",
+          "source": "system/agents/design_agent.md",
+          "before_sha256": "408309ea34dc7300ab380203765788ea1ef38348df2ef760e1cd1ebfe1603333",
+          "after_sha256": "bfafd993e51aecea5d9e4aa72c069590052831c8ab6a00ce5194ab027efb96f0"
+        },
+        {
+          "page": "system/knowledge/wiki/design-role.md",
+          "source": "system/runtime/three_level_control_model.md",
+          "before_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+          "after_sha256": "0dbdf7322e0b970584a38ae8c181d18486a565285af73d8185371afdcea81127"
+        },
+        {
+          "page": "system/knowledge/wiki/equipment-role.md",
+          "source": "system/agents/equipment_agent.md",
+          "before_sha256": "21de8d0387ce55d54c666d687dcddbc443ced70cfcdaade3f0687f12fc63a396",
+          "after_sha256": "ef49a454b482be24ec5fd6ae347e287cca26383f285165b9ec8de2ef3f7f9a8e"
+        },
+        {
+          "page": "system/knowledge/wiki/experimental-setup.md",
+          "source": "system/agents/orchestrator_agent.md",
+          "before_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+          "after_sha256": "0ead09417efae55effb2c035e52c34390861e6b3946cd70c79a447f8c771e39e"
+        },
+        {
+          "page": "system/knowledge/wiki/experimental-setup.md",
+          "source": "system/modularity.md",
+          "before_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+          "after_sha256": "ff6824f4c5d698782a4a4ab16dbdaddc10e217b2fee1806bbcd101da9d712228"
+        },
+        {
+          "page": "system/knowledge/wiki/guardian-role.md",
+          "source": "system/agents/guardian_agent.md",
+          "before_sha256": "504b83dfd169884d5d34177667fac9b947bcc2ef3cf3c0aa46988690f9a46249",
+          "after_sha256": "3028fc90ab90215be9a7d7a5bb4a63fafd3263e4c6e8342084be2cf5ed12c886"
+        },
+        {
+          "page": "system/knowledge/wiki/guardian-role.md",
+          "source": "system/device_bridges/plc_safety_bridge.md",
+          "before_sha256": "06805f23d8f066b175e9e9b9a63e1c356ea9547b73adf48b233f005c9e8e7e4f",
+          "after_sha256": "fae567937e82ccc704ca6c5a403ee6140975be9dbdb81ed5ce7e0da0f52821f3"
+        },
+        {
+          "page": "system/knowledge/wiki/knowledge-agent.md",
+          "source": "system/knowledge/wiki_memory.md",
+          "before_sha256": "278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88",
+          "after_sha256": "895db872a7c91ce24f2ec2bcf880ddd0c7f15c3dd55696dccbf1b12b1efb3f42"
+        },
+        {
+          "page": "system/knowledge/wiki/knowledge-agent.md",
+          "source": "system/knowledge/publication.md",
+          "before_sha256": "45d6b053ad1f4632f089b80bec6e0729783d2ed1d4328170a992c23fba52ffe4",
+          "after_sha256": "7ade193566f19bc57065f60f3a263785bf45e9fa7a5b285f18e547213c870931"
+        },
+        {
+          "page": "system/knowledge/wiki/knowledge-agent.md",
+          "source": "system/agents/knowledge_agent.md",
+          "before_sha256": "798b165b781d85a3197d1b8888b618fea9610928aa15b8765bb7afae21196890",
+          "after_sha256": "a2ef1bf75babf4f1d2529c0393b6474984a2c258cd112ba0a5d3c0d3cd69e761"
+        },
+        {
+          "page": "system/knowledge/wiki/knowledge-role.md",
+          "source": "system/agents/knowledge_agent.md",
+          "before_sha256": "798b165b781d85a3197d1b8888b618fea9610928aa15b8765bb7afae21196890",
+          "after_sha256": "a2ef1bf75babf4f1d2529c0393b6474984a2c258cd112ba0a5d3c0d3cd69e761"
+        },
+        {
+          "page": "system/knowledge/wiki/knowledge-role.md",
+          "source": "system/knowledge/wiki_memory.md",
+          "before_sha256": "278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88",
+          "after_sha256": "895db872a7c91ce24f2ec2bcf880ddd0c7f15c3dd55696dccbf1b12b1efb3f42"
+        },
+        {
+          "page": "system/knowledge/wiki/manipulation-role.md",
+          "source": "system/agents/manipulation_agent.md",
+          "before_sha256": "123be74169a6d93766d1f00ba7205dd4f61939a931e17b6070c48c0b6d766740",
+          "after_sha256": "d18e0f8fc4c2e1e5af183ebdcdadd6db1ffc71f16ec56d4fed407afb5c4ef51b"
+        },
+        {
+          "page": "system/knowledge/wiki/measurement-metrics.md",
+          "source": "system/agents/analysis_agent.md",
+          "before_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+          "after_sha256": "fd0e6921b8443f318e3cb2139e614482288c828d8633fac1746bddd0fa04a6cd"
+        },
+        {
+          "page": "system/knowledge/wiki/orchestrator-role.md",
+          "source": "system/agents/orchestrator_agent.md",
+          "before_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+          "after_sha256": "0ead09417efae55effb2c035e52c34390861e6b3946cd70c79a447f8c771e39e"
+        },
+        {
+          "page": "system/knowledge/wiki/packages-and-plans.md",
+          "source": "system/modularity.md",
+          "before_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+          "after_sha256": "ff6824f4c5d698782a4a4ab16dbdaddc10e217b2fee1806bbcd101da9d712228"
+        },
+        {
+          "page": "system/knowledge/wiki/platform-overview.md",
+          "source": "docs/README.md",
+          "before_sha256": "78af2a5d31db8bef7e1506c3678b079d5c965d0221a1517a70978a05ee268417",
+          "after_sha256": "b05b041d4ecd751ad58dc2df13b2909dc9955708ea4118a0f290b3afc3a94590"
+        },
+        {
+          "page": "system/knowledge/wiki/platform-overview.md",
+          "source": "system/modularity.md",
+          "before_sha256": "3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e",
+          "after_sha256": "ff6824f4c5d698782a4a4ab16dbdaddc10e217b2fee1806bbcd101da9d712228"
+        },
+        {
+          "page": "system/knowledge/wiki/platform-overview.md",
+          "source": "system/runtime/three_level_control_model.md",
+          "before_sha256": "15330a201059320411303aab741381c81835651b897c9d7161e3d507578da9e6",
+          "after_sha256": "0dbdf7322e0b970584a38ae8c181d18486a565285af73d8185371afdcea81127"
+        },
+        {
+          "page": "system/knowledge/wiki/recovery.md",
+          "source": "system/agents/equipment_agent.md",
+          "before_sha256": "21de8d0387ce55d54c666d687dcddbc443ced70cfcdaade3f0687f12fc63a396",
+          "after_sha256": "ef49a454b482be24ec5fd6ae347e287cca26383f285165b9ec8de2ef3f7f9a8e"
+        },
+        {
+          "page": "system/knowledge/wiki/recovery.md",
+          "source": "system/agents/vision_agent.md",
+          "before_sha256": "ad04cfe9bcc0c0f76a8dae75658d5ee2e101cfb1074b6c87a732626ca7bc9946",
+          "after_sha256": "a30661502aff943c53e9ae4f02909c82ea2d5f5c8c1f642d54aec6c49a85b93d"
+        },
+        {
+          "page": "system/knowledge/wiki/recovery.md",
+          "source": "system/agents/analysis_agent.md",
+          "before_sha256": "b4e4c1d2a5ce25ddc2dbbea46bcd522ccd841ad00aa0838e3768b0fd7d76ce19",
+          "after_sha256": "fd0e6921b8443f318e3cb2139e614482288c828d8633fac1746bddd0fa04a6cd"
+        },
+        {
+          "page": "system/knowledge/wiki/recovery.md",
+          "source": "system/device_bridges/plc_safety_bridge.md",
+          "before_sha256": "06805f23d8f066b175e9e9b9a63e1c356ea9547b73adf48b233f005c9e8e7e4f",
+          "after_sha256": "fae567937e82ccc704ca6c5a403ee6140975be9dbdb81ed5ce7e0da0f52821f3"
+        },
+        {
+          "page": "system/knowledge/wiki/specimen-role.md",
+          "source": "system/agents/specimen_agent.md",
+          "before_sha256": "e8a62e812dc9a3d2f821a4294bc874005478fc10faa3892ffa233e8d40c4ca22",
+          "after_sha256": "fe47900b6cd81e0a23364e8767893d2cee08a77b0d4161b90b64f4d9fd04103d"
+        },
+        {
+          "page": "system/knowledge/wiki/test-modes.md",
+          "source": "system/agents/specimen_agent.md",
+          "before_sha256": "e8a62e812dc9a3d2f821a4294bc874005478fc10faa3892ffa233e8d40c4ca22",
+          "after_sha256": "fe47900b6cd81e0a23364e8767893d2cee08a77b0d4161b90b64f4d9fd04103d"
+        },
+        {
+          "page": "system/knowledge/wiki/vision-role.md",
+          "source": "system/agents/vision_agent.md",
+          "before_sha256": "ad04cfe9bcc0c0f76a8dae75658d5ee2e101cfb1074b6c87a732626ca7bc9946",
+          "after_sha256": "a30661502aff943c53e9ae4f02909c82ea2d5f5c8c1f642d54aec6c49a85b93d"
+        },
+        {
+          "page": "system/knowledge/wiki/workspaces.md",
+          "source": "system/runtime/runtime_ide.md",
+          "before_sha256": "a891a20f0e99a15633ee75837bfa35a4c80755677fb7fbe52132392250186a24",
+          "after_sha256": "25e739d3647c5a458ce57cc19fd5476d80a481a8993d3b1929ff7907904f4e5c"
+        },
+        {
+          "page": "system/knowledge/wiki/workspaces.md",
+          "source": "system/device_bridges/README.md",
+          "before_sha256": "726e0ab41a968da898d8549f26bf618dc29568423d6241b1195d8861437e7c49",
+          "after_sha256": "4947359cd3bf80e5338e1d8d2a29afea210f3990c2fe1899b7f6f19f602d87b6"
+        },
+        {
+          "page": "system/knowledge/wiki/workspaces.md",
+          "source": "system/knowledge/wiki_memory.md",
+          "before_sha256": "278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88",
+          "after_sha256": "895db872a7c91ce24f2ec2bcf880ddd0c7f15c3dd55696dccbf1b12b1efb3f42"
+        },
+        {
+          "page": "system/knowledge/wiki/workspaces.md",
+          "source": "system/agents/orchestrator_agent.md",
+          "before_sha256": "0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c",
+          "after_sha256": "0ead09417efae55effb2c035e52c34390861e6b3946cd70c79a447f8c771e39e"
+        }
+      ],
+      "wiki_pages": [
+        {
+          "path": "system/knowledge/wiki/agent-contracts.md",
+          "before_sha256": "d91bacffdc1692d122be440c448074d1c002ce296ea2cedb00cc17242cd0e4e8",
+          "after_sha256": "7d74d143c59544dbf064f605249ad1163a39c407a37addeedb8b42d0da7651bb",
+          "pairs": 3
+        },
+        {
+          "path": "system/knowledge/wiki/analysis-role.md",
+          "before_sha256": "5bdfd67ff3642c625fc2a97cd4db40424b3e64fbe1f9a16ee10d842062dcb67e",
+          "after_sha256": "99655f440a3410f166e6e1f236002ac208031bba27fe9a84fe7b7a560f383e9a",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/artifacts.md",
+          "before_sha256": "db58a50be811ef5449b72a7b6879cd5946a602c7d197f4b343de1b50c92248f6",
+          "after_sha256": "e169c3350f50b8c2d0acf17d71f8f190bc8f9f206b5c90795d6fe7120b33783b",
+          "pairs": 2
+        },
+        {
+          "path": "system/knowledge/wiki/bo-role.md",
+          "before_sha256": "1590ef44c1e32df6e70b87a6e9fdeb145538bd6d9e9fc1f255535036c8ed3a45",
+          "after_sha256": "595de3fc1cf0ecfd229f75cf77d3d5411dd521aeafe85e97af5828c348500e24",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/bo-visualization.md",
+          "before_sha256": "ad7ca9bfb69eddf4275567aad9256e7e13afc367d2b1e00556bb0e73b3233855",
+          "after_sha256": "ee025df4d15f2ef9c8a027d7eea39f196ab3837d572bfe381302bc679363116a",
+          "pairs": 2
+        },
+        {
+          "path": "system/knowledge/wiki/closed-loop.md",
+          "before_sha256": "02227ceddaeb2b2439c67a35cd6dfd59f2d49f89a3498ec852f5ee34a0e9c7a5",
+          "after_sha256": "57e51ae2dd44ef1cc4341c027e3eaa490811d0024f7d401ee33c93aa62b25c4b",
+          "pairs": 4
+        },
+        {
+          "path": "system/knowledge/wiki/control-levels.md",
+          "before_sha256": "5b19eb18724a9021f591b01de404a6a29d00869857d7f0924cdcd1900dd67812",
+          "after_sha256": "5d532acdc2aacfd5e3ee9dacf87dac720b0e07cdf58a99ae205d9f378043aa97",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/design-role.md",
+          "before_sha256": "2af9b2a5fc8dc5243570b89c9b1e358cf81cefbd713fa7eeb98168fc193be4f8",
+          "after_sha256": "a20b7cae4eb925038dafecee1e2a17389af8b1380d92c2561aa7c1610f9e6ad5",
+          "pairs": 2
+        },
+        {
+          "path": "system/knowledge/wiki/equipment-role.md",
+          "before_sha256": "92b21078e1f1266f855e2d519a6bf9f0bd73b0ebdea24a475cda93d9708d0751",
+          "after_sha256": "368a8986d55638786108d50f88439a442d34cc124999d3cd0e81795f96caab86",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/experimental-setup.md",
+          "before_sha256": "f2a8bc47b111a940ab6d52dfd92b48e6f7d7060777cc892c61c02619fe49790e",
+          "after_sha256": "aced869547231e4e27a16a560b53dfc355350d2ab7cbe64f22b22bf9048f45c2",
+          "pairs": 2
+        },
+        {
+          "path": "system/knowledge/wiki/guardian-role.md",
+          "before_sha256": "a370640eaf6c862c7fd3f0ec60ac3c2e32e703f95baba2f922ec62775e06f07f",
+          "after_sha256": "2d4b271126dff5a8969169410873578414e1d3e6c427df127b61df6418dc0ad9",
+          "pairs": 2
+        },
+        {
+          "path": "system/knowledge/wiki/knowledge-agent.md",
+          "before_sha256": "36e71e5d99a7b1f9b8ce089dbf67ad1cdaf95090e2425928e22e0e8ab4fb2abe",
+          "after_sha256": "e382d88d481a1acc12271410cf7cb943a2417f22ffe3d30b60748c50fc870465",
+          "pairs": 3
+        },
+        {
+          "path": "system/knowledge/wiki/knowledge-role.md",
+          "before_sha256": "ffefc55c9974506211cc286827a261d5ff8e5328c46a5d9e2604c74af6e9fd0e",
+          "after_sha256": "fca4da543bcefe1674455604b2e36e9609e196a5fcda9d3cc9635cb6f6687b5d",
+          "pairs": 2
+        },
+        {
+          "path": "system/knowledge/wiki/manipulation-role.md",
+          "before_sha256": "740c1a5773886347435374c836f201adfe898f4a60df0a8f4cf7c67402ba869e",
+          "after_sha256": "d6eb0fef7c1f3e065e28a96a994b664e3ee6844e121d011edf79008f00667746",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/measurement-metrics.md",
+          "before_sha256": "fb41dd899c98b881c60fb3aec441834b014556d79baa3d0db0a4d5c1103687c7",
+          "after_sha256": "0fcd17acff5c15554448369bb79192b8187a2c64639ad28b7169deae4595610a",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/orchestrator-role.md",
+          "before_sha256": "346bbd88f1178d871dd6ec9f36d72584c49392937bf153567d88ec397aa518e0",
+          "after_sha256": "56158d2e9efe56a7ba29bc84200eade4886de9e958d1b3d408e4d1ea0f4de27a",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/packages-and-plans.md",
+          "before_sha256": "15ba06493cb26c93ac8bf4214b1e68b7a54e9e923f32fb46ae50d4e85b7bc228",
+          "after_sha256": "31aeacfdd94530de9ffae145e32fb1a3af23226d011599cdf115e6f8a22cb55a",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/platform-overview.md",
+          "before_sha256": "f3a856e1496558a8fe25aeea88b0907a1092d6f9c5cb04fa15c2b485d4520330",
+          "after_sha256": "7d82aa574d85eb3f43a3d6fdffbebc0c7e3ca0192de1f44952b84ceeaa86ab15",
+          "pairs": 3
+        },
+        {
+          "path": "system/knowledge/wiki/recovery.md",
+          "before_sha256": "9823b48f73265d620e3531e71b8c4d89a9d567d1735e62ee2605f92692531c34",
+          "after_sha256": "47770f0f1876e41372dd7f918fad83a4772faf7bc05a81ef4139185783e01331",
+          "pairs": 4
+        },
+        {
+          "path": "system/knowledge/wiki/specimen-role.md",
+          "before_sha256": "318d1b4102f0d6530462daf1cdd4cd0be4bd3270a990a5620f1fd1063111eb3f",
+          "after_sha256": "d08e1116c69eceff4781f4b3c0372b66c0ef9c21b396872c919e7d0a84ad3540",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/test-modes.md",
+          "before_sha256": "cead2542c1e85606a3002925523cf097096a3f0e2c5657cfddee84e2973cd2f3",
+          "after_sha256": "494d412a184347b580087e7b5236b4d18a24dc0df399e35a0b67295e881ebf56",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/vision-role.md",
+          "before_sha256": "d83283dfe7b013cdc70e576203fd878a675f4fee389884939a59af440b93e996",
+          "after_sha256": "a656bde230240110bef07f20580d6be47cefde69d3742152aa73d686ca131ea3",
+          "pairs": 1
+        },
+        {
+          "path": "system/knowledge/wiki/workspaces.md",
+          "before_sha256": "7a9adbdb21f90a99ce44c3b15d38463e38ff4696acc2d8ddcb911bf3a7f2e13a",
+          "after_sha256": "481b6e353ef06c6bc42c4838388c15b53ae37c31ed7f04a581c5502c10b3fb7d",
+          "pairs": 4
+        }
+      ],
+      "publication_relocations": {
+        "runtime/sim/robotis_omx/omx.png": {
+          "sha256": "5bda69cc017da73a2f92315fceb8d3386a3074af7bf09f081fa5d58f7cc26c35",
+          "source": "sim/robotis_omx/omx.png",
+          "destination": "runtime/sim/robotis_omx/omx.png",
+          "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+          "size": 208932,
+          "mode": "100644",
+          "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+        },
+        "runtime/sim/robotis_omx/omx/payloads/geometries.usd": {
+          "sha256": "252f282e49f36434120039b8e02ba2121c3a35e5461405e3ffa0b264a6723622",
+          "source": "sim/robotis_omx/omx/payloads/geometries.usd",
+          "destination": "runtime/sim/robotis_omx/omx/payloads/geometries.usd",
+          "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+          "size": 1438768,
+          "mode": "100644",
+          "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+        },
+        "runtime/sim/robotis_omx/scene/Textures/redwood_table_grain.png": {
+          "sha256": "f294ef4e274997651d049b3b686b05dde4885aec418bdf59ed192397fb25b738",
+          "source": "sim/robotis_omx/scene/Textures/redwood_table_grain.png",
+          "destination": "runtime/sim/robotis_omx/scene/Textures/redwood_table_grain.png",
+          "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+          "size": 133288,
+          "mode": "100644",
+          "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+        },
+        "runtime/sim/robotis_omx/scene/payloads/geometries.usd": {
+          "sha256": "19515a7e0eb375674ca00acd8cd034162eee00b9e1ce80ac8f9dd027b00cbb70",
+          "source": "sim/robotis_omx/scene/payloads/geometries.usd",
+          "destination": "runtime/sim/robotis_omx/scene/payloads/geometries.usd",
+          "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+          "size": 1438783,
+          "mode": "100644",
+          "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+        },
+        "runtime/tests/fixtures/utm_clear/compressed_raw.png": {
+          "sha256": "a3220ea140583c2a8cca9f3d56822c4ab4bc00200c23ed4e884037f1ab308436",
+          "source": "tests/fixtures/utm_clear/compressed_raw.png",
+          "destination": "runtime/tests/fixtures/utm_clear/compressed_raw.png",
+          "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+          "size": 378061,
+          "mode": "100644",
+          "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+        },
+        "runtime/tests/fixtures/utm_clear/upright_raw.png": {
+          "sha256": "048fe6dd413d310d9bfc775b12c7155dff45bf7d9c13b9827e5575562e68c49f",
+          "source": "tests/fixtures/utm_clear/upright_raw.png",
+          "destination": "runtime/tests/fixtures/utm_clear/upright_raw.png",
+          "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+          "size": 377777,
+          "mode": "100644",
+          "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+        }
+      },
+      "preserved_existing_approval_count": 264
+    },
     "move_revision": "ba3942c39a0ec1d5b7651d096742d776814a07ef",
     "prior_documents_sha256": "ebfed4b1aad5fd916f5b88d1f36abeb0d7a696ad7eb04dff76377b53ffb89bac",
     "receipt_sha256": "1d77bc2ed68a4d8fd3a427ce6fb8bf8dea66ce8db6174aace2d23d7c4c265784",

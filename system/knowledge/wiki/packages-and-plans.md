@@ -1,5 +1,5 @@
 ---
-{"topic_id":"packages-and-plans","owner":"documentation","source_refs":["system/modularity.md"],"source_revision":{"system/modularity.md":"3f337170c201f3ca121b2a0e47fe5e4e90922e0191b3b0275a18d38925367f2e"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: packages-and-plans","status":"reviewed"}
+{"topic_id":"packages-and-plans","owner":"documentation","source_refs":["system/modularity.md"],"source_revision":{"system/modularity.md":"ff6824f4c5d698782a4a4ab16dbdaddc10e217b2fee1806bbcd101da9d712228"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: packages-and-plans","status":"reviewed"}
 ---
 
 # Packages and Plans — Configuration and Ownership

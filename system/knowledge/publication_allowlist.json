@@ -1,6 +1,60 @@
 {
   "schema": "knowledge_publication.v1",
   "approved_assets": {
+    "runtime/sim/robotis_omx/omx.png": {
+      "sha256": "5bda69cc017da73a2f92315fceb8d3386a3074af7bf09f081fa5d58f7cc26c35",
+      "source": "sim/robotis_omx/omx.png",
+      "destination": "runtime/sim/robotis_omx/omx.png",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 208932,
+      "mode": "100644",
+      "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+    },
+    "runtime/sim/robotis_omx/omx/payloads/geometries.usd": {
+      "sha256": "252f282e49f36434120039b8e02ba2121c3a35e5461405e3ffa0b264a6723622",
+      "source": "sim/robotis_omx/omx/payloads/geometries.usd",
+      "destination": "runtime/sim/robotis_omx/omx/payloads/geometries.usd",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 1438768,
+      "mode": "100644",
+      "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+    },
+    "runtime/sim/robotis_omx/scene/Textures/redwood_table_grain.png": {
+      "sha256": "f294ef4e274997651d049b3b686b05dde4885aec418bdf59ed192397fb25b738",
+      "source": "sim/robotis_omx/scene/Textures/redwood_table_grain.png",
+      "destination": "runtime/sim/robotis_omx/scene/Textures/redwood_table_grain.png",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 133288,
+      "mode": "100644",
+      "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+    },
+    "runtime/sim/robotis_omx/scene/payloads/geometries.usd": {
+      "sha256": "19515a7e0eb375674ca00acd8cd034162eee00b9e1ce80ac8f9dd027b00cbb70",
+      "source": "sim/robotis_omx/scene/payloads/geometries.usd",
+      "destination": "runtime/sim/robotis_omx/scene/payloads/geometries.usd",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 1438783,
+      "mode": "100644",
+      "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+    },
+    "runtime/tests/fixtures/utm_clear/compressed_raw.png": {
+      "sha256": "a3220ea140583c2a8cca9f3d56822c4ab4bc00200c23ed4e884037f1ab308436",
+      "source": "tests/fixtures/utm_clear/compressed_raw.png",
+      "destination": "runtime/tests/fixtures/utm_clear/compressed_raw.png",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 378061,
+      "mode": "100644",
+      "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+    },
+    "runtime/tests/fixtures/utm_clear/upright_raw.png": {
+      "sha256": "048fe6dd413d310d9bfc775b12c7155dff45bf7d9c13b9827e5575562e68c49f",
+      "source": "tests/fixtures/utm_clear/upright_raw.png",
+      "destination": "runtime/tests/fixtures/utm_clear/upright_raw.png",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 377777,
+      "mode": "100644",
+      "review": "Task9 migration-only controller authorization after independent review of 10a8b8c9cb7321064049746bd76bbc0e4b5625b6: exact previously tracked unchanged source relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."
+    },
     "system/agents/assets/figures/bo-overview.webp": {
       "sha256": "18ca08051b4130dd11a97db185ee9db5bf4e9fe76b8ab1ecf1fc1c32898ef75b",
       "review": "Task8 migration-only controller authorization after independent review of acbd615527677a93d607652a5409f9ba684a54d0: exact previously tracked unchanged source docs/agents/assets/figures/bo-overview.webp relocated to this destination. Identity/provenance approval only; no new visual/privacy review, future-byte approval, or size/privacy exemption."

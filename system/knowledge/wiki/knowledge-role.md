@@ -1,5 +1,5 @@
 ---
-{"topic_id":"knowledge-role","owner":"knowledge_agent","source_refs":["system/agents/knowledge_agent.md","system/knowledge/wiki_memory.md"],"source_revision":{"system/agents/knowledge_agent.md":"798b165b781d85a3197d1b8888b618fea9610928aa15b8765bb7afae21196890","system/knowledge/wiki_memory.md":"278893b65e6ab9bebde9438a5c59d87f6462b5b1c509230f1f0fb17f320eda88"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: knowledge-role","status":"reviewed"}
+{"topic_id":"knowledge-role","owner":"knowledge_agent","source_refs":["system/agents/knowledge_agent.md","system/knowledge/wiki_memory.md"],"source_revision":{"system/agents/knowledge_agent.md":"a2ef1bf75babf4f1d2529c0393b6474984a2c258cd112ba0a5d3c0d3cd69e761","system/knowledge/wiki_memory.md":"895db872a7c91ce24f2ec2bcf880ddd0c7f15c3dd55696dccbf1b12b1efb3f42"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: knowledge-role","status":"reviewed"}
 ---
 
 # Knowledge Agent — Source-Backed Context

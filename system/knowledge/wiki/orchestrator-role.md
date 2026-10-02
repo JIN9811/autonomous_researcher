@@ -1,5 +1,5 @@
 ---
-{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["system/agents/orchestrator_agent.md","system/runtime/test_mode.md"],"source_revision":{"system/agents/orchestrator_agent.md":"0081e2e93bb1fd9b9139052e85c80f29c89ff8417359d735f1bf7c49dd5b2a9c","system/runtime/test_mode.md":"4a525fdc1da418bb7ed17c8e2a0d0659ee8a7e976a71a5595348e00d297b4270"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: orchestrator-role","status":"reviewed"}
+{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["system/agents/orchestrator_agent.md","system/runtime/test_mode.md"],"source_revision":{"system/agents/orchestrator_agent.md":"0ead09417efae55effb2c035e52c34390861e6b3946cd70c79a447f8c771e39e","system/runtime/test_mode.md":"4a525fdc1da418bb7ed17c8e2a0d0659ee8a7e976a71a5595348e00d297b4270"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: orchestrator-role","status":"reviewed"}
 ---
 
 # Orchestrator Agent — Conversation and Coordination
