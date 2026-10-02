@@ -7030,11 +7030,15 @@ class MainController:
         return values
 
     @staticmethod
-    def _validated_printer_defaults() -> dict[str, Any]:
+    def _validated_printer_defaults(*, paths: RuntimePaths | None = None) -> dict[str, Any]:
         """Return operator-controlled print defaults adapted to the active printer profile."""
-        profile = load_prusa_print_profile()
+        binding = paths or current_paths()
+        profile = (
+            load_prusa_print_profile(path=binding.memory_root / "prusa_print_profile.json")
+            if paths is not None else load_prusa_print_profile()
+        )
         try:
-            manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(resolve_path("configs")))
+            manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(binding.runtime_root / "configs"), repo_root=binding.repository_root, paths=binding)
             selected_profile, _reason = manager.fleet_selection()
             profile = adapt_print_profile_for_provider(profile, selected_profile.provider)
         except Exception:
@@ -7072,9 +7076,14 @@ class MainController:
         return {key: profile[key] for key in allowed if key in profile}
 
     @staticmethod
-    def _print_start_calibration_flags(defaults: dict[str, Any] | None = None) -> dict[str, bool]:
+    def _print_start_calibration_flags(
+        defaults: dict[str, Any] | None = None, *, paths: RuntimePaths | None = None
+    ) -> dict[str, bool]:
         """Bambu project_file start flags from the operator 3DP profile (default on)."""
-        source = defaults if isinstance(defaults, dict) else MainController._validated_printer_defaults()
+        source = defaults if isinstance(defaults, dict) else (
+            MainController._validated_printer_defaults(paths=paths)
+            if paths is not None else MainController._validated_printer_defaults()
+        )
         return {
             "bed_leveling": bool(source.get("bed_leveling_enabled", True)),
             "flow_cali": bool(source.get("flow_calibration_enabled", True)),
@@ -7082,7 +7091,7 @@ class MainController:
 
     def _with_validated_printer_defaults(self, constraints: dict[str, Any]) -> dict[str, Any]:
         """Apply validated printer defaults while preserving operator overrides."""
-        merged = dict(self._validated_printer_defaults())
+        merged = dict(self._validated_printer_defaults(paths=self._paths))
         merged.update({key: value for key, value in constraints.items() if value not in (None, "", [])})
         return merged
 
@@ -7290,7 +7299,7 @@ class MainController:
 
     def _default_test_constraints(self, constraints: dict[str, Any]) -> dict[str, Any]:
         """Fill missing Live GUI constraints with deterministic test-mode defaults."""
-        printer_defaults = self._validated_printer_defaults()
+        printer_defaults = self._validated_printer_defaults(paths=self._paths)
         test_unit_cell_size_mm = float(printer_defaults.get("test_unit_cell_size_mm", 10.0))
         defaults: dict[str, Any] = {
             "material": printer_defaults.get("material", "PLA"),
@@ -8931,7 +8940,7 @@ class MainController:
             calibration = (
                 {"bed_leveling": False, "flow_cali": False}
                 if print_body_skipped
-                else self._print_start_calibration_flags()
+                else self._print_start_calibration_flags(paths=self._paths)
             )
             print_request.update(
                 {
@@ -9203,7 +9212,8 @@ class MainController:
         }
 
     async def _read_specimen_printer_completion_status(self) -> dict[str, Any]:
-        manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(resolve_path("configs")))
+        binding = self._paths
+        manager = PrinterDeviceBridgeManager.from_devices_config(load_all_configs(binding.runtime_root / "configs"), repo_root=binding.repository_root, paths=binding)
         return await asyncio.to_thread(
             manager.prepare,
             {
@@ -10672,7 +10682,7 @@ class MainController:
         if not isinstance(size, list) or len(size) != 3:
             size = [30.0, 30.0, 30.0]
         specimen_size = [float(item) for item in size]
-        validated_defaults = self._validated_printer_defaults()
+        validated_defaults = self._validated_printer_defaults(paths=self._paths)
         test_handoff = bool(constraints.get("test_mode_autofill") or constraints.get("test_mode_llm_generated"))
         print_constraints = constraints.get("print") if isinstance(constraints.get("print"), dict) else {}
         if "start_immediately" in print_constraints:

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from utils.paths import resolve_path
+from utils.runtime_paths import RuntimePaths
 
 
 LEROBOT_ROLLOUT_PROFILE_PATH = resolve_path("memory/lerobot_rollout_profile.json")
@@ -140,23 +141,25 @@ def normalize_lerobot_rollout_profile(raw: dict[str, Any] | None) -> dict[str, A
     return profile
 
 
-def load_lerobot_rollout_profile(*, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
+def load_lerobot_rollout_profile(*, fallback: dict[str, Any] | None = None, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Load persisted rollout defaults, using an existing saved task profile once for migration."""
+    path = paths.memory_root / "lerobot_rollout_profile.json" if paths is not None else LEROBOT_ROLLOUT_PROFILE_PATH
     fallback = {**(fallback or {}), "rollout_linear_enabled": False}
-    if not LEROBOT_ROLLOUT_PROFILE_PATH.exists():
+    if not path.exists():
         return normalize_lerobot_rollout_profile(fallback)
     try:
-        raw = json.loads(LEROBOT_ROLLOUT_PROFILE_PATH.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         raw = fallback or {}
     return normalize_lerobot_rollout_profile(raw if isinstance(raw, dict) else fallback)
 
 
-def save_lerobot_rollout_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
+def save_lerobot_rollout_profile(raw: dict[str, Any] | None, *, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Persist normalized standalone rollout defaults."""
+    path = paths.memory_root / "lerobot_rollout_profile.json" if paths is not None else LEROBOT_ROLLOUT_PROFILE_PATH
     profile = normalize_lerobot_rollout_profile(raw)
-    LEROBOT_ROLLOUT_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    LEROBOT_ROLLOUT_PROFILE_PATH.write_text(
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(profile, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )

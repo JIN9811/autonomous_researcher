@@ -300,6 +300,7 @@ def test_changed_mixed_bridge_arguments_keep_legacy_storage_base(split_bridge_ru
     expected = {name: paths.repository_root / suffix for name, suffix in suffixes.items()}
     expected["utm_memory"] = paths.memory_root / "device_bridge/utm_camera_config.json"
     expected["equipment_profile"] = paths.memory_root / "equipment_utm_profile.json"
+    expected["lerobot_logs"] = paths.run_root / "lerobot_sessions"
     assert actual == expected
     assert lerobot.artifact_run_root == paths.run_root
     # The direct UTM test handler is software-only and writes a synthetic CSV.

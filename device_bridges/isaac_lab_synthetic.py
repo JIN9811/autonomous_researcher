@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.util import find_spec
 from pathlib import Path
+from utils.runtime_paths import RuntimePaths
 from typing import Any
 from urllib.parse import quote
 
@@ -254,8 +255,12 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
 class IsaacLabSyntheticPipeline:
     """File-backed non-actuating implementation of the synthetic pipeline contract."""
 
-    def __init__(self, *, repo_root: Path, allowed_roots: list[Path]) -> None:
+    def __init__(self, *, repo_root: Path, allowed_roots: list[Path], paths: RuntimePaths | None = None) -> None:
         self.repo_root = repo_root.expanduser().resolve()
+        if paths is not None and self.repo_root != paths.repository_root:
+            raise ValueError("repo_root conflicts with paths.repository_root")
+        self.paths = paths
+        self.runtime_root = paths.runtime_root if paths is not None else self.repo_root
         self.allowed_roots = [root.expanduser().resolve() for root in allowed_roots]
 
     def validate(self, request: IsaacLabSyntheticRequest) -> dict[str, Any]:
@@ -1347,7 +1352,7 @@ class IsaacLabSyntheticPipeline:
     ) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
         isaac_lab_root = self._isaac_lab_path(request)
-        script = self.repo_root / "scripts" / "lerobot_isaac_lab_official_mimic_replay_promote.py"
+        script = self.runtime_root / "scripts" / "lerobot_isaac_lab_official_mimic_replay_promote.py"
         replay_script = isaac_lab_root / "scripts" / "tools" / "replay_demos.py"
         command = [
             *_python_script_command(isaac_python, script),
@@ -1575,7 +1580,7 @@ class IsaacLabSyntheticPipeline:
         if kind == "mimic":
             generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
             if request.mimic_generation_backend == "joint_replay":
-                script = self.repo_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
+                script = self.runtime_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
                 command = [
                     *_python_script_command(isaac_python, script),
                     "--backend",
@@ -1629,7 +1634,7 @@ class IsaacLabSyntheticPipeline:
                 return command
             annotate_script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["annotate_demos"]
             generate_script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["generate_dataset"]
-            script = self.repo_root / "scripts" / "lerobot_isaac_lab_official_mimic_generate.py"
+            script = self.runtime_root / "scripts" / "lerobot_isaac_lab_official_mimic_generate.py"
             # The Robotis OMX USD has fixed-joint articulation assumptions that are stable
             # for one Lab env, but cloned parallel envs can produce zero successful Mimic
             # rollouts. Keep the requested domain-variant x mimic-trial count, and run it
@@ -1708,7 +1713,7 @@ class IsaacLabSyntheticPipeline:
         hook_summary: dict[str, Any],
     ) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        script = self.repo_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
+        script = self.runtime_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
         generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
         command = [
             *_python_script_command(isaac_python, script),
@@ -1771,7 +1776,7 @@ class IsaacLabSyntheticPipeline:
         hook_summary: dict[str, Any],
     ) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        script = self.repo_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
+        script = self.runtime_root / "scripts" / "lerobot_isaac_lab_joint_replay_mimic.py"
         generated_hdf5 = output_root / "mimic" / "generated_dataset.hdf5"
         rgbd_dir = output_root / "mimic_rgbd"
         command = [
@@ -1881,7 +1886,7 @@ class IsaacLabSyntheticPipeline:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
         isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
         output_root = self._output_root(request, self._dataset_path(request))
-        wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_train.py"
+        wrapper = self.runtime_root / "scripts" / "lerobot_isaac_lab_robomimic_train.py"
         command = [
             *_python_script_command(isaac_python, wrapper),
             "--isaac-lab-path",
@@ -2043,7 +2048,7 @@ class IsaacLabSyntheticPipeline:
     def _il_play_command(self, request: IsaacLabSyntheticRequest, checkpoint: Path) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
         isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
-        wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_play.py"
+        wrapper = self.runtime_root / "scripts" / "lerobot_isaac_lab_robomimic_play.py"
         command = [
             *_python_script_command(isaac_python, wrapper),
             "--isaac-lab-path",
@@ -2118,7 +2123,7 @@ class IsaacLabSyntheticPipeline:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
         isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
         output_root = self._output_root(request, self._dataset_path(request))
-        wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_robust_eval.py"
+        wrapper = self.runtime_root / "scripts" / "lerobot_isaac_lab_robomimic_robust_eval.py"
         command = [
             *_python_script_command(isaac_python, wrapper),
             "--isaac-lab-path",
@@ -3086,10 +3091,9 @@ class IsaacLabSyntheticPipeline:
             "reason": "Runtime path is configured, but Replicator import is deferred to the Isaac Sim worker.",
         }
 
-    @staticmethod
-    def _replicator_build_plan(summary: dict[str, Any]) -> dict[str, Any]:
-        repo_root = Path(__file__).resolve().parents[1]
-        worker_script = repo_root / "scripts" / "lerobot_isaac_replicator_synthetic.py"
+    def _replicator_build_plan(self, summary: dict[str, Any]) -> dict[str, Any]:
+        source_root = self.runtime_root if self.paths is not None else Path(__file__).resolve().parents[1]
+        worker_script = source_root / "scripts" / "lerobot_isaac_replicator_synthetic.py"
         output_root = Path(str(summary.get("output_root") or ""))
         replicator_output = output_root / "replicator"
         canonical_index = output_root / "canonical_episode_index" / "manifest.jsonl"
@@ -7853,7 +7857,7 @@ class IsaacLabSyntheticPipeline:
     def _stage_path(self, request: IsaacLabSyntheticRequest) -> Path:
         if request.stage_path:
             return Path(request.stage_path).expanduser().resolve()
-        return (self.repo_root / "sim" / "robotis_omx" / "scene" / "omx_table_layout_20260915.usda").resolve()
+        return (self.runtime_root / "sim" / "robotis_omx" / "scene" / "omx_table_layout_20260915.usda").resolve()
 
     def _depth_manifest_path(self, dataset_path: Path) -> Path:
         for rel in (

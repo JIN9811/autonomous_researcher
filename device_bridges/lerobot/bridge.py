@@ -48,6 +48,8 @@ from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw
+from utils.runtime_paths import RuntimePaths
+from utils.runtime_process import path_metadata
 
 from mcp_tools.lerobot_schemas import (
     IsaacLabSyntheticRequest,
@@ -443,33 +445,39 @@ class LeRobotBridgeConfig:
     policy_presets: list[dict[str, str]] = field(default_factory=list)
     profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     repo_root: Path = Path(".")
+    paths: RuntimePaths | None = field(default=None, kw_only=True, compare=False, repr=False)
 
     @classmethod
-    def from_config(cls, config: dict[str, Any] | None = None, *, repo_root: Path | None = None) -> "LeRobotBridgeConfig":
+    def from_config(cls, config: dict[str, Any] | None = None, *, repo_root: Path | None = None, paths: RuntimePaths | None = None) -> "LeRobotBridgeConfig":
         """Create bridge config from configs/lerobot.yaml-shaped data."""
         raw = dict(config or {})
         root = raw.get("lerobot", raw)
-        repo = Path(repo_root or ".").resolve()
-        session_memory = _resolve_path(repo, str(root.get("session_memory_path", "memory/lerobot_sessions.json")))
-        device_memory = _resolve_path(repo, str(root.get("device_memory_path", "memory/lerobot_device_ports.json")))
-        fake_dataset_root = _resolve_path(repo, str(root.get("fake_dataset_root", "artifacts/lerobot/fake_datasets")))
-        fake_checkpoint_root = _resolve_path(repo, str(root.get("fake_checkpoint_root", "artifacts/lerobot/fake_checkpoints")))
+        repo = Path(repo_root or (paths.repository_root if paths else ".")).resolve()
+        if paths is not None and repo != paths.repository_root:
+            raise ValueError("repo_root conflicts with paths.repository_root")
+
+        def default_path(name: str, legacy: str, store: str, suffix: str) -> Path:
+            if paths is not None and name not in root:
+                return getattr(paths, store) / suffix
+            return _resolve_path(repo, str(root.get(name, legacy)))
+
+        session_memory = default_path("session_memory_path", "memory/lerobot_sessions.json", "memory_root", "lerobot_sessions.json")
+        device_memory = default_path("device_memory_path", "memory/lerobot_device_ports.json", "memory_root", "lerobot_device_ports.json")
+        fake_dataset_root = default_path("fake_dataset_root", "artifacts/lerobot/fake_datasets", "artifact_root", "lerobot/fake_datasets")
+        fake_checkpoint_root = default_path("fake_checkpoint_root", "artifacts/lerobot/fake_checkpoints", "artifact_root", "lerobot/fake_checkpoints")
         dataset_root = _resolve_path(repo, str(root.get("dataset_root", "~/.cache/huggingface/lerobot")))
-        output_root = _resolve_path(repo, str(root.get("output_root", "outputs/train")))
-        policy_root = _resolve_path(repo, str(root.get("policy_root", "outputs/train")))
-        session_log_root = _resolve_path(repo, str(root.get("session_log_root", "runs/lerobot_sessions")))
+        output_root = default_path("output_root", "outputs/train", "output_root", "train")
+        policy_root = default_path("policy_root", "outputs/train", "output_root", "train")
+        session_log_root = default_path("session_log_root", "runs/lerobot_sessions", "run_root", "lerobot_sessions")
         pi05_repo_root = _resolve_path(repo, str(root.get("pi05_repo_root", "~/lerobot_pi05")))
         pi05_hf_home = _resolve_path(repo, str(root.get("pi05_hf_home", "~/.cache/huggingface_pi05")))
         hf_token_path = _resolve_path(repo, str(root.get("hf_token_path", "~/.cache/huggingface/token")))
-        wandb_local_api_key_path = _resolve_path(
-            repo,
-            str(root.get("wandb_local_api_key_path", "memory/wandb_local_api_key.json")),
-        )
+        wandb_local_api_key_path = default_path("wandb_local_api_key_path", "memory/wandb_local_api_key.json", "memory_root", "wandb_local_api_key.json")
         tts_piper_python = _resolve_path(repo, str(root.get("tts_piper_python", ".venv/bin/python")))
-        tts_piper_script = _resolve_path(repo, str(root.get("tts_piper_script", "tools/tts/atr_piper_say.py")))
+        tts_piper_script = default_path("tts_piper_script", "tools/tts/atr_piper_say.py", "runtime_root", "tools/tts/atr_piper_say.py")
         tts_piper_bin = _resolve_path(repo, str(root.get("tts_piper_bin", ".venv/bin/piper")))
-        tts_piper_model = _resolve_path(repo, str(root.get("tts_piper_model", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx")))
-        tts_piper_config = _resolve_path(repo, str(root.get("tts_piper_config", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json")))
+        tts_piper_model = default_path("tts_piper_model", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx", "runtime_root", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx")
+        tts_piper_config = default_path("tts_piper_config", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json", "runtime_root", "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json")
         profiles = _resolve_profiles(dict(root.get("profiles", {})))
         policy_presets = [dict(item) for item in root.get("policy_presets", []) if isinstance(item, dict)]
         return cls(
@@ -483,7 +491,7 @@ class LeRobotBridgeConfig:
             output_root=output_root,
             policy_root=policy_root,
             session_log_root=session_log_root,
-            artifact_run_root=_resolve_path(repo, str(root.get("artifact_run_root", "runs"))),
+            artifact_run_root=default_path("artifact_run_root", "runs", "run_root", "."),
             conda_env_name=str(root.get("conda_env_name", "lerobot")),
             conda_executable=_resolve_conda_executable(str(root.get("conda_executable", "conda"))),
             pi05_conda_env_name=str(root.get("pi05_conda_env_name", "lerobot-pi05-torch211")),
@@ -533,13 +541,41 @@ class LeRobotBridgeConfig:
             policy_presets=policy_presets,
             profiles=profiles,
             repo_root=repo,
+            paths=paths,
         )
 
 
 class LeRobotBridge:
     """Deterministic LeRobot bridge with live-mode gates disabled by default."""
 
+    @property
+    def _runtime_root(self) -> Path:
+        paths = getattr(self.config, "paths", None)
+        return paths.runtime_root if paths is not None else self.config.repo_root
+
+    @property
+    def _run_root(self) -> Path:
+        paths = getattr(self.config, "paths", None)
+        return paths.run_root if paths is not None else self.config.repo_root / "runs"
+
+    @property
+    def _artifact_root(self) -> Path:
+        paths = getattr(self.config, "paths", None)
+        return paths.artifact_root if paths is not None else self.config.repo_root / "artifacts"
+
+    def _source_environment(self) -> dict[str, str]:
+        """Keep hardware environment contracts, with reproducible project roots."""
+        env = dict(os.environ)
+        paths = getattr(self.config, "paths", None)
+        if paths is not None:
+            metadata = path_metadata(paths)
+            env.pop("ATR_PATH_BINDINGS", None)
+            env.update(metadata)
+        return env
+
     def __init__(self, config: LeRobotBridgeConfig) -> None:
+        if config.paths is not None and config.repo_root.resolve() != config.paths.repository_root:
+            raise ValueError("repo_root conflicts with paths.repository_root")
         self.config = config
         self._sessions: dict[str, dict[str, Any]] = {}
         self._replay_start_lock = threading.RLock()
@@ -739,7 +775,7 @@ class LeRobotBridge:
         if profile is None:
             return self._error("lerobot.mirror.joint_mapping", mode, request.profile_id, "LEROBOT_PROFILE_NOT_FOUND", "Robot profile not found.")
         joint_map = [dict(item) for item in ISAAC_OMX_JOINT_MAP]
-        scene_path = self.config.repo_root / ISAAC_OMX_SCENE_RELATIVE_PATH
+        scene_path = self._runtime_root / ISAAC_OMX_SCENE_RELATIVE_PATH
         calibration = self._isaac_mirror_calibration()
         step_trace = [
             {"step": "MIRROR_MAPPING", "status": "ok", "detail": f"{len(joint_map)} follower joints -> Isaac articulation"},
@@ -857,7 +893,7 @@ class LeRobotBridge:
             "tool": "lerobot.mirror.state_probe",
             "mode": mode,
             "profile_id": profile_id,
-            "scene_path": str(self.config.repo_root / ISAAC_OMX_SCENE_RELATIVE_PATH),
+            "scene_path": str(self._runtime_root / ISAAC_OMX_SCENE_RELATIVE_PATH),
             "articulation_root": ISAAC_OMX_ARTICULATION_ROOT,
             "follower_port": follower_port,
             "probe_source": probe_source,
@@ -870,7 +906,7 @@ class LeRobotBridge:
         }
 
     def _isaac_mirror_calibration(self) -> dict[str, Any]:
-        return load_isaac_omx_mirror_calibration(default_isaac_omx_mirror_calibration_path(self.config.repo_root))
+        return load_isaac_omx_mirror_calibration(default_isaac_omx_mirror_calibration_path(self.config.repo_root, paths=getattr(self.config, "paths", None)))
 
     def mirror_receiver_health(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Check the Isaac mirror receiver before live teleop/record synchronization."""
@@ -1041,7 +1077,7 @@ class LeRobotBridge:
         else:
             self._stop_receiver_process(process_key)
 
-        log_dir = self.config.repo_root / "runs" / "isaac_mirror_receiver"
+        log_dir = self._run_root / "isaac_mirror_receiver"
         log_dir.mkdir(parents=True, exist_ok=True)
         launch_mode = str(command_info.get("launch_mode") or "python_script")
         log_path = log_dir / f"receiver_{launch_mode}_{host.replace('.', '_')}_{port}.log"
@@ -1049,7 +1085,8 @@ class LeRobotBridge:
         try:
             process = subprocess.Popen(
                 command,
-                cwd=str(self.config.repo_root),
+                cwd=str(self._runtime_root),
+                env=self._source_environment(),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -1883,7 +1920,7 @@ class LeRobotBridge:
         env_overrides["ATR_LEROBOT_SPECIMEN_CAMERA_KEY"] = camera_key
         env_overrides["ATR_ACTIVE_ROBOT_CAM_PRIMARY_CAMERA_KEY"] = camera_key
         driver_payload = self._active_robot_cam_driver_payload(profile, active_request, camera_key=camera_key)
-        script_path = self.config.repo_root / "scripts" / "lerobot_active_robot_cam_once.py"
+        script_path = self._runtime_root / "scripts" / "lerobot_active_robot_cam_once.py"
         command = [
             self.config.conda_executable,
             "run",
@@ -1893,11 +1930,11 @@ class LeRobotBridge:
             str(script_path),
             json.dumps(driver_payload, ensure_ascii=True),
         ]
-        run_env = {**os.environ, **env_overrides, "PYTHONUNBUFFERED": "1"}
+        run_env = {**self._source_environment(), **env_overrides, "PYTHONUNBUFFERED": "1"}
         try:
             completed = subprocess.run(
                 command,
-                cwd=str(self.config.repo_root),
+                cwd=str(self._runtime_root),
                 env=run_env,
                 text=True,
                 capture_output=True,
@@ -4257,7 +4294,8 @@ class LeRobotBridge:
         try:
             completed = subprocess.run(
                 command,
-                cwd=str(self.config.repo_root),
+                cwd=str(self._runtime_root),
+                env=self._source_environment(),
                 text=True,
                 capture_output=True,
                 timeout=900,
@@ -4525,8 +4563,8 @@ class LeRobotBridge:
         output_root = self._isaac_lab_live_e2e_output_root(request, dataset_path)
         log_path = output_root / "live_e2e" / "logs" / f"{job_id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        env = os.environ.copy()
-        repo_root_text = str(self.config.repo_root.resolve())
+        env = self._source_environment()
+        repo_root_text = str(self._runtime_root.resolve())
         existing_pythonpath = str(env.get("PYTHONPATH") or "")
         env["PYTHONPATH"] = repo_root_text if not existing_pythonpath else repo_root_text + os.pathsep + existing_pythonpath
         if request.isaac_lab_visualize_generation:
@@ -4535,7 +4573,7 @@ class LeRobotBridge:
             with log_path.open("a", encoding="utf-8") as log:
                 process = subprocess.Popen(
                     command,
-                    cwd=str(self.config.repo_root),
+                    cwd=str(self._runtime_root),
                     env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=log,
@@ -4568,7 +4606,7 @@ class LeRobotBridge:
             },
             "command_preview": {"operation": "live_e2e_check", "visual": bool(request.isaac_lab_visualize_generation)},
             "command": command,
-            "cwd": str(self.config.repo_root),
+            "cwd": str(self._runtime_root),
             "pid": int(process.pid),
             "log_path": str(log_path),
             "output_root": str(output_root),
@@ -4732,7 +4770,7 @@ class LeRobotBridge:
             "command": [],
             "primary_command": [],
             "post_run": copy.deepcopy(runner["post_run"]),
-            "cwd": str(self.config.repo_root),
+            "cwd": str(self._runtime_root),
             "pid": None,
             "log_path": str(log_path),
             "runtime_smoke": {},
@@ -4789,7 +4827,7 @@ class LeRobotBridge:
         request = self._isaac_lab_synthetic_request(payload)
         dataset_path = Path(request.dataset_path).expanduser()
         if not str(request.dataset_path or "").strip():
-            dataset_path = self.config.repo_root / "artifacts" / "lerobot" / "synthetic_e2e_gui" / "five-by-ten"
+            dataset_path = self._artifact_root / "lerobot" / "synthetic_e2e_gui" / "five-by-ten"
         dataset_path = dataset_path.resolve()
         if not self._is_under_allowed_roots(dataset_path):
             return {
@@ -4805,7 +4843,7 @@ class LeRobotBridge:
                 "step_trace": [{"stage": "resolve_dataset", "status": "blocked", "message": "Dataset path is outside allowed roots."}],
             }
         isaac_lab_path = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else (self.config.repo_root / "IsaacLab").resolve()
-        stage_path = Path(request.stage_path).expanduser().resolve() if request.stage_path else (self.config.repo_root / ISAAC_OMX_SCENE_RELATIVE_PATH).resolve()
+        stage_path = Path(request.stage_path).expanduser().resolve() if request.stage_path else (self._runtime_root / ISAAC_OMX_SCENE_RELATIVE_PATH).resolve()
         fixture = {}
         if request.e2e_create_fixture:
             fixture = build_fixture_recording_dataset(
@@ -4905,7 +4943,7 @@ class LeRobotBridge:
     def _isaac_lab_live_e2e_command(self, request: IsaacLabSyntheticRequest) -> list[str]:
         request = self._isaac_lab_live_e2e_request(request)
         dataset_path = Path(self._dataset_path_for(request)).expanduser().resolve()
-        script = self.config.repo_root / "scripts" / "lerobot_isaac_lab_e2e_smoke.py"
+        script = self._runtime_root / "scripts" / "lerobot_isaac_lab_e2e_smoke.py"
         env_python = Path.home() / "miniconda3" / "envs" / self.config.conda_env_name / "bin" / "python"
         python_executable = str(env_python if env_python.is_file() else Path(sys.executable or "python"))
         command = [
@@ -4943,6 +4981,8 @@ class LeRobotBridge:
         ]
         if request.isaac_lab_visualize_generation:
             command.append("--visualize-generation")
+        if getattr(self.config, "paths", None) is not None:
+            command.extend(["--runtime-root", str(self._runtime_root)])
         command.append("--mimic-enable-cameras" if request.mimic_enable_cameras else "--no-mimic-enable-cameras")
         return command
 
@@ -5186,9 +5226,9 @@ class LeRobotBridge:
         output_root = Path(str(result.get("output_root") or "")).expanduser().resolve()
         log_path = output_root / self._isaac_lab_hook_dir(kind) / "logs" / f"{job_id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        cwd = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else self.config.repo_root
-        env = os.environ.copy()
-        repo_root_text = str(self.config.repo_root.resolve())
+        cwd = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else self._runtime_root
+        env = self._source_environment()
+        repo_root_text = str(self._runtime_root.resolve())
         existing_pythonpath = str(env.get("PYTHONPATH") or "")
         env["PYTHONPATH"] = (
             repo_root_text
@@ -5587,11 +5627,11 @@ class LeRobotBridge:
             failed["post_run"] = post_run
             return failed, None
 
-        cwd = str(job.get("cwd") or self.config.repo_root)
+        cwd = str(job.get("cwd") or self._runtime_root)
         log_path = Path(str(job.get("log_path") or "")).expanduser()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        env = os.environ.copy()
-        repo_root_text = str(self.config.repo_root.resolve())
+        env = self._source_environment()
+        repo_root_text = str(self._runtime_root.resolve())
         existing_pythonpath = str(env.get("PYTHONPATH") or "")
         env["PYTHONPATH"] = (
             repo_root_text
@@ -7611,7 +7651,7 @@ class LeRobotBridge:
         if workflow == "record":
             dataset_path = Path(str((response or {}).get("dataset_path") or self._dataset_path_for(request))).expanduser()
             return dataset_path / "sidecar" / "isaac_mirror" / f"{session_id}.jsonl"
-        return self.config.repo_root / "runs" / "isaac_mirror_sessions" / f"{session_id}.jsonl"
+        return self._run_root / "isaac_mirror_sessions" / f"{session_id}.jsonl"
 
     def _attach_isaac_viewport_frame_if_ready(
         self,
@@ -9383,12 +9423,13 @@ class LeRobotBridge:
         """
         launch_mode = self._isaac_mirror_receiver_launch_mode(payload)
         host, port = self._isaac_mirror_host_port(endpoint)
-        scene_path = _resolve_path(self.config.repo_root, str(payload.get("isaac_mirror_receiver_scene") or ISAAC_OMX_SCENE_RELATIVE_PATH))
+        scene_value = payload.get("isaac_mirror_receiver_scene")
+        scene_path = _resolve_path(self.config.repo_root, str(scene_value)) if scene_value else self._runtime_root / ISAAC_OMX_SCENE_RELATIVE_PATH
         if launch_mode == "isaac_extension":
             executable = self._isaac_mirror_receiver_isaac_sim_executable(payload)
             active_robot_cam_enabled = _safe_bool(payload.get("active_robot_cam_enabled"), True)
             play_timeline_on_startup = _safe_bool(payload.get("isaac_mirror_receiver_play_timeline_on_startup"), False)
-            extension_root = self.config.repo_root / "sim" / "robotis_omx" / "extensions"
+            extension_root = self._runtime_root / "sim" / "robotis_omx" / "extensions"
             manifest = extension_root / "atr.omx.mirror" / "config" / "extension.toml"
             if not manifest.exists():
                 return {
@@ -9435,7 +9476,7 @@ class LeRobotBridge:
             return {"ok": True, "launch_mode": launch_mode, "command": command, "scene_path": str(scene_path)}
 
         python_executable = self._isaac_mirror_receiver_python(payload)
-        script_path = self.config.repo_root / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
+        script_path = self._runtime_root / "sim" / "robotis_omx" / "tools" / "isaac_omx_mirror_server.py"
         if not script_path.exists():
             return {
                 "ok": False,
@@ -9571,7 +9612,7 @@ class LeRobotBridge:
         raw = str(request.isaac_mirror_record_path or "").strip()
         if raw:
             return _resolve_path(self.config.repo_root, raw)
-        return self.config.repo_root / "runs" / "isaac_mirror_sessions" / f"{session_id}.jsonl"
+        return self._run_root / "isaac_mirror_sessions" / f"{session_id}.jsonl"
 
     def _resolve_mirror_session(self, session_id: str, attached_to_session_id: str = "", *, prefer_active: bool = False) -> dict[str, Any] | None:
         if session_id:
@@ -10050,7 +10091,7 @@ class LeRobotBridge:
 
     def _isaac_lab_synthetic_pipeline(self) -> IsaacLabSyntheticPipeline:
         """Return the non-actuating Isaac Lab synthetic pipeline helper."""
-        return IsaacLabSyntheticPipeline(repo_root=self.config.repo_root, allowed_roots=self._allowed_roots())
+        return IsaacLabSyntheticPipeline(repo_root=self.config.repo_root, allowed_roots=self._allowed_roots(), paths=getattr(self.config, "paths", None))
 
     def _read_dataset_pipeline_metadata(self, dataset_path: Path) -> dict[str, Any]:
         """Read ATR dataset pipeline metadata, or infer a conservative display-only value."""
@@ -11101,13 +11142,14 @@ class LeRobotBridge:
         mode = request.runtime_mode or request.mode
         command = [self.config.conda_executable, "run", "--no-capture-output", "-n", self._workflow_conda_env_name(workflow, request)]
         if workflow == "replay":
-            command.extend(["python", str(Path(__file__).resolve().parents[2] / "scripts" / "lerobot_managed_replay.py")])
+            source_root = self._runtime_root if getattr(self.config, "paths", None) is not None else Path(__file__).resolve().parents[2]
+            command.extend(["python", str(source_root / "scripts" / "lerobot_managed_replay.py")])
         elif self._uses_in_process_lerobot_wrapper(workflow, request):
-            command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"), workflow])
+            command.extend(["python", str(self._runtime_root / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"), workflow])
         elif workflow == "rollout" and self._is_pi05_policy(request.policy_type):
-            command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
+            command.extend(["python", str(self._runtime_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
         elif workflow == "rollout" and self._uses_live_rollout_wrapper(request):
-            command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_live_rollout_wrapper.py")])
+            command.extend(["python", str(self._runtime_root / "scripts" / "lerobot_live_rollout_wrapper.py")])
         else:
             command.extend(self._workflow_entrypoint(profile, workflow))
         if workflow in {"teleoperate", "record", "rollout", "replay"}:
@@ -11173,7 +11215,7 @@ class LeRobotBridge:
                     "ATR_ISAAC_MIRROR_SESSION_ID": mirror_session_id,
                     "ATR_ISAAC_MIRROR_ATTACHED_TO_SESSION_ID": mirror_session_id,
                     "ATR_ISAAC_MIRROR_PROFILE_ID": str(request.profile_id or self._selected_profile_id),
-                    "ATR_ISAAC_MIRROR_CALIBRATION_PATH": str(default_isaac_omx_mirror_calibration_path(self.config.repo_root)),
+                    "ATR_ISAAC_MIRROR_CALIBRATION_PATH": str(default_isaac_omx_mirror_calibration_path(self.config.repo_root, paths=getattr(self.config, "paths", None))),
                     "ATR_ISAAC_MIRROR_RECORD_PATH": str(self._in_process_isaac_mirror_record_path(workflow, request, mirror_session_id or "live")),
                 }
             )
@@ -11687,10 +11729,10 @@ class LeRobotBridge:
         """Attach passive host diagnostics to GUI-started live training sessions."""
         session_id = str(session.get("session_id") or "")
         log_path = str(session.get("log_path") or "").strip()
-        script = self.config.repo_root / "scripts" / "training_stability_monitor.py"
+        script = self._runtime_root / "scripts" / "training_stability_monitor.py"
         if not script.is_file():
             return {"status": "unavailable", "reason": f"missing monitor script: {script}"}
-        output_dir = self.config.repo_root / "runs" / "training_watch"
+        output_dir = self._run_root / "training_watch"
         command = [
             sys.executable or "python3",
             str(script),
@@ -11707,11 +11749,11 @@ class LeRobotBridge:
         try:
             process = subprocess.Popen(
                 command,
-                cwd=str(self.config.repo_root),
+                cwd=str(self._runtime_root),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env={**self._source_environment(), "PYTHONUNBUFFERED": "1"},
                 start_new_session=True,
             )
         except Exception as exc:
@@ -13725,13 +13767,13 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         raw = str(request.active_robot_cam_capture_pose_path or "").strip()
         if raw:
             return str(_resolve_path(self.config.repo_root, raw))
-        return str(self.config.repo_root / "runs" / "active_robot_cam" / "latest_follower_capture_pose.json")
+        return str(self._run_root / "active_robot_cam" / "latest_follower_capture_pose.json")
 
     def _active_robot_cam_home_pose_path(self, request: LeRobotSessionRequest) -> str:
         raw = str(request.active_robot_cam_home_pose_path or "").strip()
         if raw:
             return str(_resolve_path(self.config.repo_root, raw))
-        return str(self.config.repo_root / "runs" / "active_robot_cam" / "latest_follower_home_pose.json")
+        return str(self._run_root / "active_robot_cam" / "latest_follower_home_pose.json")
 
     def _teleop_args(self, profile: RobotProfile, *, request: LeRobotSessionRequest, allow_fake: bool = True) -> list[str]:
         mode = request.runtime_mode or request.mode
@@ -13775,19 +13817,21 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         background: bool = False,
     ) -> dict[str, Any]:
         try:
+            source_env = self._source_environment()
             self.config.session_log_root.mkdir(parents=True, exist_ok=True)
             log_path = self.config.session_log_root / f"{session_id}.log"
             runtime_state_path = self.config.session_log_root / f"{session_id}.state.json"
             launch_command = list(command)
             if background:
-                runner = Path(__file__).resolve().parents[2] / "scripts" / "lerobot_background_train_runner.py"
+                source_root = self._runtime_root if getattr(self.config, "paths", None) is not None else Path(__file__).resolve().parents[2]
+                runner = source_root / "scripts" / "lerobot_background_train_runner.py"
                 launch_command = [
                     sys.executable or "python3",
                     str(runner),
                     "--state-path",
                     str(runtime_state_path),
                     "--cwd",
-                    str(self.config.repo_root),
+                    str(self._runtime_root),
                     "--",
                     *command,
                 ]
@@ -13796,11 +13840,11 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             log_handle.flush()
             process = subprocess.Popen(
                 launch_command,
-                cwd=str(self.config.repo_root),
+                cwd=str(self._runtime_root),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 text=True,
-                env={**os.environ, **dict(env_overrides or {}), "PYTHONUNBUFFERED": "1"},
+                env={**source_env, **dict(env_overrides or {}), "PYTHONUNBUFFERED": "1"},
                 start_new_session=True,
             )
             self._processes[session_id] = process
@@ -15423,7 +15467,7 @@ print(json.dumps(ids))
         }
 
     def _fake_camera_capture(self, profile: RobotProfile, camera_key: str, camera_port: str) -> dict[str, Any]:
-        capture_dir = self.config.repo_root / "artifacts" / "lerobot" / "camera_tests"
+        capture_dir = self._artifact_root / "lerobot" / "camera_tests"
         capture_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         path = capture_dir / f"{profile.profile_id}_{camera_key}_{timestamp}.png"
@@ -15444,7 +15488,7 @@ print(json.dumps(ids))
         }
 
     def _live_camera_capture(self, profile: RobotProfile, camera_key: str, camera_port: str, *, camera_device: dict[str, Any] | None = None) -> dict[str, Any]:
-        capture_dir = self.config.repo_root / "artifacts" / "lerobot" / "camera_tests"
+        capture_dir = self._artifact_root / "lerobot" / "camera_tests"
         capture_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         path = capture_dir / f"{profile.profile_id}_{camera_key}_{timestamp}.jpg"
@@ -15906,6 +15950,7 @@ finally:
             self.config.fake_dataset_root.resolve(),
             self.config.fake_checkpoint_root.resolve(),
             self.config.session_log_root.resolve(),
+            *([self._artifact_root / "lerobot"] if getattr(self.config, "paths", None) is not None else []),
             Path("/tmp/atr_lerobot_latest_frame").resolve(),
         ]
 

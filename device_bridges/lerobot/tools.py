@@ -26,6 +26,7 @@ from typing import Any
 
 from device_bridges.lerobot.bridge import LeRobotBridge, LeRobotBridgeConfig
 from mcp_tools.tool_registry import ToolRegistry
+from utils.runtime_paths import RuntimePaths
 
 
 def register_lerobot_tools(
@@ -33,9 +34,10 @@ def register_lerobot_tools(
     lerobot_config: dict[str, Any] | None = None,
     *,
     repo_root: Path | None = None,
+    paths: RuntimePaths | None = None,
 ) -> LeRobotBridge:
     """Register LeRobot tools and return the bridge instance."""
-    bridge = LeRobotBridge(LeRobotBridgeConfig.from_config(lerobot_config or {}, repo_root=repo_root))
+    bridge = LeRobotBridge(LeRobotBridgeConfig.from_config(lerobot_config or {}, repo_root=repo_root, paths=paths))
     registry.register_resource("lerobot.bridge", bridge)
 
     registry.register("lerobot.profiles.list", lambda payload: bridge.profiles_list(dict(payload or {})))

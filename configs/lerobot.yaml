@@ -16,14 +16,7 @@
 lerobot:
   default_profile_id: robotis_omx_ai
   default_mode: test
-  session_memory_path: memory/lerobot_sessions.json
-  device_memory_path: memory/lerobot_device_ports.json
-  fake_dataset_root: artifacts/lerobot/fake_datasets
-  fake_checkpoint_root: artifacts/lerobot/fake_checkpoints
   dataset_root: ~/.cache/huggingface/lerobot
-  output_root: outputs/train
-  policy_root: outputs/train
-  session_log_root: runs/lerobot_sessions
   conda_env_name: lerobot
   conda_executable: conda
   pi05_conda_env_name: lerobot-pi05-torch211
@@ -53,10 +46,7 @@ lerobot:
   tts_rate: -35
   tts_voice: en_US-lessac-medium
   tts_piper_python: .venv/bin/python
-  tts_piper_script: tools/tts/atr_piper_say.py
   tts_piper_bin: .venv/bin/piper
-  tts_piper_model: models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx
-  tts_piper_config: models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json
 
   policy_presets:
     - label: Manual local checkpoint path

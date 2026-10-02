@@ -438,7 +438,7 @@ def test_e2e_smoke_cli_forwards_episode_preset_to_bridge(tmp_path: Path, monkeyp
             captured.update(payload)
             return {"ok": True, "status": "COMPLETED"}
 
-    monkeypatch.setattr(smoke, "_bridge", lambda repo_root: FakeBridge())
+    monkeypatch.setattr(smoke, "_bridge", lambda repo_root, **kwargs: FakeBridge())
 
     rc = smoke.main(
         [

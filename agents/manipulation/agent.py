@@ -30,6 +30,7 @@ from utils.agent_artifact_archive import archive_agent_run, current_execution
 from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
 from orchestrator.state import Mode, OrchestratorState
 from utils.manipulation_profile import load_manipulation_agent_profile
+from utils.runtime_paths import RuntimePaths
 
 
 class ManipulationAgent(BaseAgent):
@@ -124,8 +125,8 @@ class ManipulationAgent(BaseAgent):
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def _spec(self, state: OrchestratorState) -> dict[str, Any]:
-        saved = load_manipulation_agent_profile()
+    def _spec(self, state: OrchestratorState, *, paths: RuntimePaths | None = None) -> dict[str, Any]:
+        saved = load_manipulation_agent_profile(paths=paths) if paths is not None else load_manipulation_agent_profile()
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         direct_bridge = (
             isinstance(state.run_metadata, dict)
@@ -318,8 +319,8 @@ class ManipulationAgent(BaseAgent):
             return "pi05" if clean in {"pi05", "pi050"} else saved_type
         return "act"
 
-    def _strategy(self, state: OrchestratorState) -> str:
-        spec = self._spec(state)
+    def _strategy(self, state: OrchestratorState, *, paths: RuntimePaths | None = None) -> str:
+        spec = self._spec(state, paths=paths)
         raw = str(
             spec.get("manipulation_strategy")
             or spec.get("robot_strategy")
@@ -457,8 +458,8 @@ class ManipulationAgent(BaseAgent):
         except (TypeError, ValueError):
             return default
 
-    def _lerobot_payload(self, state: OrchestratorState, protocol_note: str, strategy: str) -> dict[str, Any]:
-        spec = self._spec(state)
+    def _lerobot_payload(self, state: OrchestratorState, protocol_note: str, strategy: str, *, paths: RuntimePaths | None = None) -> dict[str, Any]:
+        spec = self._spec(state, paths=paths)
         device_workspace_bridge = (
             isinstance(state.run_metadata, dict)
             and str(state.run_metadata.get("source") or "") == "lerobot_gui_manipulation_bridge"
@@ -1781,9 +1782,10 @@ class ManipulationAgent(BaseAgent):
         return execution.result
 
     async def _run_task(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        paths = getattr(ctx, "paths", None)
         from utils.utm_clear_cycle import current_clear, run_clear_manipulation
         if current_clear(state):
-            return await run_clear_manipulation(state, ctx, spec=self._spec(state))
+            return await run_clear_manipulation(state, ctx, spec=self._spec(state, paths=paths))
         from agents.manipulation.startup_retry import prepare_retry, admit_vision
         retry_blocked = await prepare_retry(state, ctx)
         if retry_blocked is not None:
@@ -1791,14 +1793,14 @@ class ManipulationAgent(BaseAgent):
         from agents.manipulation.decision import select_manipulation_tool, review_manipulation_result, allows, claim_skill_execution
         skill_decision = None
         result_decision = None
-        strategy = self._strategy(state)
-        spec = self._spec(state)
+        strategy = self._strategy(state, paths=paths)
+        spec = self._spec(state, paths=paths)
         task_id = self._task_id(state, spec)
         if task_id == "clear_utm_to_disposal":
             return AgentResult(success=False, summary="Same-cycle verified Equipment handoff is required for UTM disposal",
                 data={"failure_code": "UTM_CLEAR_HANDOFF_REQUIRED", "requested_next_stage": "vision"}, next_hint="vision")
         protocol_note = "Existing configured manipulation skill; bounded decision before execution."
-        payload = self._lerobot_payload(state, protocol_note, strategy)
+        payload = self._lerobot_payload(state, protocol_note, strategy, paths=paths)
         freshness = self._vision_signal_freshness(state)
         vision_context = self._vision_context(state, freshness)
         execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
@@ -1854,7 +1856,7 @@ class ManipulationAgent(BaseAgent):
             fresh_now = self._vision_signal_freshness(state)
             recheck = self._preflight(state=state, strategy=strategy, payload=payload,
                 freshness=fresh_now, vision_context=self._vision_context(state, fresh_now))
-            unchanged = payload == self._lerobot_payload(state, protocol_note, self._strategy(state))
+            unchanged = payload == self._lerobot_payload(state, protocol_note, self._strategy(state, paths=paths), paths=paths)
             if not allows(skill_decision) or recheck.get("status") == "fail" or not unchanged or would_execute_tool not in available_tools:
                 state.run_metadata.pop("manipulation_vision_admission", None)
                 blocked = self._blocked_result(state=state, strategy=strategy, payload=payload,

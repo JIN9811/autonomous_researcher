@@ -1292,7 +1292,7 @@ def test_live_gui_test_defaults_use_3dp_gui_saved_test_size(monkeypatch: pytest.
 
     monkeypatch.setattr(
         "app.controller.load_prusa_print_profile",
-        lambda: {
+        lambda **kwargs: {
             "material": "PLA",
             "printer_model": "Prusa MK4S",
             "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
@@ -1342,7 +1342,7 @@ def test_live_gui_live_spec_uses_active_bambu_bridge_by_default(monkeypatch: pyt
     controller._state.mode = Mode.LIVE
     monkeypatch.setattr(
         "app.controller.load_prusa_print_profile",
-        lambda: {
+        lambda **kwargs: {
             "material": "PLA",
             "printer_model": "Prusa MK4S",
             "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
@@ -1500,7 +1500,7 @@ def test_live_gui_live_spec_uses_saved_printer_profile(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(
         "app.controller.load_prusa_print_profile",
-        lambda: {
+        lambda **kwargs: {
             "material": "PETG",
             "printer_model": "Prusa MK4S",
             "printer_profile": "petg_quality_0p4",
@@ -1548,7 +1548,7 @@ def test_live_gui_test_spec_uses_saved_auto_ejection_toggle(monkeypatch: pytest.
 
     monkeypatch.setattr(
         "app.controller.load_prusa_print_profile",
-        lambda: {
+        lambda **kwargs: {
             "material": "PLA",
             "printer_model": "Prusa MK4S",
             "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
@@ -2489,7 +2489,7 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     controller = scenario_controller
     monkeypatch.setattr(
         "app.controller.load_prusa_print_profile",
-        lambda: {
+        lambda **kwargs: {
             "material": "PLA",
             "printer_model": "Prusa MK4S",
             "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
@@ -4244,10 +4244,12 @@ def test_live_gui_agent_stage_messages_remain_chat_visible(tmp_path: Path) -> No
 
 def test_physical_print_choice_carries_profile_calibration_flags(tmp_path, monkeypatch) -> None:
     from utils import printer_profile
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
 
     profile_path = tmp_path / "prusa_print_profile.json"
     monkeypatch.setattr(printer_profile, "PRUSA_PRINT_PROFILE_PATH", profile_path)
-    controller = load_runtime()
+    controller = load_runtime(paths=replace(current_paths(), memory_root=tmp_path))
 
     physical = controller._apply_specimen_printer_choice_to_spec(
         controller._default_test_constraints({}), "physical_print"
@@ -4275,10 +4277,12 @@ def test_physical_print_choice_carries_profile_calibration_flags(tmp_path, monke
 
 def test_live_planning_spec_print_request_carries_profile_calibration_flags(tmp_path, monkeypatch) -> None:
     from utils import printer_profile
+    from dataclasses import replace
+    from utils.runtime_paths import current_paths
 
     profile_path = tmp_path / "prusa_print_profile.json"
     monkeypatch.setattr(printer_profile, "PRUSA_PRINT_PROFILE_PATH", profile_path)
-    controller = load_runtime()
+    controller = load_runtime(paths=replace(current_paths(), memory_root=tmp_path))
     controller._state.mode = Mode.LIVE
 
     spec = controller._build_planning_spec(

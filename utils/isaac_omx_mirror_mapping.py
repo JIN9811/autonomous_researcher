@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from utils.runtime_paths import RuntimePaths
 from typing import Any
 
 
@@ -159,7 +160,11 @@ ISAAC_OMX_TEST_JOINT_STATE_DEG = {
 }
 
 
-def default_isaac_omx_mirror_calibration_path(repo_root: Path | str) -> Path:
+def default_isaac_omx_mirror_calibration_path(repo_root: Path | str, *, paths: RuntimePaths | None = None) -> Path:
+    if paths is not None:
+        if Path(repo_root).expanduser().resolve() != paths.repository_root:
+            raise ValueError("repo_root conflicts with paths.repository_root")
+        return paths.memory_root / "isaac_omx_mirror_calibration.json"
     return Path(repo_root).expanduser().resolve() / "memory" / "isaac_omx_mirror_calibration.json"
 
 

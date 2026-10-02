@@ -14,6 +14,7 @@ from typing import Any
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from utils.config_loader import load_all_configs
+from utils.runtime_paths import current_paths
 
 
 def _repo_root() -> Path:
@@ -21,9 +22,9 @@ def _repo_root() -> Path:
 
 
 def _bridge() -> LeRobotBridge:
-    repo = _repo_root()
-    cfg = load_all_configs(repo / "configs")
-    return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=repo))
+    paths = current_paths()
+    cfg = load_all_configs(paths.runtime_root / "configs")
+    return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), paths=paths))
 
 
 def _payload(args: argparse.Namespace) -> dict[str, Any]:

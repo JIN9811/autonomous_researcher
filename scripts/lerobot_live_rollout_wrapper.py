@@ -99,6 +99,7 @@ def _install_rtc_observation_retry() -> bool:
 
 
 def _ensure_omx_action_log_env_defaults() -> None:
+    from utils.runtime_paths import current_paths
     os.environ.setdefault("ATR_LEROBOT_OMX_ACTION_LOG", "1")
     os.environ.setdefault("ATR_LEROBOT_OMX_ACTION_LOG_MOTORS", _OMX_ACTION_LOG_MOTORS)
     session_id = os.environ.get("ATR_LEROBOT_OMX_ACTION_LOG_SESSION_ID", "").strip()
@@ -106,7 +107,7 @@ def _ensure_omx_action_log_env_defaults() -> None:
         session_id = f"{_rollout_dataset_name_from_argv()}-pid{os.getpid()}"
         os.environ["ATR_LEROBOT_OMX_ACTION_LOG_SESSION_ID"] = session_id
     if not os.environ.get("ATR_LEROBOT_OMX_ACTION_LOG_DIR", "").strip():
-        os.environ["ATR_LEROBOT_OMX_ACTION_LOG_DIR"] = str(REPO_ROOT / "runs" / "lerobot_action_logs" / session_id)
+        os.environ["ATR_LEROBOT_OMX_ACTION_LOG_DIR"] = str(current_paths().run_root / "lerobot_action_logs" / session_id)
 
 
 def _rollout_dataset_name_from_argv() -> str:

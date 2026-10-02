@@ -13,19 +13,23 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from utils.runtime_paths import RuntimePaths
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _bridge(repo_root: Path):
+def _bridge(repo_root: Path, *, paths: RuntimePaths | None = None):
     from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
     from utils.config_loader import load_all_configs
 
-    cfg = load_all_configs(repo_root / "configs")
-    return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=repo_root))
+    source_root = paths.runtime_root if paths is not None else repo_root
+    cfg = load_all_configs(source_root / "configs")
+    return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=repo_root, paths=paths))
 
 
 def _wait_job(bridge: Any, kind: str, payload: dict[str, Any], result: dict[str, Any], timeout_s: float) -> dict[str, Any]:
@@ -104,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--domain-randomization-profile", default="conservative")
-    parser.add_argument("--repo-root", default=str(_repo_root()))
+    parser.add_argument("--repo-root", default=None)
+    parser.add_argument("--runtime-root", default=None, help="Bound source root; requires matching ATR layout metadata.")
     parser.add_argument("--create-fixture", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--episode-s", type=int, default=10)
@@ -119,9 +124,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--include-il-train", action="store_true", default=False)
     args = parser.parse_args(argv)
 
-    repo_root = Path(args.repo_root).expanduser().resolve()
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
+    paths = None
+    if args.repo_root is None or args.runtime_root:
+        # A direct script launch starts with scripts/, not the source root, on sys.path.
+        if str(_repo_root()) not in sys.path:
+            sys.path.insert(0, str(_repo_root()))
+        from utils.runtime_paths import current_paths
+        paths = current_paths()
+    repo_root = Path(args.repo_root).expanduser().resolve() if args.repo_root else paths.repository_root
+    source_root = Path(args.runtime_root).expanduser().resolve() if args.runtime_root else repo_root
+    if args.repo_root is None:
+        source_root = paths.runtime_root
+    if str(source_root) not in sys.path:
+        sys.path.insert(0, str(source_root))
+    if args.runtime_root:
+        if paths.repository_root != repo_root or paths.runtime_root != source_root:
+            raise ValueError("Explicit roots conflict with runtime path metadata")
 
     dataset_path = Path(args.dataset_path).expanduser().resolve()
     if args.create_fixture:
@@ -134,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             fps=args.fps,
         )
 
-    bridge = _bridge(repo_root)
+    bridge = _bridge(repo_root, paths=paths) if paths is not None else _bridge(repo_root)
     policy_task_name = (
         "ATR-Robotis-OMX-PickPlace-Physical-v0"
         if bool(args.mimic_enable_cameras)

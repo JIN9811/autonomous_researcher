@@ -323,7 +323,7 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     )
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root, paths=paths)
-    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.repository_root)
+    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.repository_root, paths=paths)
     lerobot_bridge.config.artifact_run_root = paths.run_root
     # PINN's sole path is storage: supply the typed default without rewriting
     # any explicitly configured legacy relative or absolute artifact setting.

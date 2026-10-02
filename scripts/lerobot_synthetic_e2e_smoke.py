@@ -21,15 +21,17 @@ from PIL import Image
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from utils.config_loader import load_all_configs
+from utils.runtime_paths import RuntimePaths, current_paths
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _bridge(repo_root: Path) -> LeRobotBridge:
-    cfg = load_all_configs(repo_root / "configs")
-    return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=repo_root))
+def _bridge(repo_root: Path, *, paths: RuntimePaths | None = None) -> LeRobotBridge:
+    source_root = paths.runtime_root if paths is not None else repo_root
+    cfg = load_all_configs(source_root / "configs")
+    return LeRobotBridge(LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=repo_root, paths=paths))
 
 
 def _json_write(path: Path, payload: dict[str, Any]) -> None:
@@ -235,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", required=True, help="Fixture or recorded LeRobot dataset path.")
     parser.add_argument("--isaac-lab-path", required=True, help="Isaac Lab checkout path used for compatibility preflight.")
     parser.add_argument("--stage", required=True, help="Isaac Sim USD/USDA stage path.")
-    parser.add_argument("--repo-root", default=str(_repo_root()))
+    parser.add_argument("--repo-root", default=None)
     parser.add_argument("--create-fixture", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--episode-s", type=int, default=10)
@@ -247,7 +249,11 @@ def main(argv: list[str] | None = None) -> int:
     dataset_path = Path(args.dataset)
     if args.create_fixture:
         build_fixture_recording_dataset(dataset_path, episodes=args.episodes, episode_s=args.episode_s, fps=args.fps)
-    bridge = _bridge(Path(args.repo_root).expanduser().resolve())
+    if args.repo_root is None:
+        paths = current_paths()
+        bridge = _bridge(paths.repository_root, paths=paths)
+    else:
+        bridge = _bridge(Path(args.repo_root).expanduser().resolve())
     report = run_e2e_smoke(
         bridge=bridge,
         dataset_path=dataset_path,

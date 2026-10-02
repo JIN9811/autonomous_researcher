@@ -1943,8 +1943,8 @@ def _load_agent_baseline_markdown() -> str:
 
 
 def _equipment_bridge() -> WindowsPyAutoGUIBridge:
-    cfg = load_all_configs(resolve_path("configs"))
-    config = WindowsPyAutoGUIBridgeConfig.from_devices_config(cfg.get("devices", {}), repo_root=resolve_path("."))
+    cfg = load_all_configs(RUNTIME_PATHS.runtime_root / "configs")
+    config = WindowsPyAutoGUIBridgeConfig.from_devices_config(cfg.get("devices", {}), repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
     return WindowsPyAutoGUIBridge(config)
 
 
@@ -1956,15 +1956,15 @@ def _local_pyautogui_bridge_supervisor() -> LocalPyAutoGUIBridgeSupervisor:
 
 
 def _printer_workflow() -> PrinterAgenticWorkflow:
-    cfg = load_all_configs(resolve_path("configs"))
-    config = PrusaBridgeConfig.from_devices_config(cfg.get("devices", {}), repo_root=resolve_path("."))
-    return PrinterAgenticWorkflow(config, repo_root=resolve_path("."))
+    cfg = load_all_configs(RUNTIME_PATHS.runtime_root / "configs")
+    config = PrusaBridgeConfig.from_devices_config(cfg.get("devices", {}), repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
+    return PrinterAgenticWorkflow(config, repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
 
 
 def _printer_bridge_manager() -> PrinterDeviceBridgeManager:
     """Return the selected-printer bridge manager used by 3D GUI and printer.prepare."""
-    cfg = load_all_configs(resolve_path("configs"))
-    return PrinterDeviceBridgeManager.from_devices_config(cfg.get("devices", {}), repo_root=resolve_path("."))
+    cfg = load_all_configs(RUNTIME_PATHS.runtime_root / "configs")
+    return PrinterDeviceBridgeManager.from_devices_config(cfg.get("devices", {}), repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
 
 
 def _redacted_printer_connection(workflow: PrinterAgenticWorkflow) -> dict[str, object]:
@@ -2183,7 +2183,7 @@ async def _probe_bambu_http_artifact_fetch(
 
 def _selected_print_profile(manager: PrinterDeviceBridgeManager) -> dict[str, object]:
     """Return print defaults adapted to the selected printer provider without mutating memory."""
-    profile = load_prusa_print_profile()
+    profile = load_prusa_print_profile(path=RUNTIME_PATHS.memory_root / "prusa_print_profile.json")
     selected_profile, _reason = manager.fleet_selection()
     return adapt_print_profile_for_provider(profile, selected_profile.provider)
 
@@ -2248,7 +2248,7 @@ def _selected_printer_slicer_payload(
     """Return slicer config for the active printer provider."""
     selected_profile, _reason = manager.fleet_selection()
     if selected_profile.provider == "bambulab_x2d":
-        return manager.config.slicer.resolved_payload(repo_root=resolve_path("."))
+        return manager.config.slicer.resolved_payload(repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
     return {
         "enabled": config.slicer.enabled,
         "available": bool(os.environ.get(config.slicer.executable_env) or Path(config.slicer.executable_path).exists()),
@@ -2280,15 +2280,15 @@ def _lerobot_bridge() -> LeRobotBridge:
     bridge = _registered_lerobot_bridge()
     if bridge is not None:
         return bridge
-    config_path = resolve_path("configs/lerobot.yaml")
+    config_path = RUNTIME_PATHS.runtime_root / "configs/lerobot.yaml"
     try:
         config_mtime_ns = config_path.stat().st_mtime_ns
     except OSError:
         config_mtime_ns = -1
     if _LEROBOT_BRIDGE is None or config_mtime_ns != _LEROBOT_CONFIG_MTIME_NS:
-        cfg = load_all_configs(resolve_path("configs"))
-        config = LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=resolve_path("."))
-        config.artifact_run_root = resolve_path(cfg.get("system", {}).get("system", {}).get("run_root", "./runs"))
+        cfg = load_all_configs(RUNTIME_PATHS.runtime_root / "configs")
+        config = LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
+        config.artifact_run_root = RUNTIME_PATHS.run_root
         _LEROBOT_BRIDGE = LeRobotBridge(config)
         _LEROBOT_CONFIG_MTIME_NS = config_mtime_ns
     return _LEROBOT_BRIDGE
@@ -2429,8 +2429,8 @@ def _utm_runtime_bridge() -> UTMRuntimeProcessManager:
     """Return the shared UTM ROS runtime manager used by GUI routes and tools."""
     global _utm_runtime_manager
     if _utm_runtime_manager is None:
-        cfg = load_all_configs(resolve_path("configs"))
-        _utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=resolve_path("."))
+        cfg = load_all_configs(RUNTIME_PATHS.runtime_root / "configs")
+        _utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
     return _utm_runtime_manager
 
 
@@ -2438,8 +2438,8 @@ def _specimen_pose_tracker_bridge() -> SpecimenPoseTrackerBridge:
     """Return the shared one-shot D455F specimen pose tracker bridge."""
     global _specimen_pose_tracker
     if _specimen_pose_tracker is None:
-        cfg = load_all_configs(resolve_path("configs"))
-        _specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=resolve_path("."))
+        cfg = load_all_configs(RUNTIME_PATHS.runtime_root / "configs")
+        _specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
     return _specimen_pose_tracker
 
 
@@ -2904,7 +2904,7 @@ def _bundled_windows_bridge_console_html() -> str:
     global _BUNDLED_WINDOWS_CONSOLE_HTML
     if _BUNDLED_WINDOWS_CONSOLE_HTML is not None:
         return _BUNDLED_WINDOWS_CONSOLE_HTML
-    source_path = Path(__file__).resolve().parents[1] / "Pyautogui_server_for_window" / "bridge" / "windows_pyautogui_bridge_server.py"
+    source_path = RUNTIME_PATHS.runtime_root / "Pyautogui_server_for_window" / "bridge" / "windows_pyautogui_bridge_server.py"
     module_name = "atr_bundled_windows_pyautogui_console"
     spec = importlib.util.spec_from_file_location(module_name, source_path)
     if spec is None or spec.loader is None:
@@ -9963,7 +9963,7 @@ def _persist_windows_utm_proof_package(package: dict[str, object]) -> dict[str, 
     """Persist the Windows UTM proof package as a run-local JSON artifact."""
     run_id = str(package.get("run_id") or controller._state.run_id or "run").strip() or "run"
     safe_run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:96] or "run"
-    artifact_dir = resolve_path("artifacts/equipment") / safe_run_id / "utm"
+    artifact_dir = (RUNTIME_PATHS.artifact_root / "equipment") / safe_run_id / "utm"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = artifact_dir / f"windows_utm_proof_package_{stamp}.json"
@@ -10232,7 +10232,7 @@ def _persist_windows_utm_completion_audit(result: dict[str, object]) -> dict[str
     verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
     run_id = str(verification.get("run_id") or controller._state.run_id or result.get("run_id") or "run").strip() or "run"
     safe_run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:96] or "run"
-    artifact_dir = resolve_path("artifacts/equipment") / safe_run_id / "utm"
+    artifact_dir = (RUNTIME_PATHS.artifact_root / "equipment") / safe_run_id / "utm"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = artifact_dir / f"windows_utm_completion_audit_{stamp}.json"
@@ -10265,7 +10265,7 @@ def _persist_windows_utm_live_validation(report: dict[str, object]) -> dict[str,
     """Persist the non-actuating Windows UTM live validation report as a JSON artifact."""
     run_id = str(report.get("run_id") or controller._state.run_id or "run").strip() or "run"
     safe_run_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_id).strip("._-")[:96] or "run"
-    artifact_dir = resolve_path("artifacts/equipment") / safe_run_id / "live_validation"
+    artifact_dir = (RUNTIME_PATHS.artifact_root / "equipment") / safe_run_id / "live_validation"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / "lab_equipment_utm_live_validation.json"
     artifact = {
@@ -10394,7 +10394,7 @@ def _windows_proof_resolved_ref_path(ref: object, artifact_records: list[dict[st
 
 def _latest_windows_utm_proof_package_path() -> Path | None:
     """Return the newest persisted Windows UTM proof package under artifacts/equipment."""
-    root = resolve_path("artifacts/equipment")
+    root = (RUNTIME_PATHS.artifact_root / "equipment")
     if not root.exists():
         return None
     candidates = sorted(
@@ -10457,12 +10457,13 @@ def _load_windows_utm_proof_package_for_verify(path_value: str = "", *, use_curr
         candidate = Path(raw_path).expanduser()
         try:
             resolved = candidate.resolve()
-            repo_root = resolve_path(".").resolve()
+            repo_root = RUNTIME_PATHS.repository_root
         except Exception as exc:
             load_info["blockers"] = ["PROOF_PACKAGE_PATH_INVALID"]
             load_info["message"] = str(exc)
             return {}, load_info
-        if repo_root not in resolved.parents and resolved != repo_root:
+        equipment_root = (RUNTIME_PATHS.artifact_root / "equipment").resolve()
+        if not (resolved.is_relative_to(repo_root) or resolved.is_relative_to(equipment_root)):
             load_info["blockers"] = ["PROOF_PACKAGE_PATH_OUTSIDE_PROJECT"]
             load_info["path"] = str(resolved)
             return {}, load_info
@@ -11797,16 +11798,16 @@ async def _annotate_equipment_skill_with_selected_model(
     manifest = package.get("manifest") if isinstance(package.get("manifest"), dict) else {}
     vision_evidence = collect_visual_annotation_evidence(
         package,
-        allowed_roots=[resolve_path("artifacts/equipment")],
+        allowed_roots=[(RUNTIME_PATHS.artifact_root / "equipment")],
         max_images=16,
     )
     recording = package.get("recording") if isinstance(package.get("recording"), dict) else {}
     recording_id = str(recording.get("recording_id") or manifest.get("timeline_id") or "recording").strip()
     safe_recording_id = re.sub(r"[^A-Za-z0-9._-]+", "-", recording_id).strip("-.") or "recording"
-    storyboard_root = resolve_path("artifacts/equipment") / "skill_storyboards" / safe_recording_id
+    storyboard_root = (RUNTIME_PATHS.artifact_root / "equipment") / "skill_storyboards" / safe_recording_id
     storyboards = build_temporal_storyboards(
         package,
-        allowed_roots=[resolve_path("artifacts/equipment")],
+        allowed_roots=[(RUNTIME_PATHS.artifact_root / "equipment")],
         output_dir=storyboard_root,
     )
     manual_context = _manual_knowledge_context(
@@ -11954,7 +11955,7 @@ async def _annotate_equipment_skill_with_selected_model(
         enriched = apply_visual_locator_annotations(
             package,
             payload,
-            allowed_roots=[resolve_path("artifacts/equipment")],
+            allowed_roots=[(RUNTIME_PATHS.artifact_root / "equipment")],
         )
         executable_by_step = {
             str(step.get("step_id") or ""): step.get("action")
@@ -12096,7 +12097,7 @@ async def get_equipment_skill_authoring_storyboards(
             detail={"ok": False, "failure_code": "SKILL_AUTHORING_JOB_NOT_FOUND", "message": str(job_id)},
         ) from exc
     safe_recording_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(job.get("recording_id") or "")).strip("-.")
-    artifact_root = resolve_path("artifacts/equipment").resolve()
+    artifact_root = (RUNTIME_PATHS.artifact_root / "equipment").resolve()
     storyboard_root = (artifact_root / "skill_storyboards" / safe_recording_id).resolve()
     try:
         storyboard_root.relative_to(artifact_root)
@@ -12452,7 +12453,7 @@ def _equipment_skill_locator_source(skill_id: str, version: str, step_id: str) -
     source = resolve_visual_locator_source(
         package,
         step_id,
-        allowed_roots=[resolve_path("artifacts/equipment")],
+        allowed_roots=[(RUNTIME_PATHS.artifact_root / "equipment")],
     )
     if source is None:
         raise HTTPException(
@@ -13632,7 +13633,7 @@ async def get_printer_status(mode: Literal["live", "test"] = "live", emit: bool 
         },
         "slicer": _selected_printer_slicer_payload(manager, _printer_workflow().config),
         "profile": profile,
-        "profile_path": str(PRUSA_PRINT_PROFILE_PATH),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "prusa_print_profile.json"),
         "device_screen": health.get("device_screen", {}),
         "preprint_gate": health.get("preprint_gate", {}),
         "operator_actions": health.get("operator_actions", []),
@@ -13985,7 +13986,7 @@ async def post_printer_upload_path_probe(req: PrinterUploadPathProbeRequest) -> 
 def _priority_project_file_draft(manager, req, **kwargs):
     root = getattr(manager, "repo_root", resolve_path("."))
     try:
-        policy = load_priority(path=priority_path(root))
+        policy = load_priority(path=(RUNTIME_PATHS.memory_root / "bambu_material_priority.json"))
     except (OSError, ValueError):
         return {"ok": False, "failure_code": "BAMBU_MATERIAL_PRIORITY_INVALID", "will_publish": False, "start_enabled": False}
     selection = {"ok": True, "enabled": False}
@@ -13994,7 +13995,7 @@ def _priority_project_file_draft(manager, req, **kwargs):
                 "material_selection": {"ok": True, "enabled": False, "status": "deferred_virtual"}}
     if policy["enabled"]:
         selection = manager.resolve_material_selection(req.model_dump())
-        path = material_artifact_path(getattr(req, "artifact_path", "") or kwargs.get("remote_path"), root)
+        path = material_artifact_path(getattr(req, "artifact_path", "") or kwargs.get("remote_path"), root, paths=RUNTIME_PATHS)
         selection = bind_artifact(selection, path, kwargs.get("plate_id", 1))
         if not selection["ok"]:
             return {"ok": False, "failure_code": selection["failure_code"], "material_selection": selection,
@@ -14150,7 +14151,7 @@ def _bambu_autoejection_camera_gate(manager: PrinterDeviceBridgeManager, remote_
             snapshot_bytes = None
     camera_snapshot_path = ""
     if isinstance(snapshot_bytes, (bytes, bytearray)) and snapshot_bytes:
-        evidence_dir = manager.repo_root / "artifacts" / "bambu_camera_evidence"
+        evidence_dir = RUNTIME_PATHS.artifact_root / "bambu_camera_evidence"
         evidence_dir.mkdir(parents=True, exist_ok=True)
         evidence_path = evidence_dir / f"bambu-camera-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{uuid.uuid4().hex[:8]}.jpg"
         evidence_path.write_bytes(bytes(snapshot_bytes))
@@ -14828,7 +14829,7 @@ def _looks_like_local_policy_ref(policy_ref: str) -> bool:
 
 def _bambu_manipulation_consumer_readiness(*, mode: str = "live") -> dict[str, object]:
     """Verify that Bambu autoejection has an actual Manipulation Agent consumer path."""
-    profile_path = Path(MANIPULATION_AGENT_PROFILE_PATH)
+    profile_path = (RUNTIME_PATHS.memory_root / "manipulation_agent_bridge.json")
     profile_saved = profile_path.exists()
     raw: dict[str, object] = {}
     if profile_saved:
@@ -15289,8 +15290,8 @@ async def post_printer_bambu_slice_artifact(req: PrinterBambuSliceArtifactReques
             "will_publish": False,
             "start_enabled": False,
         }
-    runner = BambuStudioSlicerRunner(manager.config.slicer, repo_root=resolve_path("."))
-    placement = req.specimen_placement.model_dump() if req.specimen_placement is not None else load_prusa_print_profile().get("specimen_placement")
+    runner = BambuStudioSlicerRunner(manager.config.slicer, repo_root=RUNTIME_PATHS.repository_root, paths=RUNTIME_PATHS)
+    placement = req.specimen_placement.model_dump() if req.specimen_placement is not None else load_prusa_print_profile(path=RUNTIME_PATHS.memory_root / "prusa_print_profile.json").get("specimen_placement")
     result = runner.slice(
         source_path=req.source_path,
         specimen_placement=placement,
@@ -15567,7 +15568,7 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
                 "message": "Provide a source STL/3MF or an existing sliced artifact path.",
             }
 
-    placement = req.specimen_placement.model_dump() if req.specimen_placement is not None else load_prusa_print_profile().get("specimen_placement")
+    placement = req.specimen_placement.model_dump() if req.specimen_placement is not None else load_prusa_print_profile(path=RUNTIME_PATHS.memory_root / "prusa_print_profile.json").get("specimen_placement")
     # Retain the effective machine area proven by this slice, rather than
     # reinterpreting a custom profile against the default X2D region.
     sliced_placement_check = slice_result.get("placement_validation") or {}
@@ -15762,7 +15763,7 @@ async def get_bambu_http_artifact(token: str, filename: str) -> FileResponse:
 async def get_printer_material_priority() -> dict[str, object]:
     manager = _printer_bridge_manager()
     try:
-        return {"ok": True, "priority": load_priority(path=priority_path(manager.repo_root))}
+        return {"ok": True, "priority": load_priority(path=(RUNTIME_PATHS.memory_root / "bambu_material_priority.json"))}
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=409, detail="BAMBU_MATERIAL_PRIORITY_INVALID") from exc
 
@@ -15773,7 +15774,7 @@ async def post_printer_material_priority(req: MaterialPriority) -> dict[str, obj
     profile, _reason = manager.fleet_selection()
     if profile.provider != "bambulab_x2d":
         raise HTTPException(status_code=400, detail="BAMBU_MATERIAL_PRIORITY_NOT_APPLICABLE")
-    return {"ok": True, "priority": save_priority(req.model_dump(), path=priority_path(manager.repo_root)), "will_publish": False}
+    return {"ok": True, "priority": save_priority(req.model_dump(), path=(RUNTIME_PATHS.memory_root / "bambu_material_priority.json")), "will_publish": False}
 
 
 @app.get("/api/printer/profile")
@@ -15787,7 +15788,7 @@ async def get_printer_profile() -> dict[str, object]:
     return {
         "ok": True,
         "profile": profile,
-        "profile_path": str(PRUSA_PRINT_PROFILE_PATH),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "prusa_print_profile.json"),
         "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
         "connection_memory_path": str(selected_profile.connection_memory_path),
         "live_gates": _selected_printer_profile_live_gates(manager, config),
@@ -15802,13 +15803,13 @@ async def post_printer_profile(req: PrinterProfileRequest) -> dict[str, object]:
     manager = _printer_bridge_manager()
     workflow = _printer_workflow()
     config = workflow.config
-    profile = save_prusa_print_profile(req.model_dump())
+    profile = save_prusa_print_profile(req.model_dump(), path=RUNTIME_PATHS.memory_root / "prusa_print_profile.json")
     profile = _selected_print_profile(manager)
     selected_profile, selection_reason = manager.fleet_selection()
     return {
         "ok": True,
         "profile": profile,
-        "profile_path": str(PRUSA_PRINT_PROFILE_PATH),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "prusa_print_profile.json"),
         "selected_printer": manager._selected_printer_payload(selected_profile, selection_reason),
         "connection_memory_path": str(selected_profile.connection_memory_path),
         "live_gates": _selected_printer_profile_live_gates(manager, config),
@@ -15855,7 +15856,7 @@ async def get_printer_autoejection_status() -> dict[str, object]:
             ),
         }
     workflow = _printer_workflow()
-    profile = load_prusa_print_profile()
+    profile = load_prusa_print_profile(path=RUNTIME_PATHS.memory_root / "prusa_print_profile.json")
     payload = _selected_printer_autoejection_payload(manager, workflow.config, profile)
     return {
         "ok": True,
@@ -15920,7 +15921,7 @@ async def post_printer_bambu_autoejection_proof_template(req: PrinterBambuAutoej
             "message": "Bambu physical proof templates are only applicable to the selected Bambu Lab bridge.",
         }
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    default_path = manager.repo_root / "artifacts" / "printer" / "manual" / "bambu" / f"bambu_autoejection_physical_validation_{stamp}.json"
+    default_path = RUNTIME_PATHS.artifact_root / "printer" / "manual" / "bambu" / f"bambu_autoejection_physical_validation_{stamp}.json"
     result = write_proof_template(
         req.proof_package_path or str(default_path),
         printer_profile_id=req.printer_profile_id or selected_profile.profile_id,
@@ -16319,7 +16320,7 @@ async def post_printer_autoejection_test(req: PrinterAutoejectionTestRequest, re
         )
         return result
     workflow = _printer_workflow()
-    profile = load_prusa_print_profile()
+    profile = load_prusa_print_profile(path=RUNTIME_PATHS.memory_root / "prusa_print_profile.json")
     payload = {
         "runtime_mode": req.mode,
         "position": req.position,
@@ -17554,7 +17555,7 @@ def _rollout_profile_from_request(req: LeRobotAPIRequest) -> dict[str, object]:
 
 def _saved_manipulation_rollout_fallback() -> dict[str, object]:
     """Use the selected saved manipulation task as the first standalone rollout profile."""
-    profile = load_manipulation_agent_profile()
+    profile = load_manipulation_agent_profile(paths=RUNTIME_PATHS)
     task_id = str(profile.get("task_id") or "transfer_to_utm")
     task_profiles = profile.get("task_profiles") if isinstance(profile.get("task_profiles"), dict) else {}
     task_profile = task_profiles.get(task_id) if isinstance(task_profiles, dict) else None
@@ -17564,11 +17565,11 @@ def _saved_manipulation_rollout_fallback() -> dict[str, object]:
 @app.get("/api/lerobot/rollout/config")
 async def get_lerobot_rollout_config() -> dict[str, object]:
     """Return saved standalone rollout defaults without selecting the newest checkpoint."""
-    saved = LEROBOT_ROLLOUT_PROFILE_PATH.exists()
+    saved = (RUNTIME_PATHS.memory_root / "lerobot_rollout_profile.json").exists()
     return {
         "ok": True,
-        "profile": load_lerobot_rollout_profile(fallback=_saved_manipulation_rollout_fallback()),
-        "profile_path": str(LEROBOT_ROLLOUT_PROFILE_PATH),
+        "profile": load_lerobot_rollout_profile(fallback=_saved_manipulation_rollout_fallback(), paths=RUNTIME_PATHS),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "lerobot_rollout_profile.json"),
         "source": "saved_rollout_profile" if saved else "manipulation_agent_profile",
     }
 
@@ -17576,12 +17577,12 @@ async def get_lerobot_rollout_config() -> dict[str, object]:
 @app.post("/api/lerobot/rollout/config")
 async def post_lerobot_rollout_config(req: LeRobotAPIRequest) -> dict[str, object]:
     """Persist the standalone rollout selection and safety options."""
-    profile = save_lerobot_rollout_profile(_rollout_profile_from_request(req))
+    profile = save_lerobot_rollout_profile(_rollout_profile_from_request(req), paths=RUNTIME_PATHS)
     return {
         "ok": True,
         "tool": "lerobot.rollout.config.save",
         "profile": profile,
-        "profile_path": str(LEROBOT_ROLLOUT_PROFILE_PATH),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "lerobot_rollout_profile.json"),
         "source": "saved_rollout_profile",
         "message": "Standalone rollout defaults saved.",
     }
@@ -17751,20 +17752,20 @@ async def get_lerobot_manipulation_agent_config() -> dict[str, object]:
     """Return saved Manipulation Agent bridge defaults."""
     return {
         "ok": True,
-        "profile": load_manipulation_agent_profile(),
-        "profile_path": str(MANIPULATION_AGENT_PROFILE_PATH),
+        "profile": load_manipulation_agent_profile(paths=RUNTIME_PATHS),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "manipulation_agent_bridge.json"),
     }
 
 
 @app.post("/api/lerobot/manipulation-agent/config")
 async def post_lerobot_manipulation_agent_config(req: ManipulationAgentBridgeRequest) -> dict[str, object]:
     """Persist Manipulation Agent bridge defaults for live/test loop usage."""
-    profile = save_manipulation_agent_profile(_manipulation_profile_from_request(req))
+    profile = save_manipulation_agent_profile(_manipulation_profile_from_request(req), paths=RUNTIME_PATHS)
     return {
         "ok": True,
         "tool": "manipulation_agent.config.save",
         "profile": profile,
-        "profile_path": str(MANIPULATION_AGENT_PROFILE_PATH),
+        "profile_path": str(RUNTIME_PATHS.memory_root / "manipulation_agent_bridge.json"),
         "message": "Manipulation Agent bridge defaults saved.",
     }
 

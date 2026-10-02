@@ -24,6 +24,7 @@ import json
 from typing import Any
 
 from utils.paths import resolve_path
+from utils.runtime_paths import RuntimePaths
 
 
 MANIPULATION_AGENT_PROFILE_PATH = resolve_path("memory/manipulation_agent_bridge.json")
@@ -367,22 +368,24 @@ def _profile_for_storage(profile: dict[str, Any]) -> dict[str, Any]:
     return stored
 
 
-def load_manipulation_agent_profile() -> dict[str, Any]:
+def load_manipulation_agent_profile(*, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Load saved Manipulation Agent defaults, falling back to safe defaults."""
-    if not MANIPULATION_AGENT_PROFILE_PATH.exists():
+    path = paths.memory_root / "manipulation_agent_bridge.json" if paths is not None else MANIPULATION_AGENT_PROFILE_PATH
+    if not path.exists():
         return normalize_manipulation_agent_profile({})
     try:
-        raw = json.loads(MANIPULATION_AGENT_PROFILE_PATH.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         raw = {}
     return normalize_manipulation_agent_profile(raw if isinstance(raw, dict) else {})
 
 
-def save_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
+def save_manipulation_agent_profile(raw: dict[str, Any] | None, *, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Persist normalized Manipulation Agent defaults."""
+    path = paths.memory_root / "manipulation_agent_bridge.json" if paths is not None else MANIPULATION_AGENT_PROFILE_PATH
     profile = normalize_manipulation_agent_profile(raw)
-    MANIPULATION_AGENT_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MANIPULATION_AGENT_PROFILE_PATH.write_text(
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(_profile_for_storage(profile), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )

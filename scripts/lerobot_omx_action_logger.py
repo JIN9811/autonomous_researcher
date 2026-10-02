@@ -238,9 +238,10 @@ def install_omx_follower_action_logger() -> bool:
 
 
 def _logger_from_env() -> _OmxActionLogger:
+    from utils.runtime_paths import current_paths
     session_id = _clean_session_id(os.environ.get("ATR_LEROBOT_OMX_ACTION_LOG_SESSION_ID", "manual"))
     raw_dir = str(os.environ.get("ATR_LEROBOT_OMX_ACTION_LOG_DIR", "")).strip()
-    log_dir = Path(raw_dir).expanduser() if raw_dir else Path.cwd() / "runs" / "lerobot_action_logs" / session_id
+    log_dir = Path(raw_dir).expanduser() if raw_dir else current_paths().run_root / "lerobot_action_logs" / session_id
     motor_names = _motor_names_from_env()
     return _OmxActionLogger(log_dir, session_id=session_id, motor_names=motor_names)
 

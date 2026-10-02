@@ -82,7 +82,7 @@ def test_explicit_ejection_choice_survives_saved_default(monkeypatch, explicit):
     controller._state.mode = Mode.LIVE
     defaults = controller._validated_printer_defaults()
     defaults.update(allow_ejection=not explicit, start_immediately_live=False)
-    monkeypatch.setattr(controller, "_validated_printer_defaults", lambda: defaults)
+    monkeypatch.setattr(controller, "_validated_printer_defaults", lambda **kwargs: defaults)
     spec = controller._build_planning_spec(base_spec={"candidate_id": "audit"},
         constraints={"print": {"start_immediately": True}, "ejection": {"enabled": explicit}})
     assert spec["print"]["start_immediately"] is True
@@ -94,7 +94,7 @@ def test_explicit_live_start_enables_normal_ejection_without_changing_idle_defau
     controller._state.mode = Mode.LIVE
     defaults = controller._validated_printer_defaults()
     defaults.update(allow_ejection=False, start_immediately_live=False)
-    monkeypatch.setattr(controller, "_validated_printer_defaults", lambda: defaults)
+    monkeypatch.setattr(controller, "_validated_printer_defaults", lambda **kwargs: defaults)
     idle = controller._build_planning_spec(base_spec={}, constraints={})
     assert idle["print"]["start_immediately"] is False
     assert idle["ejection"]["enabled"] is False
@@ -181,7 +181,7 @@ async def test_explicit_experiment_start_resolves_physical_intent(scenario_contr
     c = scenario_controller
     defaults = c._validated_printer_defaults()
     defaults.update(start_immediately_live=False, allow_ejection=False)
-    monkeypatch.setattr(c, "_validated_printer_defaults", lambda: defaults)
+    monkeypatch.setattr(c, "_validated_printer_defaults", lambda **kwargs: defaults)
     specs = []
     async def handoff(*, goal, constraints):
         specs.append(c._build_planning_spec(base_spec={}, constraints=constraints))

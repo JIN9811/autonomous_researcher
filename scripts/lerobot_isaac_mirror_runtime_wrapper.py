@@ -30,6 +30,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from utils.runtime_paths import current_paths
+
 from utils.isaac_omx_mirror_mapping import (  # noqa: E402
     action_to_joint_state,
     default_isaac_omx_mirror_calibration_path,
@@ -121,7 +123,8 @@ class IsaacMirrorPublisher:
         self.profile_id = os.getenv("ATR_ISAAC_MIRROR_PROFILE_ID", "").strip()
         self.record_path = Path(os.getenv("ATR_ISAAC_MIRROR_RECORD_PATH", "").strip()).expanduser()
         calibration_path = os.getenv("ATR_ISAAC_MIRROR_CALIBRATION_PATH", "").strip()
-        self.calibration = load_isaac_omx_mirror_calibration(calibration_path or default_isaac_omx_mirror_calibration_path(REPO_ROOT))
+        paths = current_paths()
+        self.calibration = load_isaac_omx_mirror_calibration(calibration_path or default_isaac_omx_mirror_calibration_path(paths.repository_root, paths=paths))
         self.render_context = IsaacRgbdRenderContext()
         self.render_worker = IsaacRgbdRenderWorker(self.render_context, mirror_endpoint=self.endpoint, default_timeout_s=self.timeout_s)
         self._last_post_monotonic = 0.0
@@ -1345,6 +1348,7 @@ class ActiveRobotCamTracker:
         return overrides
 
     def __init__(self, sidecar: LatestFrameSidecar, updater: SpecimenPoseFrameUpdater) -> None:
+        paths = current_paths()
         self.enabled = _env_bool("ATR_ACTIVE_ROBOT_CAM_ENABLED", False)
         self.record_start_enabled = _env_bool("ATR_ACTIVE_ROBOT_CAM_RECORD_START_ENABLED", True)
         self.trigger_on_first_action = _env_bool("ATR_ACTIVE_ROBOT_CAM_TRIGGER_ON_FIRST_ACTION", True)
@@ -1358,13 +1362,13 @@ class ActiveRobotCamTracker:
         self.capture_pose_path = Path(
             os.getenv(
                 "ATR_ACTIVE_ROBOT_CAM_CAPTURE_POSE_PATH",
-                str(REPO_ROOT / "runs" / "active_robot_cam" / "latest_follower_capture_pose.json"),
+                str(paths.run_root / "active_robot_cam" / "latest_follower_capture_pose.json"),
             )
         ).expanduser()
         self.home_pose_path = Path(
             os.getenv(
                 "ATR_ACTIVE_ROBOT_CAM_HOME_POSE_PATH",
-                str(REPO_ROOT / "runs" / "active_robot_cam" / "latest_follower_home_pose.json"),
+                str(paths.run_root / "active_robot_cam" / "latest_follower_home_pose.json"),
             )
         ).expanduser()
         self.d455f_manifest_path = Path(
@@ -1375,7 +1379,7 @@ class ActiveRobotCamTracker:
         ).expanduser()
         self.request_ttl_s = _env_float("ATR_ACTIVE_ROBOT_CAM_REQUEST_TTL_S", 15.0, minimum=0.0)
         self.result_dir = Path(
-            os.getenv("ATR_ACTIVE_ROBOT_CAM_RESULT_DIR", str(REPO_ROOT / "runs" / "active_robot_cam"))
+            os.getenv("ATR_ACTIVE_ROBOT_CAM_RESULT_DIR", str(paths.run_root / "active_robot_cam"))
         ).expanduser()
         self.max_step = _env_float("ATR_ACTIVE_ROBOT_CAM_MAX_STEP", 5.0, minimum=0.1)
         self.min_steps = _env_int("ATR_ACTIVE_ROBOT_CAM_MIN_STEPS", 8, minimum=1)
