@@ -58,6 +58,12 @@ test-results/
 meta/
 
 # Generated hardware / experiment outputs
+/runtime/ros/build/
+/runtime/ros/install/
+/runtime/ros/log/
+/ros/build/
+/ros/install/
+/ros/log/
 /result.json
 *.stl
 *.gcode

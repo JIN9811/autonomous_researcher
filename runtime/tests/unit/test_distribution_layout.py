@@ -41,7 +41,9 @@ def test_runtime_move_targets_match_exact_phase_identities():
     phase = manifest['runtime_phase']
     assert 'files' in phase, 'runtime final identity accounting is missing'
     assert set(phase['files']) == set(phase['moves'])
+    subsequent = manifest.get('task10_phase', {}).get('files', {})
     for source, record in phase['files'].items():
+        record = subsequent.get(phase['moves'][source], record)
         path = outer / phase['moves'][source]
         assert path.is_file() and not path.is_symlink(), source
         data = path.read_bytes()
@@ -49,12 +51,23 @@ def test_runtime_move_targets_match_exact_phase_identities():
         assert hashlib.sha256(data).hexdigest() == record['sha256'], source
         assert ('100755' if path.stat().st_mode & 0o111 else '100644') == record['mode'], source
     for source, record in phase['post_move_additions'].items():
+        record = subsequent.get(source, record)
+        assert hashlib.sha256((outer / source).read_bytes()).hexdigest() == record['sha256'], source
+    for source, record in manifest.get('task10_phase', {}).get('additions', {}).items():
         assert hashlib.sha256((outer / source).read_bytes()).hexdigest() == record['sha256'], source
     assert len(phase['generated_deferrals']) == 39
     for source, record in phase['generated_deferrals'].items():
         assert record['current_location'] == source and record['handoff'] == 'Task 10'
         path = outer / source
         original = manifest['entries'][source]
+        retirement = manifest.get('generated_output_rebuilds', {}).get(source, {}).get('source_retirement')
+        if retirement is not None:
+            assert retirement['status'] == 'removed_from_source'
+            assert retirement['baseline_identity'] == {key: original[key] for key in ('mode', 'git_blob', 'sha256', 'size')}
+            assert len(retirement['rebuild_receipt_sha256']) == 64
+            assert not os.path.lexists(path), source
+            assert not os.path.lexists(outer / original['destination']), source
+            continue
         # Generated links may deliberately be dangling; certify link bytes,
         # never follow them into old build/install or external locations.
         if original['mode'] == '120000':

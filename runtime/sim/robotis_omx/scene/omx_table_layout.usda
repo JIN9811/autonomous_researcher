@@ -65,7 +65,7 @@ def Xform "World"
             def Shader "WoodTexture"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @/home/jin/autonomous_researcher/sim/robotis_omx/scene/Textures/redwood_table_grain.png@
+                asset inputs:file = @./Textures/redwood_table_grain.png@
                 token inputs:sourceColorSpace = "sRGB"
                 float2 inputs:st.connect = </World/Materials/desk_redwood_textured/PrimvarReader_st.outputs:result>
                 color3f outputs:rgb
@@ -452,7 +452,7 @@ def Xform "World"
     }
 
     def Xform "Robot" (
-        prepend references = @/home/jin/autonomous_researcher/sim/robotis_omx/omx/omx.usda@</omx>
+        prepend references = @../omx/omx.usda@</omx>
     )
     {
         float xformOp:rotateZ = 90

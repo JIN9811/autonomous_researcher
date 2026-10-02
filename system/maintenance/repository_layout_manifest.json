@@ -46165,5 +46165,1304 @@
         "content_changed": false
       }
     }
+  },
+  "generated_output_rebuilds": {
+    "ros/install/.colcon_install_layout": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "3aad5336af1f22b8088508218dceeda3d7bc8cc2",
+          "sha256": "9b8d77949b6e468746790cc1ada9432ca9984c51533a086544c8d0c01f18cc66",
+          "size": 9
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/COLCON_IGNORE": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/_local_setup_util_ps1.py": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "3c6d9e8779050f742ec78af8a4d55abc4de7841b",
+          "sha256": "39720fe68987dbed5738074bd6b7fc1859aee64e4791760b2894793fd9821450",
+          "size": 14856
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/_local_setup_util_sh.py": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "f67eaa9891ec587c4bbe364da6b18b5c65631f4d",
+          "sha256": "1d288ded3830dfd38e01684c2b3bd0fcefa5ccbe583ab37499333aff73e69356",
+          "size": 15024
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/bin/specimen_pose_node": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100755",
+          "git_blob": "370a341a8755d3ef72c6622046f11c6a88332566",
+          "sha256": "ae2d093cfe61608559fbde138465eacd617b721362672d0d3425db6791d4e6df",
+          "size": 1034
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/lib/atr_specimen_pose_tracker/specimen_pose_node": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100755",
+          "git_blob": "370a341a8755d3ef72c6622046f11c6a88332566",
+          "sha256": "ae2d093cfe61608559fbde138465eacd617b721362672d0d3425db6791d4e6df",
+          "size": 1034
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/lib/python3.12/site-packages/atr_specimen_pose_tracker/__init__.py": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "703899981a53a3c345dbf6bb9a4f4d0fb9b38d73",
+          "sha256": "09ec0ae73f9aafd5daf8ecc4ae7708a879edf79728ab9399bee6ce9f39c2f857",
+          "size": 54
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/lib/python3.12/site-packages/atr_specimen_pose_tracker/specimen_pose_node.py": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "e7f2e5ae781a50ff00b06c61a4139f78b1b727bd",
+          "sha256": "78c0da6808237f6fa13bd93333ccf6b2a59b8cd15f6f52ba490afcb056a88d32",
+          "size": 10983
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/ament_index/resource_index/packages/atr_specimen_pose_tracker": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/ament_prefix_path.dsv": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "79d4c95b55cb72a17c9be498c3758478e2c7bb8d",
+          "sha256": "c4797d0a0670c70b4d3bcb5b7d47563635c7950595603f3af66f70af546ad57e",
+          "size": 41
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/ament_prefix_path.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "26b99975794bb42ea3d6a17150e313cbfc45fc24",
+          "sha256": "0aad623e5d52cbe955cc1d27b5002c3ce9a4c1f8de754b6afd4e6ac27e1eb2dd",
+          "size": 152
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/ament_prefix_path.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "f3041f688a623ea5c66e65c917bc503e5fae6dc9",
+          "sha256": "c07f082a166d9644cabb3237d58e59177e5830868363f0fc32b646e1fb5cb3a5",
+          "size": 142
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/path.dsv": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "95435e0c2ec61dbd486b5ee8f86a36cd57083d46",
+          "sha256": "0407354ecdf2f7f6bdec81d33932821893892a387663ddacc53876e48fd74db8",
+          "size": 31
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/path.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "d02a00393b0850d212f09a55c1bf0aa291595a6d",
+          "sha256": "2ecc7471768db47decf28e7c54a0755b2a10d0be44daaae34b039e4c3d5a573c",
+          "size": 143
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/path.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "295266d6f42a3892d69b7639a9f0b6786d9fa45a",
+          "sha256": "0cb5a19378c1ece833ff5aebabb17fb09bddd1d889c008832ca7c28af53df5a2",
+          "size": 133
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/pythonpath.dsv": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "c2ddcdb73d1e5f7457cdbba9133f2e8a4d250b78",
+          "sha256": "070ebe43e03af540d1d1e1a820dcdba2b6fac511fcecc16664eea6fc0e9a6691",
+          "size": 62
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/pythonpath.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "bea370331950873b871f3d58edc3a4448642f22d",
+          "sha256": "151b30bbc3f8389f5b3125f0a8f6512625f04d77be5c317187b409f8640b0cc9",
+          "size": 174
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/pythonpath.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "45388fea975bdbfb649447f4a82b390f9c4b7920",
+          "sha256": "15a6191c43b0d92b5c726b638e710e045a711c8683875cfdead77f9e759e27aa",
+          "size": 164
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/pythonscriptspath.dsv": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "95435e0c2ec61dbd486b5ee8f86a36cd57083d46",
+          "sha256": "0407354ecdf2f7f6bdec81d33932821893892a387663ddacc53876e48fd74db8",
+          "size": 31
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/pythonscriptspath.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "d02a00393b0850d212f09a55c1bf0aa291595a6d",
+          "sha256": "2ecc7471768db47decf28e7c54a0755b2a10d0be44daaae34b039e4c3d5a573c",
+          "size": 143
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/hook/pythonscriptspath.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "295266d6f42a3892d69b7639a9f0b6786d9fa45a",
+          "sha256": "0cb5a19378c1ece833ff5aebabb17fb09bddd1d889c008832ca7c28af53df5a2",
+          "size": 133
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/package.bash": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "c8a1982c2712fd3b437e323454c5f482e50db3e1",
+          "sha256": "60433e287718225fa6f50a4fb74e19c31d4c7e399b24596e5a2a3a7e3a5a8cd8",
+          "size": 1087
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/package.dsv": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "137d1b42fb6958834fd2438209e41aa90bb7d478",
+          "sha256": "fc0dfa1a542eeb3812a59ac0239cd33c48b8197be932183fc5dc1dc3ff65d56b",
+          "size": 728
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/package.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "f70b35d526265fe7adc5be9e918061521ab23be1",
+          "sha256": "929eaefecea5a2aa3f28dd796fab2c02aaa100f6267400c808a4a7d746f1245e",
+          "size": 3526
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/package.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "de49febd54b90fd23cfcdffc3e93639404fc02fb",
+          "sha256": "0efb1f0cad0d5a3df563859c5ee6cdb21414cca4b406794e0e68b8cc39b74c30",
+          "size": 3138
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/package.xml": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "649a00e5754ed0954e252a20e1ecf2261f3f442e",
+          "sha256": "cadae13e3576ee050c2eecbe05f9ec40007851ec8fa9bf34defe686ffef08bb2",
+          "size": 569
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/atr_specimen_pose_tracker/package.zsh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "a1dc6beda94dd1118ab8c4d6650bfa6afc8445b7",
+          "sha256": "a47951427cfcc2b853ac56210d4fcf339b8002d7e2a70906432946bf42a5ede9",
+          "size": 1375
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/atr_specimen_pose_tracker/share/colcon-core/packages/atr_specimen_pose_tracker": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "65b49cec8a8d2c760a9acdbc20d479b974eedf85",
+          "sha256": "165b365762ee6c1c7f0e5dd01ddbc668b4d9b37dcfcb8715af7eca4366a319fe",
+          "size": 56
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/local_setup.bash": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "03f00256c1a126057ca924bdd48ec74444b0cc10",
+          "sha256": "0e10d666bbf43cf559467b11b75cf6d26cf8d210e7f94e79dfe5a7dddb2fe91c",
+          "size": 3760
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/local_setup.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "6f68c8dede9ed4ecb63a4eb6ac2a7450bd18ec3b",
+          "sha256": "79cfdc40aa006498cb2a008f05efe6563f311dcc1ab5b1c385c9c84f128feacb",
+          "size": 2045
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/local_setup.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "a9f9c8e266145cf3897318262089f142d5fa00c3",
+          "sha256": "cc18702c2f18e6de06e9260826cb12826fe8c148a75857a3bafe7eb65edb31c4",
+          "size": 4347
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/local_setup.zsh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "b6487102f245a7b5ddb2b1da158d6b99ddc91d8b",
+          "sha256": "5fc7b5cfa0b484f14c21854fdcbb31653d831dc235e214b8ed88a63f6d2c4c02",
+          "size": 4155
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/setup.bash": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "bb38dd20e8539dbd0d65c5c1b93b5bb150cb22d6",
+          "sha256": "d1552370ac06943878b92be07f1ff59443d00a60275f687ddd08683f1cff795f",
+          "size": 1139
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/setup.ps1": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "51075bbad247b1ae37d8e48c898f7b0ca6d31672",
+          "sha256": "9e14de8573afa3d1254db86b2874f605b0602eb64f999ab58799cf36f9f6d128",
+          "size": 1165
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/setup.sh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "e180ef22d42a20fa5b5926045b47e485bcda3262",
+          "sha256": "27e21f953fb5df2356a1856f0993493d2aa49c3ae87fd2908690459f9a520c62",
+          "size": 1919
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/install/setup.zsh": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "6e4a496a3902d3d96d7d0846fb6011cd01b82631",
+          "sha256": "6bd5525dd74811468bee9af1bcc881fbd44acdc386911a96b065ece463087ebf",
+          "size": 1127
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/log/COLCON_IGNORE": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "100644",
+          "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/log/latest": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "120000",
+          "git_blob": "b57d247c77c0293269460b70b9bb1360f27cf808",
+          "sha256": "4be6cac6617903c4ad836cd3711d512c360bc42964c17afdeaf105ecc39f1025",
+          "size": 12
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    },
+    "ros/log/latest_build": {
+      "owning_source": "runtime/ros/atr_specimen_pose_tracker",
+      "rebuild_command": [
+        "colcon",
+        "--log-base",
+        "/tmp/atr-ros-log",
+        "build",
+        "--base-paths",
+        "/tmp/atr-ros-src/atr_specimen_pose_tracker",
+        "--build-base",
+        "/tmp/atr-ros-build",
+        "--install-base",
+        "/tmp/atr-ros-install",
+        "--packages-select",
+        "atr_specimen_pose_tracker"
+      ],
+      "rebuild_profile": "staged_ros_jazzy_system_python",
+      "source_retirement": {
+        "status": "removed_from_source",
+        "reason": "Obsolete generated prefix; rebuild from owned source",
+        "recovery_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+        "baseline_identity": {
+          "mode": "120000",
+          "git_blob": "bd29535a2baabb83e9d2833d0d3d9d587379d4ab",
+          "sha256": "ecf404830a8a6630f214be619e1164d22271594be1f2cb1eb20cb52a5ae7bce5",
+          "size": 25
+        },
+        "rebuild_receipt_sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+      }
+    }
+  },
+  "task10_phase": {
+    "base_revision": "f543175e6b917c75ae993f49f2b58e4afbb2f9fa",
+    "files": {
+      ".gitignore": {
+        "mode": "100644",
+        "git_blob": "115571926ba1cde57f32a71ae69e7c3ae4fbe1dd",
+        "sha256": "90233e8788624c0605b4d6da3bc4794ed95b51784a609d609177591d0366c734",
+        "size": 2995
+      },
+      "runtime/distribution-files.json": {
+        "mode": "100644",
+        "git_blob": "ac6c147c73f49b0e9f06fc37bd5e7fef578634b3",
+        "sha256": "161c6728ac07918c2116f7b57e98719e620d41756f332af5a2e3826a4d764639",
+        "size": 86903
+      },
+      "runtime/tools/repository_layout/manifest.py": {
+        "mode": "100644",
+        "git_blob": "7afccc6b4f871f3d7bc5d7e7a4872201038c04df",
+        "sha256": "785d2dfaf8c1833661343b78aabee3520108399068ea5d2f2923c91706f3247e",
+        "size": 18415
+      },
+      "runtime/tests/unit/test_distribution_layout.py": {
+        "mode": "100644",
+        "git_blob": "9652e641e5d2e5af2931ad1fd653bf9292dfb3ad",
+        "sha256": "39df5ae8e60f94a3bea05c9a036a37781e280d9557fb510a7cf8a7b64e6e15d4",
+        "size": 7984
+      },
+      "runtime/sim/robotis_omx/scene/omx_table_layout.usda": {
+        "mode": "100644",
+        "git_blob": "03e51ba1a4fe1d27afe0700b489abe6874a78c5b",
+        "sha256": "0267cdf4f34a21fd4fedf8de9973fc010a4573f65fb07c72f709b0eedd4150a0",
+        "size": 34348
+      },
+      "runtime/sim/robotis_omx/tools/build_table_layout_scene.py": {
+        "mode": "100755",
+        "git_blob": "c911bdef5406b0e22a6c8550f75e9505cecc24f2",
+        "sha256": "48c0f0bb639976dc63f92d971da4b531c0e5eeaafcc402e8bdd987b3b1ca558d",
+        "size": 23315
+      }
+    },
+    "additions": {
+      "runtime/tests/unit/test_external_asset_layout.py": {
+        "destination": "runtime/tests/unit/test_external_asset_layout.py",
+        "disposition": "keep",
+        "reason": "Task10 explicit source-only validation test",
+        "distribution": "sdist",
+        "mode": "100644",
+        "git_blob": "509b5ce222d29536288580e90d7e672e0cd12b00",
+        "sha256": "3b8002e5410f6f6b9e57b6d51b0f2fc40ab192011cdcca3656a899a2cf3af19f",
+        "size": 11139
+      }
+    },
+    "native_usd": {
+      "receipt": "task10-native-usd.json",
+      "sha256": "a521d91f2464d791d9aabb00caa036187ac57a39d7269d7e7c3c11994872cc65"
+    },
+    "native_ros": {
+      "receipt": "task10-native-ros-shell-fixed.json",
+      "sha256": "c892e7ff4eb7f9425e62ffe94478345add412792ec61939e3741e0d2bd06d8b0"
+    },
+    "retirement": {
+      "receipt": "task10-retirement-identity.json",
+      "sha256": "7d65d6c4b54fbe658efbb47d28ff0654ada249d2f2983060c3233650f0e8b4f3"
+    },
+    "ros_sources": {
+      "runtime/ros/atr_specimen_pose_tracker/atr_specimen_pose_tracker/__init__.py": {
+        "mode": "100644",
+        "git_blob": "703899981a53a3c345dbf6bb9a4f4d0fb9b38d73",
+        "sha256": "09ec0ae73f9aafd5daf8ecc4ae7708a879edf79728ab9399bee6ce9f39c2f857",
+        "size": 54
+      },
+      "runtime/ros/atr_specimen_pose_tracker/atr_specimen_pose_tracker/specimen_pose_node.py": {
+        "mode": "100644",
+        "git_blob": "89532ee6e45d3e0e459b7c792f5b60bd56b2bcea",
+        "sha256": "ca3336b1f5391ca17e8c93f613429bd7003306df214fc891fde428da74575348",
+        "size": 14243
+      },
+      "runtime/ros/atr_specimen_pose_tracker/package.xml": {
+        "mode": "100644",
+        "git_blob": "649a00e5754ed0954e252a20e1ecf2261f3f442e",
+        "sha256": "cadae13e3576ee050c2eecbe05f9ec40007851ec8fa9bf34defe686ffef08bb2",
+        "size": 569
+      },
+      "runtime/ros/atr_specimen_pose_tracker/resource/atr_specimen_pose_tracker": {
+        "mode": "100644",
+        "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0
+      },
+      "runtime/ros/atr_specimen_pose_tracker/setup.cfg": {
+        "mode": "100644",
+        "git_blob": "3c0334b8385d63ac91f1dc935677747db53a824c",
+        "sha256": "6c4ba6c036d0ff2d98d201d6b8694245b159a8ec3668ec0b03055c4f8780cb42",
+        "size": 120
+      },
+      "runtime/ros/atr_specimen_pose_tracker/setup.py": {
+        "mode": "100644",
+        "git_blob": "f24801fb3ee4d2a25f524ee3a0402dfdffd52fdc",
+        "sha256": "fd70db7eca6d1f1506d5fb144e25fd9e37c7bf2dbcc9823201e4457f8dcb1070",
+        "size": 654
+      }
+    },
+    "dependency_provenance": {
+      "ros_manifest_sha256": "420acd7a983a245b33c91d748a27caae8fba7ccca2c30c25e85ea49290eab7b7",
+      "usd_wheel_sha256": "59a3b8ef4bc545c76059f7efc5fec94023e0818c5a714fae40f8e0411de79db5",
+      "usd_staged_manifest_sha256": "b548dfa813d72b05c42bccf87a5cabfd54d8529f74451c835866c2a4e29ab9fb"
+    },
+    "owned_reference_changes": [
+      {
+        "path": "runtime/sim/robotis_omx/scene/omx_table_layout.usda",
+        "before_sha256": "499e707721b376ffd91f49901417d27ebd6b0c606e72210aed4f292969055054",
+        "after_sha256": "0267cdf4f34a21fd4fedf8de9973fc010a4573f65fb07c72f709b0eedd4150a0",
+        "fields": {
+          "/World/Materials/desk_redwood_textured/WoodTexture.inputs:file": "./Textures/redwood_table_grain.png",
+          "/World/Robot:references": "../omx/omx.usda"
+        },
+        "preservation": "Only two authored asset values changed; all other bytes including provenance unchanged"
+      },
+      {
+        "path": "runtime/sim/robotis_omx/tools/build_table_layout_scene.py",
+        "before_sha256": "0753b7750cce4b5caaa2d8dc515a61eb27f0c2f2e8a62af2240fca07088d5fcc",
+        "after_sha256": "48c0f0bb639976dc63f92d971da4b531c0e5eeaafcc402e8bdd987b3b1ca558d",
+        "expression": "ROOT = Path(__file__).resolve().parents[1]",
+        "preservation": "Only owned ROOT expression changed; generator not executed"
+      }
+    ]
   }
 }

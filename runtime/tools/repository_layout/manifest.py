@@ -5,7 +5,9 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 import subprocess
 
@@ -139,6 +141,158 @@ def build_manifest(repository_root: Path, revision: str) -> dict:
 def _safe_relative(value: object) -> bool:
     return isinstance(value, str) and bool(value) and "\\" not in value and not value.startswith("/") and all(
         part not in {"", ".", ".."} for part in value.split("/"))
+
+
+def _asset_target(root: Path, parts: list[str]) -> tuple[str | None, str]:
+    """Resolve contained components only; never stat an escaped link target."""
+    current: list[str] = []
+    pending = list(parts)
+    links = 0
+    while pending:
+        part = pending.pop(0)
+        if part in {'', '.'}:
+            continue
+        if part == '..':
+            if not current:
+                return None, 'escaping'
+            current.pop()
+            continue
+        path = root.joinpath(*current, part)
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            current.append(part)
+            continue
+        if stat.S_ISLNK(mode):
+            links += 1
+            target = os.readlink(path)
+            if links > 40 or target.startswith('/') or '\\' in target:
+                return None, 'escaping'
+            pending = target.split('/') + pending
+        else:
+            current.append(part)
+    return '/'.join(current), 'contained'
+
+
+def audit_asset_references(repository_root: Path, manifest: dict) -> dict:
+    """Audit declared destination layers through Sdf, without composing/executing.
+
+    Exact external declarations are reported without resolving or reading them.
+    Frozen generated identities remain separate from additive rebuild metadata.
+    Missing USD tooling is an error, never an empty successful inspection.
+    """
+    result = {key: [] for key in ('owned', 'external', 'missing', 'escaping', 'generated_outputs', 'errors')}
+    if (not isinstance(manifest, dict)
+            or any(not isinstance(manifest.get(key, {}), dict)
+                   for key in ('entries', 'additions', 'generated_output_rebuilds'))
+            or not isinstance(manifest.get('external_asset_references', []), list)):
+        result['errors'].append({'reason': 'Invalid asset manifest metadata'})
+        return result
+    if any(not isinstance(row, dict) for key in ('entries', 'additions', 'generated_output_rebuilds')
+           for row in manifest.get(key, {}).values()):
+        result['errors'].append({'reason': 'Invalid asset manifest row'})
+        return result
+    root = Path(repository_root).resolve()
+    rows = {}
+    for section in ('entries', 'additions'):
+        for source, row in manifest.get(section, {}).items():
+            destination = row.get('destination')
+            if not _safe_relative(destination) or destination in rows:
+                result['errors'].append({'source': source, 'reason': 'Invalid or duplicate destination'})
+                continue
+            rows[destination] = row
+            if row.get('disposition') == 'regenerated_build_output':
+                metadata = {**row, **manifest.get('generated_output_rebuilds', {}).get(source, {})}
+                argv = metadata.get('rebuild_command')
+                if (not _safe_relative(metadata.get('owning_source')) or not isinstance(argv, list)
+                        or not argv or not all(isinstance(v, str) and v for v in argv)
+                        or not isinstance(metadata.get('rebuild_profile'), str) or not metadata['rebuild_profile']):
+                    result['errors'].append({'source': source, 'reason': 'Incomplete generated rebuild metadata'})
+                else:
+                    result['generated_outputs'].append({'source': source, 'destination': destination,
+                        **{key: metadata[key] for key in ('owning_source', 'rebuild_command', 'rebuild_profile')},
+                        'source_retirement': metadata.get('source_retirement')})
+    external = {}
+    for declaration in manifest.get('external_asset_references', []):
+        if (not isinstance(declaration, dict) or not isinstance(declaration.get('layer'), str)
+                or declaration['layer'] not in rows
+                or not isinstance(declaration.get('reference'), str) or not declaration['reference']
+                or not isinstance(declaration.get('configuration'), str) or not declaration['configuration']):
+            result['errors'].append({'reason': 'Invalid external asset declaration'})
+            continue
+        key = declaration['layer'], declaration['reference']
+        if key in external:
+            result['errors'].append({'layer': key[0], 'reason': 'Duplicate external asset declaration'})
+        external[key] = declaration['configuration']
+    layers = {name: row for name, row in rows.items() if Path(name).suffix.lower() in {'.usd', '.usda', '.usdc'}
+              and row.get('disposition') != 'regenerated_build_output'}
+    if not layers:
+        return result
+    try:
+        from pxr import Sdf
+    except ImportError as exc:
+        result['errors'].append({'reason': 'USD inspection unavailable', 'detail': str(exc)})
+        return result
+
+    def classify(name, field, path, reference, **context):
+        if not reference:  # An internal composition arc has no file dependency.
+            return
+        record = dict(layer=name, field=field, spec_path=str(path), reference=reference, target=None, **context)
+        if (name, reference) in external:
+            result['external'].append({**record, 'configuration': external[name, reference]})
+            return
+        if reference.startswith('/') or '\\' in reference or re.match(r'^[A-Za-z][A-Za-z0-9+.-]*:', reference):
+            result['escaping'].append(record)
+            return
+        target, status = _asset_target(root, [*PurePosixPath(name).parent.parts, *reference.split('/')])
+        record['target'] = target
+        if status == 'escaping':
+            result['escaping'].append(record)
+        elif target not in rows or rows[target].get('disposition') == 'regenerated_build_output':
+            result['missing'].append({**record, 'reason': 'unlisted'})
+        elif not (root / target).is_file():
+            result['missing'].append({**record, 'reason': 'absent'})
+        else:
+            result['owned'].append(record)
+
+    for name, row in sorted(layers.items()):
+        try:
+            target, status = _asset_target(root, name.split('/'))
+            if status != 'contained' or target != name or row.get('mode') not in {'100644', '100755'}:
+                raise ValueError('Layer must be a declared regular destination, not a link')
+            layer = Sdf.Layer.FindOrOpen(str(root / name))
+            if layer is None:
+                raise ValueError('Unreadable USD layer')
+            for index, reference in enumerate(layer.subLayerPaths):
+                classify(name, 'subLayers', '/', reference, list='explicitItems', index=index)
+
+            def visit(path):
+                spec = layer.GetObjectAtPath(path)
+                if spec is None:
+                    return
+                keys = set(spec.ListInfoKeys())
+                for field in ('references', 'payload'):
+                    if field in keys:
+                        value = spec.GetInfo(field)
+                        for operation in ('explicitItems', 'prependedItems', 'appendedItems', 'addedItems', 'deletedItems', 'orderedItems'):
+                            for index, item in enumerate(getattr(value, operation, ())):
+                                classify(name, field, path, item.assetPath, list=operation, index=index, prim_path=str(item.primPath))
+                if isinstance(spec, Sdf.AttributeSpec) and spec.typeName in (Sdf.ValueTypeNames.Asset, Sdf.ValueTypeNames.AssetArray):
+                    values = [('default', None, spec.default)] if spec.HasInfo('default') else []
+                    values += [('timeSamples', time, layer.QueryTimeSample(path, time)) for time in layer.ListTimeSamplesForPath(path)]
+                    for field, time, value in values:
+                        assets = [value] if isinstance(value, Sdf.AssetPath) else value
+                        if assets is None or isinstance(assets, Sdf.ValueBlock):
+                            continue
+                        for index, asset in enumerate(assets):
+                            classify(name, field, path, asset.path, index=index, time=time)
+
+            layer.Traverse(Sdf.Path.absoluteRootPath, visit)
+        except Exception as exc:
+            result['errors'].append({'layer': name, 'reason': str(exc)})
+    for records in result.values():
+        records.sort(key=lambda record: json.dumps(record, sort_keys=True))
+    return result
 
 
 def validate_manifest(manifest: dict) -> list[str]:

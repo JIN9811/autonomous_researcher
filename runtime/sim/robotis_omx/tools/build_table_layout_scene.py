@@ -9,7 +9,7 @@ try:
 except Exception:
     PhysxSchema = None
 
-ROOT = Path('/home/jin/autonomous_researcher/sim/robotis_omx')
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'scene' / 'omx_table_layout.usda'
 ROBOT_USD = ROOT / 'omx' / 'omx.usda'
 TEXTURE_DIR = ROOT / 'scene' / 'Textures'
