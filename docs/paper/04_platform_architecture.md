@@ -50,9 +50,8 @@ supersedes: []
 
 The ATR platform exposes extension surfaces for agent modules, execution
 graphs, model backends, device bridges, durable knowledge, and operator
-workspaces. This is the secondary contribution: it matters because it enables
-new laboratory capabilities to enter the closed-loop system through declared
-contracts instead of bypassing its gates and evidence paths.
+workspaces. This secondary contribution lets new laboratory capabilities enter
+the closed loop through declared contracts, preserving its gates and evidence paths.
 
 ## Scope
 
@@ -147,8 +146,8 @@ reliability metrics.
 
 Mutation-capable workspaces must make review and apply distinct where the
 underlying service requires it. The current Knowledge workspace exposes shared
-Wiki, scoped Memory, Source Library, Agent Delivery and Ontology. Source intake preserves originals and
-publishes derived notes only through validated agent-local tools; retrieval
+Wiki, scoped Memory, Source Library, Agent Delivery and Ontology. Source intake
+preserves originals and publishes derived notes only through validated agent-local tools; retrieval
 retains source citations and caller scope. Ontology is the shared vocabulary,
 not an active graph database. See the [Knowledge Reference](../agents/knowledge_agent.md)
 and [Wiki and Memory](../knowledge/wiki_memory.md). This current UI clarification
@@ -161,8 +160,8 @@ is based on `web/templates/knowledge.html` at `dd0d772`, not a new browser test.
 **Figure 6 — Deployment topology.** The primary application, orchestrator,
 agents, evidence stores, and local workspaces may coordinate remote Windows
 workers, device bridges and model services. Knowledge records and source
-curation live on the primary host rather than requiring graph synchronization. Dashed
-links are deployment options, not proof that every combination has been
+curation live on the primary host rather than requiring graph synchronization.
+Dashed links are deployment options, not proof that every combination has been
 validated.
 
 Deployment boundaries matter to claims. A local test backend, remote API,

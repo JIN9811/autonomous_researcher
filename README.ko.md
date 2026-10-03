@@ -138,7 +138,7 @@ Orchestration Plan을 통해 결과를 조율합니다. 전문 에이전트는 �
 순서를 정의하는 대신, 계획에 필요한 기능을 제공합니다.
 
 <p align="center">
-  <img src="docs/assets/presentation/framework-overview.webp" alt="연구 의도, 구성 가능한 Orchestration Plan, 전문 에이전트 간 작업과 결과 교환" width="70%">
+  <img src="docs/assets/presentation/framework-overview.webp" alt="연구 의도, 구성 가능한 Orchestration Plan, 전문 에이전트 간 작업과 결과 교환" width="100%">
 </p>
 
 - 작업 라우팅과 전문 에이전트 조율 — [시스템 아키텍처](docs/paper/02_system_architecture.md).

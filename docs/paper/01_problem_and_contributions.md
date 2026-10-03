@@ -55,8 +55,8 @@ levels. A VLA-enabled robot arm connects physical stages, complementing API
 and desktop-controlled instruments.
 
 The novelty is the system-level combination: simple, reusable hardware with
-advanced software coordination. Reduced replacement and bespoke-fixture needs
-are design advantages, not the sole contribution. Compression testing is one
+advanced software coordination. Reducing the need for equipment replacement and
+bespoke fixtures is a design advantage, not the sole contribution. Compression testing is one
 application, not a platform constraint.
 
 ## Scope
@@ -159,8 +159,8 @@ work section requires source-specific scientific comparison.
 - A browser workspace does not prove physical-device execution.
 - Documentation validation does not establish experimental validity.
 
-These boundaries are deliberate: they make later evaluation results additive
-rather than requiring the thesis to be rewritten around overbroad claims.
+These boundaries let later evaluation extend the thesis without first
+correcting overbroad claims.
 
 ## Limitations and Known Gaps
 

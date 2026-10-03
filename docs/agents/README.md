@@ -35,24 +35,19 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 ## Summary
 
-This index is the canonical entry point for the ten executable Autonomous
-Researcher (ATR) Framework agents used by AX4LAB. Each Reference explains what the agent
-actually owns, what it does not own, its orchestration-plan handoffs, data contracts,
-internal steps, APIs, tools and external connections, state and evidence,
-runtime modes, safety gates, error recovery, operator surfaces, and current
-verification boundary.
+This index covers the ten executable ATR agents used by AX4LAB. Each reference
+describes an agent's responsibilities, handoffs, interfaces, execution,
+evidence, recovery, and verification scope.
 
-The individual agent References retain their declared verification baselines.
-The [2026-09-28 code/documentation audit](../maintenance/code_documentation_audit_20260928.md)
-adds current main-code checks and the retained fifteen-iteration campaign;
-earlier test-local "no hardware run" statements do not describe the entire
-project's current evidence inventory. RPT is implemented in a separate
-development worktree and is not an additional stage in this main-loop inventory.
-The shared [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
-Reference describes the newer run/loop/agent/invocation storage contract,
-including failed/cancelled calls, file snapshots, and saved-loop GUI access.
-The [Modularity Reference](../modularity.md) explains core versus specialist
-ownership, Package composition, Device Bridges, and configuration lifecycle.
+Verification is dated per reference. The
+[2026-09-28 audit](../maintenance/code_documentation_audit_20260928.md) adds
+main-code checks and the retained fifteen-iteration campaign; earlier
+"no hardware run" notes apply to those tests, not the whole project. RPT remains
+in a separate development worktree, outside this main-loop inventory.
+[Loop Artifact Archiving](../runtime/loop_artifact_archiving.md) covers
+run/loop/agent/invocation storage, including failed and cancelled calls, file
+snapshots, and saved-loop access. [Modularity](../modularity.md) covers module
+responsibilities, packages, bridges, and configuration lifecycle.
 
 ## Status at a Glance
 
@@ -87,9 +82,9 @@ five-area view and module-owned Live report. Its package has no Device Bridge;
 LHS, BoTorch and benchmark computation remain existing referenced services.
 
 The [Vision Reference](vision_agent.md#installed-package-and-executable-structure)
-documents the installed package, composite observation operation and shared
-five-area IDE/document projection. Its new validation uses virtual equipment and
-registered model calls; it does not add physical validation claims.
+covers its installed package, composite observation operation, and five-area
+IDE/document view. Its validation uses virtual equipment and registered model
+calls, not physical trials.
 
 Start with the role overview and available status summary, then read the
 responsibility map, handoffs, decision/tools, API connections, and evidence.
@@ -147,8 +142,7 @@ implementations remain authoritative.
 | [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Owner](../../agents/bo/agent.py) · [Code module](../../agents/bo/module.py) · [Execution graph](../../graphs/modules/bo/module.yaml) · [Agent Package](../../packages/agents/bo/package.yaml) · [Control areas](assets/figures/bo_control_areas.svg) |
 | [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Core source](../../agents/core/guardian/agent.py) · [Plan query](../../agents/core/guardian/plan.py) · [Module](../../graphs/modules/guardian/module.yaml) |
 
-The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
-agents without repeating full implementation prose.
+The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten agents.
 
 <details>
 <summary>Detailed figure index</summary>
@@ -298,9 +292,8 @@ executable code and checked-in configuration
 -> legacy agent guidelines
 ```
 
-The References describe current contracts; they do not prove correctness or
-scientific value. If a Reference conflicts with code, code is current and the
-document must be corrected.
+References describe implementation, not proof of correctness or scientific
+value. If code and a reference disagree, correct the reference.
 
 ## Legacy and Domain-Specific Detail
 

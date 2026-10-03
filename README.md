@@ -139,7 +139,7 @@ their results through a configurable Orchestration Plan. Specialist agents
 contribute capabilities to that plan rather than defining one fixed sequence.
 
 <p align="center">
-  <img src="docs/assets/presentation/framework-overview.webp" alt="Research intent, configurable Orchestration Plan, and specialist-agent task/result exchange" width="70%">
+  <img src="docs/assets/presentation/framework-overview.webp" alt="Research intent, configurable Orchestration Plan, and specialist-agent task/result exchange" width="100%">
 </p>
 
 - Task routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).

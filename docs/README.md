@@ -31,8 +31,8 @@ supersedes: []
 
 # Documentation Index
 
-Use this index to choose a reading path. Detailed behavior belongs in the linked
-owner reference, not in a second copy of the same instructions here.
+Use this index to find the research narrative, operating guides, and technical
+references. Each linked reference explains its own part of the system in detail.
 
 | Goal | Start here |
 |---|---|
@@ -98,7 +98,9 @@ implementation and execution facts. A reference can explain those facts but
 cannot override them. Follow the [standard's authority rules](standards/documentation_standard.md)
 when documents disagree; do not treat a past successful run as current device readiness.
 
-## 2. Documents by Domain: 실제 런타임 구조 요약
+<a id="2-documents-by-domain-실제-런타임-구조-요약"></a>
+
+## 2. Documents by Domain: Runtime Structure
 
 | Domain | Maintained owner documents |
 |---|---|
@@ -107,7 +109,7 @@ when documents disagree; do not treat a past successful run as current device re
 | Models and credentials | [Agent program baseline](runtime/agent_program_baseline.md), [API keys](runtime/api_keys.md) |
 | Safety and recovery evidence | [Guardian](runtime/guardian_graphwide_safety.md), [hardware alerts](gui/hardware_alert_lifecycle.md) |
 | Run persistence and playback | [Loop artifacts](runtime/loop_artifact_archiving.md), [read-only Replay](gui/run_replay.md) |
-| Knowledge | [Wiki and memory](knowledge/wiki_memory.md), [operations](knowledge/markdown_memory_operations.ko.md), [Source Library](knowledge/manual_rag_knowledge.ko.md), [runtime reference boundary](knowledge/runtime_reference_safety.md), [publication](knowledge/publication.md) |
+| Knowledge | [Wiki and memory](knowledge/wiki_memory.md), [operations (Korean)](knowledge/markdown_memory_operations.ko.md), [Source Library (Korean)](knowledge/manual_rag_knowledge.ko.md), [runtime reference boundary](knowledge/runtime_reference_safety.md), [publication](knowledge/publication.md) |
 | Platform explanations | [English AX4LAB Wiki](knowledge/wiki/platform-overview.md) |
 
 Test mode is not a universal guarantee of no physical effects. Installed-printer
@@ -117,7 +119,9 @@ and physical-printing scenarios have different boundaries; use the
 Package loading, module application, graph activation and run execution are
 separate actions; see [modularity](modularity.md).
 
-## 3. 페이지별 문서 맵
+<a id="3-페이지별-문서-맵"></a>
+
+## 3. Documentation by Page
 
 The [screen reference](gui/visual_structure.md) contains the screenshot tour.
 The table below points to operating instructions, not archived design proposals.
@@ -136,7 +140,9 @@ The table below points to operating instructions, not archived design proposals.
 | BO | `/bo` | [BO reference](agents/bo_agent.md) |
 | Windows Equipment | `/equipment/windows` | [Windows equipment guide](hardware/windows_pyautogui_equipment_agent_guideline.md) |
 
-## 4. 에이전트별 문서 맵
+<a id="4-에이전트별-문서-맵"></a>
+
+## 4. Documentation by Agent
 
 The [agent index](agents/README.md) owns the complete ten-agent inventory and
 figure navigation; the [connection matrix](agents/agent_api_connection_matrix.md)
@@ -151,7 +157,9 @@ compares their APIs, effects and evidence.
 Legacy `.txt` guides are not interchangeable with these current references.
 Some are still consumed by runtime code; consult their explicit scope before editing.
 
-## 4.1 디바이스 브릿지별 문서 맵
+<a id="41-디바이스-브릿지별-문서-맵"></a>
+
+## 4.1 Documentation by Device Bridge
 
 [Seven canonical capability references](device_bridges/README.md) cover Printer
 Fleet, Bambu, Prusa, LeRobot, Windows PyAutoGUI, UTM Vision, and simulators.
@@ -163,7 +171,9 @@ Printer setup belongs in the [3DP tutorial](tutorials/device_workspace_3dp_usage
 the [pre-ejection cleanup guide](device_bridges/x2d_pre_eject_cleanup.md) explains
 the specific tested nozzle sequence. Neither document replaces a live readiness check.
 
-## 5. 폴더별 책임
+<a id="5-폴더별-책임"></a>
+
+## 5. Repository Folder Responsibilities
 
 | Location | Responsibility |
 |---|---|
@@ -175,7 +185,9 @@ the specific tested nozzle sequence. Neither document replaces a live readiness 
 | `tests/`, `scripts/`, `install/` | Regression checks, operational utilities and installation |
 | `docs/`, `image/` | Documentation, evidence, figures and presentation provenance |
 
-## 6. 설명용 문서 폴더
+<a id="6-설명용-문서-폴더"></a>
+
+## 6. Documentation Folders
 
 Current owner documentation lives in `runtime/`, `gui/`, `agents/`,
 `device_bridges/`, `hardware/` and `knowledge/`. Start-to-finish procedures
@@ -185,14 +197,18 @@ live in `tutorials/`; research narrative and dated evidence live in `paper/`.
 `superpowers/` contains work plans/designs with explicit lifecycle;
 `oldversion/` preserves historical material.
 
-## 7. 이전 개발 자료
+<a id="7-이전-개발-자료"></a>
+
+## 7. Historical Development Material
 
 Use the [archive index](oldversion/README.md) only for development history.
 Older system prompts, UI packages, solver plans and screenshots are not current
 instructions. Local-only retired evidence is identified as unavailable to public
 readers rather than linked to nonexistent public paths.
 
-## 8. 문서 유지 규칙
+<a id="8-문서-유지-규칙"></a>
+
+## 8. Documentation Maintenance
 
 - Update the owning reference when its implementation changes, then review
   dependent tutorials, Wiki explanations and figures.

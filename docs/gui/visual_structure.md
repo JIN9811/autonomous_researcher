@@ -42,8 +42,8 @@ addresses, credentials and local paths are redacted where present.
 
 ## Scope
 
-This document explains where information and controls live, how the views relate,
-and which details belong in the corresponding specialist reference. It is not a
+This document locates information and controls, explains how views relate,
+and points to specialist references. It is not a
 new operating procedure, a hardware test, or proof that every visible status is
 fresh. The photographed session had completed its fifteenth cycle; some reports
 still expose missing or historical information. No experiment was started for

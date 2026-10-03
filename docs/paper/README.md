@@ -52,9 +52,10 @@ measurement identity and feed observations into subsequent design decisions.
 A retained campaign now provides fifteen completed Analysis observations with
 matching geometry, curves, metrics and BO records, audited without re-executing
 hardware. Earlier mixed-mode one-cycle demonstrations retain their distinct
-skipped-deposition scope. The extensible platform supports this system through modular
-interfaces and operator workspaces. The system places integration complexity in structured software rather than
-extensive hardware modification. Equipment reuse and VLA-enabled manipulation
+skipped-deposition scope. The extensible platform supports this system through
+modular interfaces and operator workspaces. The system places integration
+complexity in structured software rather than extensive hardware modification.
+Equipment reuse and VLA-enabled manipulation
 provide a route to lower equipment and fixture costs; comparative savings and
 scientific gains are not yet measured.
 
@@ -145,8 +146,8 @@ outputs, and hashes are recorded in the evidence package.
 
 ## Limitations and Known Gaps
 
-The repository contains historical and domain-specific documents outside this
-paper path. They remain useful but are not automatically paper evidence. The
+Historical and domain-specific documents outside this paper path remain useful
+but are not automatically paper evidence. The
 paper package now indexes a [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md),
 but not a complete public raw dataset, comparative benchmarks or independent
 per-cycle fabrication certification. An approved author list, venue-formatted

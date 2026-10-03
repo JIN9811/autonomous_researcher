@@ -58,14 +58,14 @@ record.
 ## Scope
 
 The current package includes repository inspection, documentation contract
-tests, a fifteen-observation archive audit, and retained supervised mixed-mode closed-loop records linked in
+tests, a fifteen-observation archive audit, and retained supervised mixed-mode
+closed-loop records linked in
 [Results](06_evaluation_and_results.md). Broader comparative campaigns remain
 evaluation work.
 
-The working-tree Orchestrator Setup contract also has a bounded verification
-record for next-new-run admission and provider-case aggregation. It belongs to
-the `test`/controlled-local boundary, not to this chapter's live-environment
-rows or a complete campaign result; see the
+The working-tree Orchestrator Setup verification covers next-new-run admission
+and provider-case aggregation in a `test`/controlled-local environment, not a
+live-environment row or complete campaign result; see the
 [runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
 
 The application setup combines existing instruments with VLA-enabled robot
@@ -177,7 +177,7 @@ Primary measures:
 - repeated physical actions after ambiguous timeout;
 - evidence completeness for denials and approvals.
 
-Presence of a gate in configuration is not included as a successful safety
+The presence of a gate in configuration does not count as a successful safety
 scenario.
 
 ## RQ4 Protocol: Contract-Preserving Extension

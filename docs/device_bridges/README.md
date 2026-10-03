@@ -40,11 +40,9 @@ instruments** through tools and Device Bridges. Agents own research decisions
 and task assessment; bridges adapt those requests to the selected equipment
 and return status, observations, and artifacts.
 
-The integration layer lets the framework reuse existing capabilities without
-embedding a particular printer protocol, robot process, or desktop workflow
-inside the research plan. Virtual devices use related integration boundaries,
-but are distinguished from physical equipment below. Analysis consumes measured
-data and has no active computation-device bridge.
+Bridges keep printer protocols, robot processes, and desktop workflows out of
+the research plan. Virtual devices use similar interfaces but remain distinct
+from physical equipment. Analysis consumes measurements without a computation-device bridge.
 
 ## Integration Architecture
 
@@ -66,9 +64,9 @@ Agent procedures call registered tools or shared runtime resources. Managers
 select providers where needed; the owning adapter executes the requested
 operation and exposes evidence for the agent's next decision.
 
-The [Modularity Reference](../modularity.md) explains why Package dependency
-links are composition metadata, while registered tools, gates, and the bridge
-remain the execution path. A package reference never grants direct device control.
+As [Modularity](../modularity.md) explains, package links declare dependencies;
+registered tools, gates, and bridges execute operations. A package reference
+does not grant device control.
 
 ![Specialist agents use tools and Device Bridges to connect robotics, API-controlled devices, and PC-operated instruments, receiving status, observations, and artifacts](assets/figures/device-bridge-overview.webp)
 
@@ -86,9 +84,8 @@ each communication protocol.
 | Native device control | Device APIs and provider protocols | Connection, artifact transfer, command dispatch and status reconciliation | Job/status responses and artifact identity |
 | Desktop workflow execution | Instrument software without a usable control API | Selected worker, deployed Flow/Skills and bounded GUI actions | Screenshots, step traces, execution records and acquired files |
 
-These are complementary routes. Observation services support physical tasks;
-Simulators provide explicitly labeled test
-responses. A successful API response alone does not establish task completion.
+These routes complement one another. Observation services support physical
+tasks; simulators return labeled test responses. API success alone is not task completion.
 
 ## Bridge Catalog
 
@@ -250,9 +247,8 @@ executable code and checked-in configuration
 -> time-bounded Evidence or legacy guideline
 ```
 
-A Reference describes observed implementation. It does not certify a device,
-protocol, safety control, or scientific result. When code conflicts with a
-Reference, code is current and the document has drift.
+A reference describes implementation; it does not certify hardware, safety,
+or scientific results. If code and a reference disagree, correct the reference.
 
 ## Legacy and Procedural Detail
 

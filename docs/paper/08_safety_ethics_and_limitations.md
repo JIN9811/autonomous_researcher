@@ -174,8 +174,8 @@ reporting unevaluated safety performance as a result.
 
 ## Limitations and Known Gaps
 
-Risk categories vary by laboratory and experiment. This chapter cannot enumerate
-every domain hazard. It also does not establish compliance with a specific
+Risks vary by laboratory and experiment; this chapter neither covers every
+domain hazard nor establishes compliance with a specific
 regulatory or institutional framework.
 
 ## Verification

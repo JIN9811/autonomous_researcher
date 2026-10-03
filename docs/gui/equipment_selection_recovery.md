@@ -1,6 +1,6 @@
 # Restart recovery at an unexecuted Equipment selection
 
-This operator-requested recovery preserves the current run and completed fabrication/robot transfer. It is not an automatic retry policy or a way to repeat device commands.
+This operator-requested recovery preserves the current run, completed fabrication, and completed robot transfer. It is not an automatic retry policy or a way to repeat device commands.
 
 ## Eligibility
 

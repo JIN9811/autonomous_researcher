@@ -52,9 +52,9 @@ supersedes: []
 
 ## Summary
 
-This appendix connects the paper abstraction to repository interface families.
-It is a map, not a generated API specification. Exact payload fields remain in
-code schemas, manifests, and endpoint responses. The canonical per-agent role,
+This appendix maps paper components to repository interface families; it is not
+a generated API specification. Exact payload fields remain in code schemas,
+manifests, and endpoint responses. The canonical per-agent role,
 API, connection, effect, and recovery contracts are maintained in the
 [Agent Reference Index](../agents/README.md) and compared in the
 [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md);
@@ -135,7 +135,7 @@ is controlled/local and does not establish a device or whole-cycle interface res
 
 Failures should be machine-identifiable and operator-readable. The runtime must
 distinguish invalid input, unavailable capability, denied action, timeout with
-known no-effect, timeout with uncertain effect, external failure, evidence
+confirmed absence of an external effect, timeout with uncertain effect, external failure, evidence
 persistence failure, and terminal policy stop. Collapsing these into one error
 prevents safe resume and meaningful evaluation.
 

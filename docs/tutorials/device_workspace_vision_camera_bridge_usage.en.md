@@ -32,7 +32,7 @@ releasing a camera owned by an active robot session.
 Open **Main → Device Workspaces → Vision**, or `/device-bridge/vision-utm`.
 The 1920 × 1080 figures were captured read-only on 29 September 2026; camera capture,
 ROS commands and configuration saves were not executed for documentation.
-Blank fields/panels are real unqueried state, not a successful setup example.
+Blank fields and panels reflect a state that has not been queried, not a successful setup example.
 
 ## Step 1 — Read the current camera configuration
 
@@ -83,9 +83,9 @@ them during a working run merely to refresh the browser.
 4. Click **Stop Live** when you finish observing.
 
 **Expected:** a current preview from the configured topic.
-Preview FPS requests browser delivery rate; it does not raise the camera's acquisition
-rate. If the picture is slow, compare source/frame freshness before increasing preview
-FPS. Check the actual camera/USB/ROS stream when the source itself is slow.
+Preview FPS requests a browser delivery rate, not a higher camera acquisition rate.
+Before increasing it, check source/frame freshness. If the source is slow, check
+the camera/USB/ROS stream.
 See [UTM ROS bridge](../hardware/utm_ros_vision_runtime_bridge.md).
 
 ## Step 5 — Use pose diagnostics for their stated purpose
@@ -103,7 +103,7 @@ Select **Specimen Pose Test**.
 **Expected:** the result identifies its source/mode and specimen. A virtual result
 does not prove detection in a real scene. A D405 smoke test is not a replacement for
 the loop's chosen camera.
-**Release VLA Camera** can disrupt an owner session; do not press it while inference
+**Release VLA Camera** can disrupt the session using the camera; do not press it while inference
 is active simply because this panel says no result.
 
 ## Step 6 — Inspect the run's actual verification
@@ -144,6 +144,6 @@ Do not recalibrate a working experiment as part of ordinary page navigation.
 | Slow preview | Actual acquisition/ROS rate versus preview delivery rate |
 | Pose test passes but VIS waits | Test mode/source versus the required run-bound verification |
 
-Complete this exercise only when configuration persistence and a fresh authorized
-frame have been checked in your own environment. The documentation captures themselves
-do not satisfy those checks. Continue with [operator walkthroughs](user_manual.en.md).
+To complete this exercise, verify saved settings and a fresh authorized frame in your
+own environment; documentation screenshots do not count. Continue with
+[operator walkthroughs](user_manual.en.md).

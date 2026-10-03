@@ -154,7 +154,7 @@ AUTONOMOUS_BACKEND=vllm
 OPENAI_API_KEY=<your-api-key>
 ```
 
-Then ATR tries the active local backend and its model fallback first; OpenAI is
+ATR then tries the active local backend and its model fallback first; OpenAI is
 used only after those fail.
 
 ### 4. Start the Server on Windows
@@ -229,7 +229,7 @@ training, and rollout. Hardware actions still require live confirmation gates.
 
 ### 6. Optional Windows Equipment Bridge
 
-If this same or another Windows PC controls UTM software through PyAutoGUI,
+If this Windows PC or another Windows PC controls UTM software through PyAutoGUI,
 copy the complete bridge package and install it in an interactive Windows session:
 
 ```powershell
@@ -311,9 +311,9 @@ Stop the server from any terminal:
 atr down
 ```
 
-`atr down` targets this checkout's `app.serve` process. During clean shutdown, the server releases LeRobot live subprocesses tied to this checkout so stale teleoperation/recording jobs do not keep cameras or serial ports open.
+`atr down` stops this checkout's `app.serve` process. Clean shutdown also releases its LeRobot live subprocesses so stale teleoperation/recording jobs do not hold cameras or serial ports open.
 
-Use `atr restart` to run the same `down` command followed by `up`. If `down` fails, it does not start a replacement. Existing shutdown/cleanup behavior and `ATR_DOWN_FORCE` apply unchanged; the restarted server runs in the foreground like `atr up`. Finish active work before using it.
+`atr restart` runs `down`, then `up` only if shutdown succeeds. Shutdown/cleanup behavior and `ATR_DOWN_FORCE` are unchanged; the server runs in the foreground like `atr up`. Finish active work first.
 
 ## CLI Help
 
@@ -325,7 +325,7 @@ atr
 
 ## Common Commands
 
-Open GUI pages:
+GUI shortcuts and server shutdown:
 
 ```bash
 atr gui
@@ -397,7 +397,7 @@ atr graph save-yaml atr_closed_loop /tmp/atr_closed_loop.yaml --no-activate
 atr graph run atr_closed_loop test "candidate route smoke"
 ```
 
-Runtime graph commands call the same `/api/graphs` endpoints used by the Runtime IDE. A graph edited in the browser is visible from `atr graph show`; a graph saved from `atr graph save-yaml` is versioned and reflected in the browser after reload. `save-yaml` validates, stores a version under `memory/runtime_graph_versions/<graph-id>/`, and activates the graph unless `--no-activate` is passed.
+Runtime graph commands share the Runtime IDE's `/api/graphs` endpoints. Browser edits appear in `atr graph show`; `save-yaml` changes appear in the browser after reload. `save-yaml` validates, stores a version under `memory/runtime_graph_versions/<graph-id>/`, and activates the graph unless `--no-activate` is passed.
 
 Runtime module management:
 
@@ -416,7 +416,7 @@ atr module register-generated my_internal_module
 atr module create ./my_internal_module.py my_internal_module "My Internal Module"
 ```
 
-Module management commands call the same `/api/modules` endpoints used by the Module Management Tool. `load` and `unload` only change the management workspace state; they do not delete files or modify the executable graph. `save-yaml` validates the module payload, performs the non-device module dry-run, saves a version under `memory/module_versions/<module-id>/`, and activates the YAML unless `--no-activate` is passed. `register-generated` is the explicit approval step for Module Designer output: it statically checks `handler.py`, flips the module handler to `module.generated_adapter`, removes staging-only `runtime.step_complete` internal-step handlers, records a version, and enables runtime execution through the generated adapter wrapper.
+Module management commands share the Module Management Tool's `/api/modules` endpoints. `load` and `unload` change only workspace state, not files or the executable graph. `save-yaml` validates the payload, runs the non-device module dry-run, saves a version under `memory/module_versions/<module-id>/`, and activates the YAML unless `--no-activate` is passed. `register-generated` explicitly approves Module Designer output: it statically checks `handler.py`, switches the handler to `module.generated_adapter`, removes staging-only `runtime.step_complete` internal-step handlers, records a version, and enables execution through the generated adapter wrapper.
 
 `atr module create` sends the Python file to the same `/api/modules` Module
 Designer endpoint used by the GUI. The active backend's `module_designer` route
@@ -494,7 +494,7 @@ atr doctor
 
 If `atr doctor` reports that only the wrapper exists but Bambu Studio itself is
 missing, install Bambu Studio or set `BAMBU_STUDIO_EXECUTABLE`. The 3DP GUI can
-still run MQTT/status checks without slicing, but it cannot honestly generate a
+still run MQTT/status checks without slicing, but it cannot generate a
 new Bambu-native sliced artifact until the CLI path resolves.
 
 ## PrusaSlicer Docker Wrapper

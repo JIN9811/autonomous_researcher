@@ -1,21 +1,21 @@
 # Windows PyAutoGUI Bridge 설치 및 운영 가이드
 
-현재 권위 문서는 [Windows Bridge README](../../Pyautogui_server_for_window/README.md)와
-[Windows Bridge USAGE](../../Pyautogui_server_for_window/docs/USAGE.md)이며 이 문서는 ATR 시스템 관점의 설치 요약입니다.
+현재 기준 문서는 [Windows Bridge README](../../Pyautogui_server_for_window/README.md)와
+[Windows Bridge USAGE](../../Pyautogui_server_for_window/docs/USAGE.md)입니다. 이 문서는 ATR 시스템 관점에서 설치 절차를 요약합니다.
 
 ## 설치
 
 권장 방식은 Windows x64 포터블 폴더입니다.
 
-1. 전체 release 폴더를 Windows 로컬 디스크에 복사
+1. 전체 릴리스 폴더를 Windows 로컬 디스크에 복사
 2. `START_PORTABLE_BRIDGE.cmd` 실행
-3. 최초 folder-local runtime 구성 완료 대기
+3. 최초 실행 시 폴더 내부 런타임 구성이 완료될 때까지 대기
 4. 브라우저 Console 확인
 5. Linux ATR에서 4자리 코드로 Pair & Save
 
-표준 설치는 전체 package를 유지할 폴더에 복사한 뒤 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 현재 installer는 그 package 폴더에 `.venv`를 만들고 같은 폴더의 supervisor를 로그인 작업·바로가기에 등록하며 별도 `%LOCALAPPDATA%\Programs` 설치본으로 복사하지 않습니다. 기본 데이터 경로는 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`입니다. PyAutoGUI는 interactive desktop이 필요하므로 Windows service가 아니라 로그인 사용자 세션에서 실행합니다.
+표준 설치에서는 전체 패키지를 계속 사용할 폴더에 복사한 뒤 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 현재 설치 프로그램은 해당 패키지 폴더에 `.venv`를 만들고 같은 폴더의 supervisor를 로그인 작업·바로가기에 등록합니다. 별도 `%LOCALAPPDATA%\Programs` 설치본으로 복사하지 않습니다. 기본 데이터 경로는 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`입니다. PyAutoGUI는 사용자와 상호작용할 수 있는 데스크톱이 필요하므로 Windows 서비스가 아니라 로그인한 사용자 세션에서 실행합니다.
 
-구버전에서 전환할 때만 최신 package를 한 번 복사해 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 그 다음 버전부터는 Linux `Lab Equipment Workspace > Saved Worker`의 `Check Update`와 `Update`로 server, launcher, updater, Python dependency를 같은 설치 폴더에 원격 반영합니다.
+구버전에서 전환할 때만 최신 패키지를 한 번 복사해 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 이후 버전부터는 Linux `Lab Equipment Workspace > Saved Worker`의 `Check Update`와 `Update`로 서버, 런처, 업데이터, Python 의존성을 같은 설치 폴더에 원격 반영합니다.
 
 ## Console 구성
 
@@ -46,28 +46,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check_bridge.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_bridge.ps1
 ```
 
-첫 명령은 local Health/pairing을, 두 번째는 paired `program1` 실행을 확인합니다.
+첫 번째 명령은 로컬 Health와 페어링 상태를, 두 번째 명령은 페어링된 `program1`의 실행을 확인합니다.
 
 ## ATR 연결
 
 1. Device Workspace > Lab Equipment
 2. Windows Bridge Scan (코드 입력 없음)
-3. candidate 선택
-4. 선택한 Candidate 카드에 4자리 code 입력
-5. Pair & Save와 alias 저장
+3. 연결 후보 선택
+4. 선택한 Candidate 카드에 4자리 코드 입력
+5. Pair & Save로 페어링하고 별칭 저장
 6. Select > Health > Programs > Test
 
 실험 루프는 `LabEquipmentAgent -> EquipmentRuntimeService -> equipment.pyautogui.run` 경로로만 실행합니다.
 
 ## 데이터와 백업
 
-설치형 기본 data root:
+설치형의 기본 데이터 루트:
 
 ```text
 %LOCALAPPDATA%\ATR\PyAutoGUIBridge
 ```
 
-포터블은 package `data\`를 사용합니다. 재설치 전 `programs`, `locators`, `recordings`를 백업할 수 있지만 `pairing.json`은 다른 PC에 복제하지 않는 것이 원칙입니다.
+포터블은 패키지의 `data\` 폴더를 사용합니다. 재설치 전 `programs`, `locators`, `recordings`를 백업할 수 있지만 `pairing.json`은 다른 PC에 복제하지 않는 것이 원칙입니다.
 
 ## 장애 진단
 

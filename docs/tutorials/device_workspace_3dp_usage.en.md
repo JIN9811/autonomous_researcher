@@ -24,7 +24,7 @@ supersedes: []
 
 ## Goal and preparation
 
-Save an intentional print profile and produce an inspectable sliced artifact
+Save the intended print profile and produce an inspectable sliced artifact
 **without starting a print**. Physical execution is a separate final step.
 You need the selected printer/slicer profile and a local STL or supported 3MF input.
 For device work, also prepare the correct printer connection and a supervised,
@@ -66,9 +66,9 @@ Scroll to **Print Defaults**.
 
 ![Print Defaults and specimen-center placement](assets/screenshots/2026-09-29/printer-defaults.png)
 
-**Expected:** units, printer profile and placement are deliberate. The specimen must
-fit the bed and intended handling path. Changing X/Y requires re-slicing the original
-model; saving defaults does not relocate an existing G-code file.
+**Expected:** units, printer profile and placement match the intended setup and fit
+the bed and handling path. Changing X/Y requires re-slicing the original model;
+saving defaults does not relocate existing G-code.
 
 ## Step 3 — Save start, speed and calibration options
 
@@ -93,8 +93,8 @@ name `xy_speed_scale_percent`.
 3. Click **Save Print Defaults**.
 4. Reload the page and verify both numbers and checkbox states.
 
-**Expected:** saved values survive reload. Disabled options may retain their numeric
-values without applying them. Existing artifacts and an active print remain unchanged.
+**Expected:** saved values survive reload; disabled options may retain values without
+applying them. Existing artifacts and active prints remain unchanged.
 **Test Specimen Defaults** is a fallback specimen setup, not the BO search-space editor.
 
 ## Step 4 — Generate a sliced artifact without printing
@@ -134,7 +134,7 @@ Do not run them simply to test a button.
 
 ![Physical Proof Package and completion audit](assets/screenshots/2026-09-29/printer-proof.png)
 
-**Build Fail-Closed Proof Template** prepares evidence to complete;
+**Build Fail-Closed Proof Template** prepares an evidence template for you to fill in;
 **Run Completion Audit** checks it. Neither button demonstrates physical ejection
 by itself. **Mark Bed Clear** is a statement about the actual bed, not an error-reset
 shortcut. Use it only after the relevant physical inspection.

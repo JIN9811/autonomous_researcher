@@ -26,9 +26,9 @@ supersedes: []
 
 ## Goal and prerequisites
 
-Complete one **virtual** experiment through the existing Live conversation, then
-find its design, analysis and optimization evidence. This walkthrough does not
-require a printer or robot. A virtual result is not a physical experiment result.
+Complete one **virtual** experiment through Live, then find its design, analysis
+and optimization evidence. No printer or robot is required; a virtual result is
+not a physical experiment result.
 
 You need a configured AX4LAB installation, a reachable LLM backend and a browser.
 If installation is incomplete, follow [Requirements](../../REQUIREMENTS.md) first.
@@ -91,8 +91,7 @@ The saved per-agent overrides also matter. See [Test Mode](../runtime/test_mode.
 This is the chat-driven entry used in this tutorial. Main's **test → Start** instead
 calls the direct run-start route; it is not the same button sequence.
 
-The figure contains historical data. Opening Live is not evidence that a new run
-has been admitted.
+The figure shows historical data. Opening Live does not confirm admission of a new run.
 
 ## Step 4 — Request and review the test plan
 
@@ -102,7 +101,7 @@ In Live chat, enter this supported example:
 테스트 모드, 가상 브릿지
 ```
 
-This means “test mode, virtual bridge.” The scenario-input driver asks/answers
+This means “test mode, virtual bridge.” The scenario-input driver asks and answers
 planning questions through the normal Orchestrator conversation. Read the resulting
 **Experiment Contract** and **Experimental Setup**, not only the greeting.
 
@@ -116,7 +115,7 @@ search space. State corrections in chat if the proposed plan differs from your i
 **Expected:** a reviewed contract and a run-specific admission/handoff.
 Planning consent is distinct from execution consent; the test scenario can supply
 the normal review replies, but missing connection facts and physical confirmations
-remain operator-owned. Do not answer a physical confirmation with fictional evidence.
+remain the operator's responsibility. Do not answer a physical confirmation with fictional evidence.
 If it is requested in this virtual exercise, check the selected profile.
 
 ## Step 5 — Check design and specimen preparation
@@ -164,13 +163,12 @@ failure. In a one-cycle exercise a new BO recommendation is not guaranteed.
 When available, inspect the 2D/3D mean, uncertainty and acquisition views and the
 candidate coordinates. Never treat the synthetic/virtual result as measured SEA.
 
-These figures show a historical multi-cycle run, not the result you must reproduce
-after a single cycle.
+These figures show a historical multi-cycle run, not an expected single-cycle result.
 
 ## Step 8 — Find the files and review the session
 
 1. Select the relevant agent, then **Artifacts**.
-2. Use **All files** or the image filter as appropriate; an empty filter does not
+2. Use **All files** or the image filter as appropriate; an empty filtered view does not
    establish that the run lost its files.
 3. Open the STL, curve image/data and BO files that actually exist.
 4. Record the run ID, cycle and candidate ID alongside the file paths.

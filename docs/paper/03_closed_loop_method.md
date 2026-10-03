@@ -98,9 +98,8 @@ The nominal path is:
 8. **Gate continuation.** Guardian and operator policy choose continue, stop,
    review, or error before another consequential cycle.
 
-The actual graph can branch, invoke sidecars, retry bounded operations, or
-terminate early. The list is an explanatory projection of the declared graph,
-not a replacement for it. The current specimen-transfer route returns to
+This list summarizes, but does not replace, the declared graph, which can branch,
+invoke sidecars, retry bounded operations, or terminate early. The current specimen-transfer route returns to
 Vision for placement confirmation before Equipment, then uses a separate
 Manipulation clearance task and Vision confirmation after Equipment. The
 [Orchestration Route](../../README.md#orchestration-route) shows the broader
@@ -112,9 +111,9 @@ graph; these handoffs are not new top-level agents.
 
 **Figure 3 — Closed-loop control and evidence flow.** Blue arrows represent
 stage/control progression; green arrows represent durable artifact and
-evidence flow. The dashed equipment-to-analysis edge applies only without a
-required clearance contract. The feedback edge carries accepted knowledge and candidate
-context into the next design stage. The paths are code-backed; continuity
+evidence flow. The dashed equipment-to-analysis edge applies only when no
+clearance contract is required. The feedback edge carries accepted knowledge
+and candidate context into the next design stage. The paths are code-backed; continuity
 through the retained campaign is [partially supported by archive inspection](evidence/2026-09-28-campaign-archive-audit.md);
 independent physical certification remains `not_evaluated`.
 

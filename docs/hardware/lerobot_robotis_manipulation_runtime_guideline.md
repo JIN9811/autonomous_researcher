@@ -15,7 +15,7 @@ In particular, an effective-live profile can move hardware in a Test run.
 
 This document converts the LeRobot/ROBOTIS research prompt into an implementation guideline that matches the current `autonomous_researcher` runtime.
 
-The goal is not to replace the existing robot path immediately. The goal is to add a LeRobot-capable bridge and tool group that can be selected by the Manipulation Agent when the workflow requires teleoperation, dataset recording, policy training, rollout, or bounded manipulation.
+The goal is to add a LeRobot-capable bridge and tool group for Manipulation Agent workflows that require teleoperation, dataset recording, policy training, rollout, or bounded manipulation, without immediately replacing the existing robot path.
 
 Primary live hardware target:
 
@@ -148,7 +148,7 @@ Manipulation Agent owns:
 - robot-related protocol notes for GUI/logging
 - Pi0.5 policy transfer from `3dp_output_area` to `utm_fixture` after a ready Specimen Making result and Vision observation
 
-Manipulation Agent does not become a LeRobot-specific agent. LeRobot is one strategy/tool backend inside Manipulation Agent.
+LeRobot is one strategy/tool backend within Manipulation Agent, not a replacement for the generic agent.
 
 Manipulation Agent output keys must remain stable:
 
@@ -891,7 +891,7 @@ Replay must reconstruct:
 
 ## 18. Implementation Checklist
 
-This guideline is not divided into mandatory phases. Use the checklist below to implement the full LeRobot/ROBOTIS integration in a way that preserves current project contracts.
+The checklist below covers the full LeRobot/ROBOTIS integration while preserving current project contracts; it does not impose mandatory phases.
 
 Read before coding:
 
@@ -1126,7 +1126,7 @@ dependency, observed task stage, decision, handoff, and evidence.
 
 ## 2026-05-29 Rollout Queue And Pi0.5 RTC Execution Update
 
-LeRobot execution endpoints in the GUI must not directly instantiate or call a separate bridge for live execution. Start/stop/status for teleoperation, recording, training, visualization, and rollout must pass through the backend `ToolRegistry` so device queue metadata, shared sessions, and bridge guards are applied consistently. The registered LeRobot bridge is exposed as the shared `lerobot.bridge` resource for read/status endpoints that need the same session state.
+GUI LeRobot execution endpoints must use the backend `ToolRegistry`, not a separate bridge, for teleoperation, recording, training, visualization, and rollout start/stop/status. This keeps device queue metadata, shared sessions, and bridge guards consistent. Read/status endpoints access the same session state through the shared `lerobot.bridge` resource.
 
 Rollout guard rule:
 

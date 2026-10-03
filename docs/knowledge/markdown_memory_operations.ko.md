@@ -19,25 +19,25 @@ related_docs:
 supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 -->
 
-Verification scope: full-document read and static source inspection at `dd0d772`.
-Historical provider/test results retain their original scope; this review did not
-invoke models, mutate Knowledge stores or operate devices.
+검증 범위: `dd0d772` 기준 문서 전체 검토와 소스 정적 분석.
+과거 제공자·테스트 결과의 검증 범위는 그대로 유지한다. 이번 검토에서는
+모델을 호출하거나 Knowledge 저장소를 변경하거나 장비를 작동하지 않았다.
 
 # Markdown Knowledge 운영 가이드
 
 ## Status at a Glance
 
-| At a glance | Details |
+| 한눈에 보기 | 내용 |
 |---|---|
-| Purpose | 원본과 ontology를 보존하며 Markdown 지식의 검색·출처·수명주기 관리 |
-| Workspace | Knowledge → Markdown / Memory / Ontology |
-| Preparation | 조회할 run·agent·지식 범위와 원본 근거 확인 |
-| Recorded basis | 2026-09-10 · [Knowledge Agent 계약](../agents/knowledge_agent.md) |
+| 목적 | 원본과 온톨로지를 보존하며 Markdown 지식의 검색·출처·수명주기 관리 |
+| 작업 화면 | Knowledge → Markdown / Memory / Ontology |
+| 준비 사항 | 조회할 run·agent·지식 범위와 원본 근거 확인 |
+| 기록 기준 | 2026-09-10 · [Knowledge Agent 계약](../agents/knowledge_agent.md) |
 
 ## 무엇이 바뀌었는가
 
 지식 그래프와 Neo4j 운영 의존성은 제거했다. 온톨로지 정의, 원본 아티팩트,
-기존 JSONL 기억·패턴·성능 기록은 보존한다. Evolution 생성은 퇴역했으며
+기존 JSONL 기억·패턴·성능 기록은 보존한다. Evolution 생성 기능은 종료했으며
 과거 기록만 유지한다. 매뉴얼 전용 RAG는 Source Library로 대체됐고,
 기존 `/api/knowledge/manuals/*` 경로는 HTTP 410을 반환한다.
 실행 순서를 표현하는 폐루프 그래프는 지식 그래프가 아니며 변경하지 않는다.
@@ -56,10 +56,10 @@ Knowledge의 LLM은 근거를 읽고, 재사용 가치와 분류를 판단하고
 | `runs/<run>/runtime/loops/` | 기존 루프·에이전트·시도별 원본 아카이브 |
 | `memory/knowledge/markdown_jobs/` | 명시적으로 시작한 과거 아카이브 후처리 상태 |
 
-Use the Markdown tab at `/knowledge` to select scope, search candidates, and read
-their provenance. Numerical values remain in the original Analysis records;
-Markdown interpretation is not a new measurement. Memory and Ontology remain in
-the workspace; [Source Library](manual_rag_knowledge.ko.md) replaces Manual RAG.
+`/knowledge`의 Markdown 탭에서 범위를 선택하고 후보를 검색한 뒤 출처를 확인한다.
+수치는 원본 Analysis 기록에 유지되며, Markdown으로 작성한 해석은 새로운 측정값이
+아니다. Memory와 Ontology는 작업 화면에 그대로 남고,
+[Source Library](manual_rag_knowledge.ko.md)가 Manual RAG를 대체한다.
 
 ## 검색 범위
 
@@ -84,7 +84,7 @@ POST `/api/knowledge/markdown/query` 예시:
 - run/cycle/agent/ontology/fidelity/status의 목록은 해당 필드 내 OR이며 필드끼리는 AND다.
 - tags와 applicability는 지정한 조건을 모두 만족해야 한다.
 - 빈 목록은 일치 없음이다. 알 수 없는 필드는 오류로 반환한다.
-- 후보에는 짧은 발췌만 들어간다. 전체 본문은 `/markdown/read`에 같은 scope와 record_id를 보낸다.
+- 후보에는 짧은 발췌만 들어간다. 전체 본문을 조회하려면 `/markdown/read`에 같은 scope와 record_id를 보낸다.
 - LLM은 호출자가 정한 범위를 좁힐 수만 있다. 분류가 비슷하다고 조건을 교체하지 않는다.
 
 ## 기록의 상태 변경

@@ -50,10 +50,9 @@ contracts, plus supervised mixed-mode closed-loop integration evidence.
 The latest archive audit reconciles fifteen completed Analysis observations
 with matching Design/Specimen artifacts and BO records (`E-INSPECT-CAMPAIGN-001`).
 The earlier one-cycle hardware demonstrations remain separate evidence.
-It does not establish end-to-end scientific efficacy, generalized
+This evidence does not establish end-to-end scientific efficacy, generalized
 safety effectiveness, live-hardware robustness, or superiority to another
-system. This chapter reports that boundary as a result rather than hiding it
-behind incomplete tables.
+system. The results below retain these limits.
 
 ## Scope
 

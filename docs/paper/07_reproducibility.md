@@ -48,7 +48,7 @@ supersedes: []
 The latest [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md)
 provides a bounded read-only reproduction protocol and per-iteration hashes.
 The public summary does not bundle private raw run data. Re-running the
-experiment, re-analyzing retained CSV and checking an archive are different
+experiment, re-analyzing retained CSV data and checking an archive are different
 reproduction tasks; none is silently performed by opening Replay.
 
 Reproduction is progressive. A reviewer can validate the public document and
@@ -58,9 +58,8 @@ dependencies and approvals are available.
 
 ## Audience and Outcome
 
-This guide is for artifact evaluators, researchers, and developers. Completion
-means reproducing one declared tier and reporting that tier without implying
-completion of a higher one.
+Artifact evaluators, researchers, and developers should reproduce and report
+one declared tier without implying completion of a higher one.
 
 ## Scope
 

@@ -17,9 +17,9 @@ For installation, begin with [Requirements](../../REQUIREMENTS.md).
 
 ## Before following a screenshot
 
-Figures are actual **1920 × 1080** browser-content captures from 29 September 2026.
-Open an image for its full-resolution view. They illustrate an existing installation,
-not prescribed parameter values. Private connection details are redacted.
+Figures are **1920 × 1080** browser-content captures from 29 September 2026.
+Open an image at full resolution. Values reflect an existing installation,
+not prescribed settings. Private connection details are redacted.
 
 Some Live figures show a completed historical run; camera/robot panels may be idle,
 and missing evidence is deliberately left visible. No experiment, print, robot move,

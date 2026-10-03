@@ -56,9 +56,9 @@ supersedes: []
 ATR separates control, agent work, physical integration, evidence, and
 operator interaction into explicit layers. At code baseline `5542ef2`, the
 checked-in graph contained 19 nodes, 74 declared edges, and 12 stage-dispatch
-entries. That reader-facing runtime map displayed 50 connections after internal
-dispatch/step-return edges are filtered. These are architecture observations, not stability or
-performance guarantees. A YAML-only check on 2026-09-29 at `dd0d772` counts
+entries. The reader-facing runtime map displayed 50 connections after internal
+dispatch/step-return edges were filtered out. These are architecture observations,
+not stability or performance guarantees. A YAML-only check on 2026-09-29 at `dd0d772` counts
 19 nodes, 73 declared edges and 12 dispatch entries; it does not rerun the
 historical architecture evidence or measure a browser rendering.
 
@@ -146,8 +146,8 @@ are maintained in the [code snapshot](../runtime/current_code_snapshot.md).
 | Complete | Terminal success state | Final run state | No implicit next action |
 | Error | Terminal or recoverable failure state | Diagnosable failure state | Explicit retry/resume policy |
 
-The table states responsibilities rather than a universal payload schema. The
-interface appendix records concrete contracts and source paths.
+The table states responsibilities, not a universal payload schema; the interface
+appendix records concrete contracts and source paths.
 
 The current working-tree Orchestrator contract keeps Setup confirmation and
 new-run admission inside the controller/runtime boundary: it validates the

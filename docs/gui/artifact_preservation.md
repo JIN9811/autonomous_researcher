@@ -9,8 +9,8 @@ Private paths are redacted. Browsing evidence does not execute it.*
 Every agent invocation owns an immutable run, zero-based loop, attempt, and
 execution ID. The common archive retains inputs, outputs, decisions/handoffs,
 tool events and referenced evidence. Read-only derived outputs are stored in
-that same attempt's `preserved/` directory, never attributed from the current UI
-cycle or from a BO iteration number.
+that same attempt's `preserved/` directory. Attribution is never inferred from the current UI
+cycle or a BO iteration number.
 
 | Owner | Evidence retained |
 | --- | --- |

@@ -122,8 +122,9 @@ remain initially collapsed and can still be reopened manually. Chat-panel pinnin
 is independent of message expansion.
 
 Artifacts uses a compact folder tree and one-line file list, scoped by default to
-the selected agent across all indexed loops. A loop filter narrows the view explicitly. Darker folder navigation, lighter file rows
-and a restrained cyan selection distinguish the regions without large artifact
+the selected agent across all indexed loops. A loop filter narrows the view
+explicitly. Darker folder navigation, lighter file rows and a restrained cyan
+selection distinguish the regions without large artifact
 cards. Selecting a file reveals its preview and original/download actions;
 conversation-only results join the same explorer without a separate preview section. See
 [Live GUI file explorer](loop_artifact_archiving.md#live-gui-file-explorer) for
@@ -224,12 +225,10 @@ dry-run evidence, create an immutable version, activate a validated graph or
 module, start an allowed run mode, resolve approvals, and inspect events and
 artifacts.
 
-The IDE is not an independent workflow engine. `app/main.py` owns its APIs,
-`graphs/*` owns validation and persistence, and
+The IDE controls existing components through bounded interfaces; it is not an
+independent workflow engine. `app/main.py` owns its APIs, `graphs/*` owns validation and persistence, and
 `orchestrator/langgraph_runtime.py` owns executable stage progression. Device
-workspaces and bridge implementations own device-specific effects. The IDE
-projects and controls those components through bounded interfaces; it does not
-replace their authority.
+workspaces and bridge implementations own device-specific effects.
 
 ## Scope
 
@@ -322,7 +321,9 @@ Important boundaries:
 
 *Module Management library and designer.*
 
-Runtime IDE is the composition/editor surface, not the Live report. Graph drafts, validation/dry-run gates and activation remain distinct; opening either page does not activate a draft.
+Runtime IDE is the composition/editor surface, not the Live report. Graph drafts,
+validation/dry-run gates and activation remain distinct; opening either page does
+not activate a draft.
 Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
 See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
 
@@ -364,9 +365,8 @@ Current handoffs include:
 - Module Management for an unattached module:
   `/ide?module=<module_id>&action=attach`.
 
-An attach handoff highlights the module and tells the operator where to work.
-It does not add a node, connect an edge, save YAML, or activate execution
-automatically.
+An attach handoff highlights the module for editing; it does not automatically
+add a node, connect an edge, save YAML, or activate execution.
 
 ## Graph Draft Editing
 
@@ -399,8 +399,9 @@ every submitted payload; client state is never the execution authority.
 All ten agents use the existing graph canvas with responsibility
 areas: **High**, **Middle**, **Low**, **Guardian / Safety**, and **Knowledge / Evidence**.
 There is no separate architecture-view switch. Design, Specimen, Vision, Manipulation,
-Equipment, Analysis, BO, Orchestrator, Knowledge and Guardian use `module.execution_graph` as the executable source for backend
-and canvas; legacy unmigrated definitions retain their checkpoint representation.
+Equipment, Analysis, BO, Orchestrator, Knowledge and Guardian use
+`module.execution_graph` as the executable source for both backend and canvas;
+legacy unmigrated definitions retain their checkpoint representation.
 The owner catalog also supplies
 `implementation_structure`: source-bound function, tool, check and evidence
 relationships around those operations. **High** means bounded LLM decisions;
@@ -609,10 +610,9 @@ Guardian paths. Successful compilation returns a summary of entry/finish nodes,
 executable and logical edges, stage dispatch, configured transitions, and
 per-node handler metadata.
 
-The current IDE `Validate` and `Compile` buttons both submit the draft to
-`/validate-draft`; they emphasize different evidence in the client. Dedicated
-`/validate` and `/compile` endpoints remain available to other API consumers.
-No validation or compilation endpoint activates the draft.
+The IDE `Validate` and `Compile` buttons both submit to `/validate-draft` but
+emphasize different evidence. Dedicated `/validate` and `/compile` endpoints
+remain available to other API consumers. None activates the draft.
 
 Draft dry-run sends the current graph payload and returns transition sequence,
 effective handlers, sanitized module runtime, and a digest-labeled record with
@@ -651,7 +651,7 @@ when the bridge node has no agent `module_id`. Back retains the composition tab;
 its close button removes only that tab. **Infra → Package Manager** opens a
 separate tab for membership and package exchange. Main and agent drafts, including
 unsaved module edits, remain intact. Neither view replaces **Dry-run Trace**
-or become an executable graph, and live updates keep the selected tab open.
+or becomes an executable graph, and live updates keep the selected tab open.
 
 The Package Manager distinguishes installed dependencies from current draft
 membership, shows shared bridges once with their owners, and identifies local
@@ -778,8 +778,8 @@ does not run the unsaved browser draft. For live mode, a missing or stale digest
 returns HTTP 409 with `GRAPH_DRY_RUN_REQUIRED`. A non-primary workspace graph
 without explicit live metadata is rejected even if it compiles.
 
-The IDE's live confirmation is necessary at its boundary but not sufficient for
-a device effect. Device-specific confirmation, calibration, freshness,
+IDE live confirmation is required but alone does not authorize a device effect.
+Device-specific confirmation, calibration, freshness,
 interlock, and stop semantics remain in bridge/workspace implementations.
 
 ## API and Connection Architecture

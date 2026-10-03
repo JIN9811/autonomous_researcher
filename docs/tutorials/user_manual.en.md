@@ -25,12 +25,12 @@ supersedes: []
 
 ## Before you start
 
-Use this guide after the first virtual run. Each exercise states its goal, exact
-controls and completion check. The first device setup requires a trained operator;
-these pages do not authorize unattended robot or UTM motion.
+After the first virtual run, follow each exercise's goal, controls and completion
+check. Initial device setup requires a trained operator; this guide does not
+authorize unattended robot or UTM motion.
 
 Read [Requirements](../../REQUIREMENTS.md) for installation. For an already installed
-system, `atr up` opens the server at `http://localhost:7860`.
+system, `atr up` starts the server at `http://localhost:7860`.
 Do not restart a running experiment for a documentation exercise.
 
 Figures are 1920 × 1080 captures from 29 September 2026. Some show historical or idle
@@ -217,11 +217,11 @@ authentication. See [Knowledge operations](../knowledge/markdown_memory_operatio
 
 ![Timeline for locating a blocked step](../gui/assets/screenshots/2026-09-29/live-timeline.png)
 
-**Checkpoint:** recovery is recorded on the existing run, not a duplicate run with
-copied completion flags. Resume may repeat a recoverable step; it is not a blanket
-guarantee of exactly-once physical execution. Inspect the requested route and device
-state before approving motion. Do not delete failure history, clear PLC latches
-blindly, or press Start to impersonate Resume.
+**Checkpoint:** recovery belongs to the existing run, not a duplicate with copied
+completion flags. Resume may repeat a step; it does not guarantee exactly-once
+physical execution. Inspect the requested route and device state before approving
+motion. Do not delete failure history, clear PLC latches
+blindly, or use Start as a substitute for Resume.
 See [Runtime flow and recovery](../runtime/closed_loop_and_pages_reference.md).
 
 ## Exercise 9 — Open a read-only replay

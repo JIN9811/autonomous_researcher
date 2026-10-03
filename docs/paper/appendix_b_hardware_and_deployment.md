@@ -55,9 +55,8 @@ actually used.
 
 ## Scope
 
-This appendix describes deployment roles and paper evidence requirements. It
-does not publish private network addresses, credentials, or a universal
-installation recipe.
+This appendix covers deployment roles and paper evidence requirements, not
+private network addresses, credentials, or a universal installation recipe.
 
 ## Source of Truth
 

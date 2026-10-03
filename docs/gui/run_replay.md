@@ -12,8 +12,8 @@ dropdown beside Mode. Select a recorded session, then **Start** opens `/replay` 
 separate window. This action does **not** call `/api/run/start`, resume an
 experiment, or replay a robot trajectory. Existing LeRobot replay APIs are unchanged.
 
-Only the coral **REPLAY** title distinguishes the viewer from LIVE; the template,
-agent panels, tabs, cards and renderers are shared with the original LIVE GUI. Select an archived
+The coral **REPLAY** title distinguishes the viewer from LIVE; both share the template,
+agent panels, tabs, cards and renderers. Select an archived
 run, then select a cycle/event in the **Contract · Replay point** dropdown.
 The dropdown moves between recorded events. Changing the point preserves
 the selected agent. The page does not poll live state or connect to SSE, cameras,

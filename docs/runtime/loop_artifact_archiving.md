@@ -49,10 +49,10 @@ earlier invocation's input, result, or copied file bytes. This is an observation
 layer around existing agent and tool calls, not a replacement execution graph,
 device driver, retry policy, or success gate.
 
-한국어 요약: 기존 `runs/` 안에서 실행 → 루프 → 에이전트 → 호출 차수별로
-보관합니다. 성공뿐 아니라 실패·취소 결과와 취소 후 도착한 tool 결과도 같은
-호출에 연결합니다. Live GUI의 완료 루프와 Runtime IDE에서 저장된 파일을
-조회할 수 있으며, 아카이브 완료와 물리 실험 성공은 별개의 상태입니다.
+Failed and cancelled results, including tool results received after cancellation,
+remain attached to their original invocation. Saved files are available through
+completed-loop views in Live GUI and through Runtime IDE. A complete archive
+does not, by itself, mean that the physical experiment succeeded.
 
 ## Scope
 
@@ -72,7 +72,8 @@ results whose loop ownership is unknown.
   bounded file snapshots, status, and disk-backed enumeration.
 - `utils/rollout_artifact_stream.py`: long-running rollout ownership and legacy
   locator compatibility.
-- `agents/*_agent.py`, `mcp_tools/tool_registry.py`: invocation/tool boundaries.
+- `agents/core/*/agent.py`, `agents/*/agent.py`, `mcp_tools/tool_registry.py`:
+  agent-invocation and tool-call boundaries.
 - `orchestrator/langgraph_runtime.py`: stage events and derived Analysis/BO files.
 - `app/main.py`, `web/static/runtime_ide.js`, `web/static/planning.js`: existing
   artifact API, filters, and saved-loop views.
@@ -277,10 +278,10 @@ ownership is labelled `legacy` with empty identity fields.
 
 ## Verification
 
-This Reference intentionally covers the uncommitted **working-tree** on
-2026-09-06, not the older committed baseline. Implementation was followed by
-offline tests; the running application was not restarted as part of this work.
-A later normal application restart loads the changes.
+The original verification covered the **working tree on 2026-09-06**, which
+was uncommitted at the time. It consisted of offline tests and did not restart
+the running application. Those historical test results are distinct from the
+later retained-campaign audit linked above.
 
 ```bash
 .venv/bin/pytest tests/unit/test_agent_artifact_archive.py tests/integration/test_all_agent_loop_archives.py tests/integration/test_loop_artifact_api.py -q

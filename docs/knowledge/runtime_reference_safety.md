@@ -19,7 +19,7 @@ concerned pixel location; citation use was unknown.
   neither present-run evidence nor authority to add/remove acceptance conditions,
   thresholds, approval, motion or replay. Existing code-owned safety and evidence
   checks are unchanged. Model judgment remains fallible; these controls reduce
-  reference contamination, not guarantee model correctness.
+  reference contamination but do not guarantee model correctness.
 - User-facing Wiki questions and browsing retain full explanatory retrieval.
   Operational Wiki references do not implicitly include private memory. Normal
   consent/scope checks for explanatory memory access remain unchanged.

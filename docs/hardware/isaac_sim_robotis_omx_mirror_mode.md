@@ -417,13 +417,12 @@ list responses expose `isaac_mirror` directly. The bridge updates
 so the GUI can show mirror progress without waiting for `record.control
 action=stop`.
 
-When `record.control action=stop` stops a recording session, the bridge also stops the attached mirror loop and refreshes `meta/atr_pipeline.json` with the final mirror `status`, `sample_count`, and `receiver_state_at_stop` snapshot from the receiver `/state` endpoint when available. This makes the dataset metadata usable after the recording finishes, not only at recording start.
+When `record.control action=stop` stops a recording session, the bridge also stops its attached mirror loop and updates `meta/atr_pipeline.json` with the final mirror `status`, `sample_count`, and, when available, `receiver_state_at_stop` from the receiver `/state` endpoint. The metadata therefore remains usable after recording finishes.
 
-The mirror JSONL rows are intentionally direct evidence, not just logs. A row
-contains the follower joint state that was sampled, the exact payload sent to
-Isaac, the receiver POST result, and `sync_metrics`. The session response and
-recording metadata contain `sync_summary`, which is the quick operator-facing
-answer to "did it keep up with the requested mirror rate?"
+Each mirror JSONL row records the sampled follower joint state, exact payload sent to
+Isaac, receiver POST result, and `sync_metrics`. The session response and
+recording metadata contain `sync_summary`, which shows whether the mirror kept
+up with the requested rate.
 
 ## Isaac Sim Receiver
 

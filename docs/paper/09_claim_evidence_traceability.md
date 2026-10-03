@@ -46,9 +46,8 @@ supersedes: []
 
 ## Summary
 
-This chapter is the human-readable view of
-`docs/paper/artifact_manifest.yaml`. It prevents a reader from having to infer
-which command, environment, or artifact supports a material claim.
+This human-readable view of `docs/paper/artifact_manifest.yaml` identifies the
+command, environment, or artifact supporting each material claim.
 
 ## Scope
 
@@ -102,7 +101,7 @@ or independent physical certification. Earlier claim IDs keep their original sco
 6. Update affected chapters, the evaluation table, manifest, and changelog in
    the same reviewed change.
 
-An evidence record is immutable in interpretation scope. A rerun at a new
+An evidence record's scope of interpretation is fixed. A rerun at a new
 commit or environment receives a new record instead of rewriting the old
 context.
 
@@ -116,8 +115,8 @@ it weakens the paper narrative.
 ## Limitations and Known Gaps
 
 The map remains deliberately sparse. It contains bounded live integration
-records, but no replay, simulation, or browser evidence records. It does not replace a manuscript bibliography,
-statistical analysis, or domain data repository.
+records, but no replay, simulation, or browser evidence records. It does not
+replace a manuscript bibliography, statistical analysis, or domain data repository.
 
 ## Verification
 

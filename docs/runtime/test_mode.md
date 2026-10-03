@@ -13,17 +13,37 @@
 ## Starting a scenario
 
 In the Live GUI, enter `테스트 모드, 가상 브릿지`, `테스트 모드, 실제 프린터`, or `테스트 모드, 실제 출력`.
-The existing model route simulates a researcher: it asks about available experiments, agrees to plan, answers the Orchestrator's condition questions, and approves the reviewed test plan. Saved scenario facts remain private to this input producer; they are not injected wholesale into chat or admission. Each natural-language reply goes through `planning_message`, the same semantic classification, Experimental Setup update and admission as human replies.
+The model acts as the researcher: it asks about experiments, agrees to planning,
+answers setup questions, and approves the reviewed test plan. It uses saved
+scenario facts without injecting them wholesale into chat or admission. Each
+reply follows the human-input path through `planning_message`, semantic
+classification, Experimental Setup updates, and admission.
 
 The input driver does not dispatch agents, allocate BO observations, or jump to an execution stage. Initial BO design publication stays inside the shared admitted workflow. Automatic messages carry `input_source: test_scenario` as metadata only; the visible conversation contains no JSON envelope or automatic-input prefix.
 
-For condition questions, the model supplies only requested facts in natural language. Agreed values update stable `conversation.input.*` blocks in the canonical Experimental Setup store; changed values revise the same block. Planning consent is not execution consent. A later run-review approval enters the existing handoff. Runtime replies are composed only from model-selected existing facts, never from free-form claims of physical completion, and cannot start another run. Missing information, connection setup, physical transfer confirmation, safety recovery and owner-configuration approval remain operator-owned. Changed pending requests invalidate generated replies. Each pending ID is answered at most once; 24 automatic planning replies pause input for human continuation. Human chat takes over; stop, emergency stop and session reset stop the input producer.
+The model answers condition questions with only the requested facts. Agreed or
+revised values update the same `conversation.input.*` blocks in Experimental
+Setup. Planning consent does not approve execution; the later run-review
+approval enters the handoff. Runtime replies use existing facts, cannot claim
+physical completion, and cannot start another run.
+
+The operator still handles missing information, connections, transfer
+confirmation, safety recovery, and owner-configuration approval. Changed requests
+invalidate pending replies, and each pending ID receives at most one reply.
+After 24 automatic planning replies, input pauses for human continuation.
+Human chat takes over; stop, emergency stop, and session reset stop the input producer.
 
 If initial ORC admission is deferred, automatic continuation resumes that same review in the background without starting a new series. The input producer remains available for subsequent runtime questions, including when admission allocated a new run before returning the deferred result.
 
 Bare `테스트 모드` does not authorize an arbitrary physical profile. The existing printer-choice prompt remains until the operator selects a mode.
 
-The ORC classifier receives these commands as an explicit workflow contract, including `설치 프린터` as an installed-printer alias. A standalone test command requests automatic conversation, not a saved-Setup edit. Ordinary experiments use the same LLM-led dialogue with the human providing replies. The initial greeting is bilingual; later replies follow the user's language. Mid-dialogue system questions preserve agreed values and the pending decision. Questions, quoted examples, negated execution and settings-only edits do not authorize a run.
+The ORC classifier recognizes these workflow commands, including `설치 프린터`
+as an installed-printer alias. A standalone test command starts automatic
+conversation, not a saved-Setup edit. Ordinary experiments use the same dialogue
+with human replies. The greeting is bilingual; later replies follow the user's
+language. Intervening system questions preserve agreed values and the pending
+decision. Questions, quoted examples, negated execution, and settings-only edits
+do not authorize a run.
 
 ## Execution profiles
 

@@ -24,7 +24,7 @@ main module. No experiment decision, formula, printer option or motion route is
 changed by worker selection.
 
 `ATR_CPU_WORKERS=3` is the default at server startup. Values 1–3 limit the pool;
-0 keeps the previous in-process implementation. Restart is required to deploy the
+0 keeps the previous in-process implementation. A restart is required to deploy the
 new server integration. `GET /api/runtime/compute` reports active/queued work and
 PIDs. A single experiment's dependent stages remain sequential; independent
 requests can use multiple workers concurrently.

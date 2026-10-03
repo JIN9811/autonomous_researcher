@@ -52,9 +52,9 @@ potentially identifying filenames. Exit 0 means the configured checks passed;
 exit 1 blocks publication, and exit 2 means the inspection itself failed.
 An empty staging area checks zero files and is not evidence about untracked data.
 
-The GitHub workflow repeats the check on changed committed blobs. It detects
-problems after upload; it cannot undo a disclosure. No local Git hook is installed
-automatically. Run the local check and review the staged diff before committing.
+The GitHub workflow checks changed committed blobs after upload and cannot undo
+a disclosure. No local Git hook is installed automatically. Run the local check
+and review the staged diff before committing.
 
 Private roots include memory, runs, artifacts, output(s), user_files, logs and
 test-results, plus raw inputs under the existing source inbox. Root README and

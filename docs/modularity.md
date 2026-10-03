@@ -68,8 +68,9 @@ can cross its declared provider or equipment effect boundary.
 
 This Reference was rechecked against the committed implementation on
 2026-09-29 by static source inspection. The dated controlled-runtime tests below
-are separate evidence, not newly repeated hardware checks. Executable code, checked-in graph/module configuration, registered
-handlers and tools, and persisted run evidence remain authoritative. The
+are separate evidence, not newly repeated hardware checks. Executable code,
+checked-in graph/module configuration, registered handlers and tools, and
+persisted run evidence remain authoritative. The
 [archived architecture Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
 records the preceding development decisions; it does not override the current
 implementation described here.
@@ -108,8 +109,7 @@ The explicit edges in the active Orchestration Plan remain the execution order.
 
 ## Code, Frontend, Configuration, and Storage
 
-The repository keeps ownership visible without forcing every existing service
-into a new physical directory:
+Ownership remains visible without moving every service into a new directory:
 
 ```text
 agents/core/{orchestrator,knowledge,guardian}/  # core backend + owned frontend

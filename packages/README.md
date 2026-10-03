@@ -3,7 +3,7 @@
 For the relationship between packages, modules, core owners, bridges, and the
 runtime path, start with the [Modularity Reference](../docs/modularity.md).
 
-Agent Packages are installed metadata, not an installer. Shipped manifests in
+Agent Packages provide installed metadata; they are not installers. Shipped manifests in
 `packages/agents/` are loaded only when their matching code-owned agent module
 is registered. Current owner packages are Design, Specimen, Vision,
 Manipulation, Equipment, Analysis and BO. BO and Design have no bridge;
@@ -13,7 +13,7 @@ exact numeric `major.minor.patch` versions. Python distribution data includes
 these manifests and the provider requirements/READMEs.
 
 The injected `PackageService` exposes `catalog()`, `export_experimental(payload)`
-and `import_experimental(payload)`. It owns no store or runtime. Graph validation
+and `import_experimental(payload)` but owns no store or runtime. Graph validation
 uses the existing `ATRLangGraphCompiler`; module validation uses the host's
 existing `ModuleConfigStore` normalization and module/execution-graph validator.
 Validation can compile structure, but never invokes handlers or starts a graph.
@@ -43,8 +43,8 @@ POST directly to `/api/packages/experimental/export` with:
 }
 ```
 
-Replace `graph` with the current existing graph configuration; it is required
-to pass existing graph validation. `module_configurations` maps module ID to
+Replace `graph` with the current graph configuration; it must pass existing
+graph validation. `module_configurations` maps each module ID to
 `{"module": <existing module configuration>}`. Include each edited module draft
 the IDE intends to retain. Export never implicitly opens referenced module files.
 

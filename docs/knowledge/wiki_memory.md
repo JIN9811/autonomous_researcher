@@ -183,10 +183,9 @@ Existing three-expanded-message behavior and source/operational panels remain.
 
 ## Integration Limits
 
-The new shared context facade combines public Wiki and authorized private v2
-memory. Existing execution Markdown and Source Library retain their own queries
-and Workspace panels; a unified historical-experiment adapter is not implemented.
-Keeping those panels available is not evidence of unified scoped retrieval.
+The shared context facade combines public Wiki and authorized private v2 memory.
+Execution Markdown and Source Library retain separate queries and Workspace panels,
+not unified scoped retrieval; a historical-experiment adapter is not implemented.
 
 The trusted-principal integration is an installation hook, not a new sign-in
 system. Without that integration, private memory and persisted private delivery

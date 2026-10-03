@@ -37,7 +37,7 @@ No experiment, LLM, printer, ROS or robot action ran in the benchmark.
 | CPU time for the 15-request concurrent batch | 6.952 s | 1.142 s |
 | Process RSS after the batch | 524 MiB | 419 MiB |
 
-All nine saved-state report JSON responses compared exactly equal. RSS figures
+All nine saved-state report JSON responses matched exactly. RSS figures
 are observations from these particular processes, not a memory guarantee; the
 baseline process had a longer lifetime. This small benchmark is not a device
 throughput or sustained-load claim. Multiple request clients simulate window

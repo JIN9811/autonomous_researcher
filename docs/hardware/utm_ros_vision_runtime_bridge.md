@@ -6,7 +6,7 @@ Paths containing `/home/<user>/` are documentation placeholders. Replace `<user>
 with the account running the bridge before running commands or editing YAML;
 YAML values must contain the resolved absolute path.
 
-This runtime bridge connects the cloned UTM ROS program into ATR as a live/test device evidence provider. It does not replace the Windows PyAutoGUI UTM control path. It adds ROS camera, marker-state, and RQT-like node-flow evidence that Vision Agent and Lab Equipment Agent can use before handing UTM data to Analysis Agent.
+This bridge connects the cloned UTM ROS program to ATR as a live/test evidence provider without replacing Windows PyAutoGUI UTM control. It supplies ROS camera, marker-state, and RQT-like node-flow evidence to Vision Agent and Lab Equipment Agent before UTM data is handed to Analysis Agent.
 
 External source-of-truth repository:
 
@@ -74,7 +74,7 @@ ros2 topic list
 ros2 node info <node>
 ```
 
-The backend builds publisher/subscriber edges from `ros2 node info`. The expected graph is only the UTM-repo launch contract; the actual graph is the live ROS source of truth.
+The backend builds publisher/subscriber edges from `ros2 node info`. The expected graph describes the UTM repository's launch contract; the actual graph records live ROS state.
 
 ## Installed Local Runtime Baseline
 

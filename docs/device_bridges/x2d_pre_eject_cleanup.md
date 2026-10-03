@@ -37,7 +37,7 @@ file in place of a rejected ejection-only file.
 
 `PYTHONPATH=. .venv/bin/python scripts/prepare_x2d_first_layer_path_trial.py ORIGINAL.gcode.3mf`
 
-This is a file-generation command only. It builds and validates the complete specimen's revised end/ejection path, then retains only the original specimen's first printing layer and that entire end sequence. Startup and first-layer moves come from the original slice, not a separately designed test plate. It writes a new archive and recalculates its plate MD5 without changing the original.
+This command only generates files. It builds and validates the complete specimen's revised end/ejection path, then retains the original specimen's first printing layer and the entire end sequence. Startup and first-layer moves come from the original slice, not a separate test plate. It writes a new archive and recalculates its plate MD5 without changing the original.
 
 For a planned 30 × 30 × 30 mm specimen, the rehearsal prints only the original first 0.2 mm layer but keeps the full-height specimen's ejection path. The report explicitly distinguishes actual printed height from planned geometry. It does not claim the thin layer will detach at the normal sweep height: the operator removes that layer after all motion ends. This verifies sequencing and leakage behavior, not full-height mechanical release. The usual production object-height validator is not relaxed.
 

@@ -38,15 +38,15 @@ OPENAI_API_KEY=<your-key-here>
 ```
 
 The backend fallback order is configured in `configs/models.yaml`. The Main GUI
-API-key `Loading` control is stronger than this static fallback: when a saved
-key is loaded, OpenAI is promoted to the first inference route until the key is
-unloaded.
+API-key `Loading` control takes precedence over that order: loading a saved key
+makes OpenAI the first inference route until the key is unloaded.
 
 ## Main GUI API Key Store
 
 The Main GUI `Current Models` panel includes an `API Key` control. Use it when
 this checkout does not have a local `.env` yet or when a new operator needs to
-set the OpenAI fallback key from the browser.
+save the OpenAI key from the browser. Loading that key makes the API route
+primary, as described below.
 
 - `API Key` opens a small local input dialog.
 - `Loading` enables the saved key and makes OpenAI API the first inference route.

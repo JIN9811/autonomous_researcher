@@ -17,7 +17,7 @@ after the device fault clears; they do not prevent resolution. Resolution never
 changes the job state, issues a command, or resumes a paused run. The independent
 printer-start and safety gates still apply. Successful upload,
 cached/unknown telemetry, a simulated bridge, a different printer, or elapsed
-time alone cannot resolve it. Profile connection changes invalidate identity.
+time alone cannot resolve it. Changes to a profile's connection invalidate that identity.
 
 Both successful GUI monitor updates and a bounded read-only refresh before a
 runtime stage's Guardian gate can resolve eligible alerts. The latter does not
