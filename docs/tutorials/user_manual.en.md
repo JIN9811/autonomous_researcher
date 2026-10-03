@@ -19,27 +19,36 @@ related_docs:
 supersedes: []
 -->
 
-# Operator Walkthroughs
+<a id="operator-walkthroughs"></a>
+
+# AX4LAB Operator Manual
 
 [한국어](user_manual.ko.md) · [First run](first_autonomous_run.en.md) · [Tutorial index](first_autonomous_run.md)
 
 ## Before you start
 
-Use this guide after the first virtual run. Each exercise states its goal, exact
-controls and completion check. The first device setup requires a trained operator;
-these pages do not authorize unattended robot or UTM motion.
+Use this manual to prepare the next experiment, perform a supervised device task,
+or inspect and recover an existing run. You do not need to complete every section
+in order. If you have not yet followed a candidate from planning to saved output,
+complete the [first virtual run](first_autonomous_run.en.md) first.
 
-Read [Requirements](../../REQUIREMENTS.md) for installation. For an already installed
-system, `atr up` opens the server at `http://localhost:7860`.
-Do not restart a running experiment for a documentation exercise.
+Start with [Install](../../install/README.md) on a new workstation. On an installed
+Linux/WSL system, use `atr up` and open `http://localhost:7860`; native Windows uses
+`python -m app.serve` from its prepared environment. Use an existing server if a run
+is active. First-time device setup requires a trained operator, and these procedures
+do not authorize unattended robot or UTM motion.
 
 Figures are 1920 × 1080 captures from 29 September 2026. Some show historical or idle
 state; none is a new hardware test. Private paths/connection details are redacted.
 Values shown are not universal settings.
 
-## Exercise 1 — Find the right workspace
+<a id="exercise-1--find-the-right-workspace"></a>
 
-**Goal:** distinguish configuration from the run that consumes it.
+## Choose a workspace for the task
+
+Workspaces prepare devices and defaults; Live contains the commands, approvals and
+reports for a particular experiment. Keep that distinction when deciding where to
+work: a successful standalone action does not complete a waiting Live step.
 
 1. Open Main and scroll to **Device Workspaces**.
 2. Choose the device you intend to configure.
@@ -50,19 +59,28 @@ Values shown are not universal settings.
 | Task | Workspace | Tutorial/reference |
 |---|---|---|
 | Print defaults, slicing, transfer | 3D Printer, `/printer` | [Printer walkthrough](device_workspace_3dp_usage.en.md) |
-| Robot devices, recording, rollout | Manipulation, `/lerobot` | Exercises 3–4 below |
+| Robot devices and demonstration recording | Manipulation, `/lerobot` | [Record one demonstration](#record-one-robot-demonstration) |
+| Policy rollout and loop task defaults | Manipulation, `/lerobot` | [Configure the correct execution path](#configure-a-policy-for-standalone-or-loop-use) |
 | UTM camera and ROS | Vision, `/device-bridge/vision-utm` | [Vision walkthrough](device_workspace_vision_camera_bridge_usage.en.md) |
-| Windows bridge and Skills | Windows Automation, `/equipment/windows` | Exercise 5 |
-| BO configuration | Bayesian Optimization, `/bo` | Exercise 6 |
+| Windows bridge and Skills | Windows Automation, `/equipment/windows` | [Prepare equipment automation](#prepare-windowsutm-automation) |
+| BO configuration | Bayesian Optimization, `/bo` | [Trace a candidate's result](#trace-a-result-from-design-to-optimization) |
 | Hardware interlocks | PLC Safety, `/plc` | [PLC bridge](../device_bridges/plc_safety_bridge.md) |
-| Retained knowledge | Knowledge, `/knowledge` | Exercise 7 |
+| Retained knowledge | Knowledge, `/knowledge` | [Check a knowledge source](#check-the-source-of-retained-knowledge) |
+| Blocked experiment | Live | [Diagnose and resume](#diagnose-and-resume-the-same-run) |
+| Saved session | Main → replay | [Review without device actions](#review-a-saved-session-without-device-actions) |
+| Workflow structure and runtime evidence | Runtime IDE, `/ide` | [Inspect the workflow](#inspect-the-workflow-in-runtime-ide) |
 
-**Checkpoint:** you can return to the same run in Live without launching another
-workspace operation. Opening a page is not a stage-completion action.
+The Main figure locates the workspace launchers. After inspecting a workspace,
+return to the same Live run and check its ID before giving a run-bound instruction.
+Opening the workspace does not start or complete an agent stage.
 
-## Exercise 2 — Move from virtual testing to hardware
+<a id="exercise-2--move-from-virtual-testing-to-hardware"></a>
 
-**Goal:** select the intended physical boundary before a new run.
+## Prepare a new run to use hardware
+
+Move beyond Virtual Bridge only when the selected devices are commissioned, the
+work area is ready and an operator can supervise. **Test** is not a safety boundary
+by itself. Choose the intended physical effects before submitting a new request:
 
 1. Open **Test Mode Settings** from Main.
 2. Compare **Installed Printer** and **Physical Print**.
@@ -75,21 +93,26 @@ workspace operation. Opening a page is not a stage-completion action.
 
 ![Physical Print: printing and cooling enabled](assets/screenshots/2026-09-29/profile-physical.png)
 
-**Checkpoint:** the admitted contract and selected profile agree.
-Installed Printer is not a dry-run: it can eject and operate downstream real devices.
-If supplying a specimen yourself, follow the current operator request; do not mark
-a sample present or removed before actually observing it. Physical Print uses the
-full print path.
+Use the two figures to compare print-body and cooling choices, not to copy their
+saved values. Confirm that the reviewed experiment contract names the profile you
+selected. **Installed Printer** skips the print body and cooling but can send an
+ejection-only artifact and operate downstream real devices. **Physical Print** uses
+the full print path. If you supply a specimen yourself, respond to the current
+operator request only after observing that it is actually present or removed.
 
 Passing the installed-printer exercise does not validate first-layer adhesion,
 full print duration or nozzle-cleaning performance. Validate physical printing
 separately under supervision. Profile edits affect the next admitted run, not an
 already running one. See [Test Mode](../runtime/test_mode.md).
 
-## Exercise 3 — Configure robot ports and record one demonstration
+<a id="exercise-3--configure-robot-ports-and-record-one-demonstration"></a>
 
-**Goal:** create an identifiable local demonstration without confusing recording,
-training and experiment execution.
+## Record one robot demonstration
+
+A demonstration records camera and joint/action data for later training. Recording
+is a supervised robot operation, not a training run or an autonomous experiment.
+Prepare calibrated devices, available cameras and a new local dataset identity
+before starting; stop if another session owns the same hardware.
 
 1. Open **Manipulation → Profile** and select the intended robot profile.
 2. Expand **2. Device Port Setup**. Read the saved follower, leader and camera entries.
@@ -116,14 +139,25 @@ training and experiment execution.
    cleanup, not the normal save button.
 9. Inspect the action status/log and recorded dataset before training.
 
-**Checkpoint:** a saved episode at the intended path, with the expected camera and
-joint channels. A successful launch without saved frames/actions is not a recording.
-If startup fails, inspect the session log, ports, calibration and dataset identity;
-do not delete calibration or reconnect a device while another session owns it.
+In the figures, port setup is separate from episode controls. After normal closure,
+open the intended dataset and verify that the accepted episode contains the expected
+camera frames and joint/action channels. Keep the dataset identity and session log
+with that result; a process that launched but saved no data is not a recording.
 
-## Exercise 4 — Configure standalone inference and the experiment bridge
+If startup fails, use the session log to distinguish a port, calibration, camera
+ownership or dataset-compatibility problem before retrying. Do not erase calibration
+or reconnect an owned device as a generic repair. The
+[LeRobot bridge](../device_bridges/lerobot_bridge.md) gives the detailed setup and
+recording contract for the selected profile.
 
-**Goal:** avoid saving a rollout option in the wrong place.
+<a id="exercise-4--configure-standalone-inference-and-the-experiment-bridge"></a>
+
+## Configure a policy for standalone or loop use
+
+A standalone rollout tests a policy directly; the experiment loop reads a separate
+task configuration. Decide which path you are preparing, then save in that path's
+section. Both can move the robot, so check calibration, hardware ownership and the
+clear work area before execution.
 
 1. Open **10. Inference / Rollout** for a standalone supervised policy test.
 2. Check the policy checkpoint, task and action rate.
@@ -141,14 +175,21 @@ do not delete calibration or reconnect a device while another session owns it.
 
 ![Task-specific Manipulation Agent Bridge settings](../gui/assets/screenshots/2026-09-29/lerobot-agent-bridge.png)
 
-**Checkpoint:** the task-specific saved configuration matches the intended next
-session. Inspect MAN's live telemetry, policy tracking and artifacts during a real
-run. A 3D robot display alone does not prove grasp or placement success.
-Do not run a standalone rollout concurrently with a loop-owned manipulation.
+The first figure is the standalone form; the second is the task-specific bridge.
+Recheck the saved policy, task, rates and options in the section you will actually
+use. **Save Rollout Defaults** does not update **Save Task Defaults**, or vice versa.
+During a loop-owned run, inspect MAN's measured telemetry, policy tracking and
+artifacts. A rendered robot does not establish grasp or placement success. Never
+start a standalone rollout while the loop owns manipulation.
 
-## Exercise 5 — Prepare Windows/UTM automation
+<a id="exercise-5--prepare-windowsutm-automation"></a>
 
-**Goal:** verify the actual target desktop and equipment sequence before admission.
+## Prepare Windows/UTM automation
+
+A connected worker can still show the wrong application or method. Before approving
+equipment execution, coordinate with the equipment operator and inspect both the
+target desktop and the sequence that will act on it. For a new worker, complete
+[bridge installation and pairing](../../Pyautogui_server_for_window/README.md) first.
 
 1. Open **Windows Automation** and inspect the selected bridge/worker connection.
 2. Check that the received desktop is the intended UTM application, not a login,
@@ -166,33 +207,56 @@ Do not run a standalone rollout concurrently with a loop-owned manipulation.
 
 ![Equipment Agent Manager and flow composition](../gui/assets/screenshots/2026-09-29/equipment-agent-manager.png)
 
-**Checkpoint:** correct worker, desktop, method and flow; current observation evidence
-belongs to the run before EQP executes. A green connection indicator does not prove
-compression or height return completed.
+The workspace figure locates the desktop view; the Agent Manager figure shows where
+to inspect the ordered flow. Check worker identity, application, method and Skills
+together. Before EQP executes, the required current observations must belong to that
+run. A green connection indicator proves neither compression nor height return;
+those need their own completion evidence. If the desktop or method is wrong, resolve
+that with the equipment operator rather than editing an active flow to skip the step.
 
-## Exercise 6 — Inspect one candidate from design to optimization
+<a id="exercise-6--inspect-one-candidate-from-design-to-optimization"></a>
 
-**Goal:** follow one candidate rather than combining unrelated cycles.
+## Trace a result from design to optimization
+
+Use this check before interpreting or sharing a result. The
+[first-run walkthrough](first_autonomous_run.en.md#step-7--read-analysis-and-bo)
+explains basic navigation; here the task is to establish which measurement produced
+which optimization observation. Start with one run, cycle and candidate identity.
 
 1. In Live, select **DSN → Report**. Record candidate ID, cell size, wall thickness,
    geometry artifact and constraint result.
-2. Select **ANL → Report**. Check the selected cycle, SS/FD axes and units, source CSV,
-   mass used in SEA, and the actual integration/strain evidence.
+2. Select **ANL → Report**. Check the selected cycle, stress–strain (SS) and
+   force–displacement (FD) axes and units, source CSV, mass used for specific energy
+   absorption (SEA), and the actual integration/strain evidence.
 3. Select **BO → Report**. Check objective identity/direction and observation count.
-4. If a GP exists, inspect the 2D/3D mean, uncertainty, acquisition and next candidate.
+4. If a Gaussian-process (GP) model exists, inspect its 2D/3D mean, uncertainty,
+   acquisition and next candidate. For cell size and wall thickness, an old 1D
+   display is not the full design space.
 
 ![Analysis report with curve and performance evidence](../gui/assets/screenshots/2026-09-29/live-analysis.png)
 
 ![BO posterior and recommendation](../gui/assets/screenshots/2026-09-29/live-bo.png)
 
-**Checkpoint:** design → source measurement → analyzed metric → BO observation are
-linked to the same identity. Before slicing, absent mass is unknown; afterward use
-the recorded mass used by analysis, not an unrelated geometry estimate.
-A BO candidate is a recommendation, not an already tested specimen.
-An initial LHS view without GP data can be correct.
-See [Analysis](../agents/analysis_agent.md) and [BO](../agents/bo_agent.md).
+Keep a small evidence bundle: candidate identity and geometry path, source CSV,
+analyzed metric with units and mass source, and the BO observation that consumed it.
+Before slicing, absent mass is unknown; afterward use the recorded analysis mass,
+not an unrelated geometry estimate. If the identities or sources do not agree, do
+not combine the values into a result.
 
-## Exercise 7 — Find retained knowledge without changing run evidence
+The figures show historical analysis and optimization, not a fresh measurement.
+A proposed BO candidate has not yet been tested. An initial Latin-hypercube
+sampling (LHS) view may correctly lack GP data. See
+[Analysis](../agents/analysis_agent.md) and [BO](../agents/bo_agent.md) for metric and
+model interpretation, and [artifact preservation](../gui/artifact_preservation.md)
+for retaining the complete source chain.
+
+<a id="exercise-7--find-retained-knowledge-without-changing-run-evidence"></a>
+
+## Check the source of retained knowledge
+
+Use Knowledge to understand prior procedures and observations, then decide whether
+they apply to the current task. It is not a substitute for today's camera image or
+device completion record.
 
 1. Open **Knowledge → Wiki**.
 2. Select an article and read its source references and scope.
@@ -201,12 +265,19 @@ See [Analysis](../agents/analysis_agent.md) and [BO](../agents/bo_agent.md).
 
 ![Knowledge Wiki with source-backed content](../gui/assets/screenshots/2026-09-29/knowledge-wiki.png)
 
-**Checkpoint:** you can identify the source and whether it is historical, procedural
-or current run evidence. A wiki instruction cannot prove today's device action.
-Some private views require authorized access; a 401 is not an invitation to bypass
-authentication. See [Knowledge operations](../knowledge/markdown_memory_operations.ko.md).
+The article view in the figure should lead you back to a source and its scope.
+Before using a statement, distinguish historical evidence, procedural instructions
+and current run evidence. Private views require authorization: request access if
+you receive a 401 rather than bypassing it. For source and memory operations, see
+[Knowledge operations](../knowledge/markdown_memory_operations.en.md).
 
-## Exercise 8 — Diagnose and resume the same run
+<a id="exercise-8--diagnose-and-resume-the-same-run"></a>
+
+## Diagnose and resume the same run
+
+When a run pauses, preserve its identity and evidence before changing anything.
+The Timeline figure locates the sequence of events that explains where it stopped.
+Do not assume that clearing a device warning also resumes the experiment.
 
 1. Note run ID, cycle, agent and the exact unresolved reason.
 2. Open that agent's **Timeline**, **Artifacts**, and **Backend** as needed.
@@ -217,14 +288,25 @@ authentication. See [Knowledge operations](../knowledge/markdown_memory_operatio
 
 ![Timeline for locating a blocked step](../gui/assets/screenshots/2026-09-29/live-timeline.png)
 
-**Checkpoint:** recovery is recorded on the existing run, not a duplicate run with
-copied completion flags. Resume may repeat a recoverable step; it is not a blanket
-guarantee of exactly-once physical execution. Inspect the requested route and device
-state before approving motion. Do not delete failure history, clear PLC latches
-blindly, or press Start to impersonate Resume.
-See [Runtime flow and recovery](../runtime/closed_loop_and_pages_reference.md).
+Recovery should add evidence to the same run. **Resume** may repeat a recoverable
+step, so inspect the requested continuation and actual device state before approving
+motion; it does not guarantee exactly-once physical execution. Do not copy completion
+flags to a new run, delete failure history, clear PLC latches blindly or use **Start**
+as Resume.
 
-## Exercise 9 — Open a read-only replay
+Use [Resume](../gui/run_resume.md) for the continuation rules,
+[printer wait recovery](../gui/printer_wait_recovery.md) if printing is still pending,
+and [Vision review recovery](../gui/vision_review_recovery.md) for a failed review.
+If no eligible Resume is offered, retain the run ID and failure details for support
+instead of trying an administrator checkpoint operation on your own.
+
+<a id="exercise-9--open-a-read-only-replay"></a>
+
+## Review a saved session without device actions
+
+Use Main's Replay to inspect recorded states after a run or during a handover.
+It reads retained evidence; it is not LeRobot motion replay and does not recreate
+missing observations by querying live devices.
 
 1. Return to Main; choose **Mode = replay**.
 2. Select an **Experiment session** and click **Start**.
@@ -236,13 +318,19 @@ See [Runtime flow and recovery](../runtime/closed_loop_and_pages_reference.md).
 
 ![Replay window reusing the Live layout](../gui/assets/screenshots/2026-09-29/replay.png)
 
-**Checkpoint:** the header says **REPLAY**, selected run/cycle/point changes, and no
-hardware action is issued. Missing snapshots cannot be reconstructed by fetching a
-new live camera frame. Artifact files may outlive their recorded point; distinguish
-point-bound evidence from a general retained file.
-See [Replay reference](../gui/run_replay.md).
+Look for **REPLAY** in the header and verify that the selected run/cycle/point changes
+as you navigate. The Main figure shows the session selector; the second figure shows
+the resulting read-only window. A missing snapshot must stay identifiable as missing.
+An artifact can remain available without a corresponding recorded point, so distinguish
+point-bound evidence from a general retained file. See [Replay](../gui/run_replay.md).
 
-## Exercise 10 — Inspect runtime composition without changing the loop
+<a id="exercise-10--inspect-runtime-composition-without-changing-the-loop"></a>
+
+## Inspect the workflow in Runtime IDE
+
+Runtime IDE is also an operating tool: use it to understand which module comes next,
+how a connection is defined and where its runtime evidence appears. Observation
+does not require editing or activating a workflow.
 
 1. Open `/ide` and inspect the graph and node/module configuration.
 2. Follow an edge to its contract and locate the associated runtime evidence.
@@ -251,10 +339,13 @@ See [Replay reference](../gui/run_replay.md).
 
 ![Runtime IDE graph and inspector](../gui/assets/screenshots/2026-09-29/ide-graph.png)
 
-**Checkpoint:** distinguish a UI report, a module implementation, a package connection
-contract and the executing graph. Changing display metadata does not grant device
-permissions. See [Runtime IDE](../runtime/runtime_ide.md),
-[Modularity](../modularity.md) and [Module Management screens](../gui/visual_structure.md).
+Use the graph and inspector in the figure to relate a visible report to a module,
+its connection contract and the executing graph. Display metadata does not grant
+device permissions. For normal inspection, continue with [Runtime IDE](../runtime/runtime_ide.md).
+If you intend to extend the system, treat that as a separate development task:
+read [Modularity](../modularity.md), [Module Management screens](../gui/visual_structure.md)
+and [CONTRIBUTING](../../CONTRIBUTING.md) before validating, compiling, dry-running or
+activating an edited version.
 
 ## Completion checklist and further reference
 

@@ -35,42 +35,51 @@ supersedes: []
 
 # Evaluation and Results
 
-## Status at a Glance
+<a id="summary"></a>
 
-| At a glance | Details |
-|---|---|
-| Topic | Reported results and their evaluation limits |
-| Evidence boundary | [Artifact manifest](artifact_manifest.yaml); supervised mixed-mode integration, not general scientific efficacy |
-| Recorded basis | 2026-09-28 archive audit; earlier records retain their dates · [Scope and verification](#verification) |
+Fifteen completed Analysis observations retain matching geometry, curves,
+metrics and BO records in the audited campaign. That is the principal result:
+a recorded multi-cycle evidence chain, checked without rerunning hardware.
+The archive also contains failed and cancelled attempts and recovery
+interventions. Completion therefore does not establish unattended reliability,
+independent fabrication identity, scientific improvement or live safety
+effectiveness.
 
-## Summary
+The two earlier supervised one-cycle demonstrations establish narrower
+integration results. Read them beside the campaign audit, not as three points
+on a common scientific-improvement curve.
 
-The current evidence establishes bounded architecture and documentation
-contracts, plus supervised mixed-mode closed-loop integration evidence.
-The latest archive audit reconciles fifteen completed Analysis observations
-with matching Design/Specimen artifacts and BO records (`E-INSPECT-CAMPAIGN-001`).
-The earlier one-cycle hardware demonstrations remain separate evidence.
-It does not establish end-to-end scientific efficacy, generalized
-safety effectiveness, live-hardware robustness, or superiority to another
-system. This chapter reports that boundary as a result rather than hiding it
-behind incomplete tables.
+## What the three experiment records establish
 
-## Scope
+| Record | Observation | Qualification needed to interpret it |
+|---|---|---|
+| [First September 7 cycle](evidence/2026-09-07-supervised-closed-loop.md) | Live UTM clearance, Analysis and next-design handoff; BO chose LHS point 2/8 | Deposition skipped; operator-reported specimen substitution; `1.275e-06 MJ/m³` is not a publishable material value for that design |
+| [Later September 7 cycle](evidence/2026-09-07-latest-cycle-demonstration.md) | 2,113 measured samples; `1.941513759 MJ/m³`; next Design/Specimen entry | Deposition still skipped; earlier substitution/near-zero value not attributed here; LHS continuation is not acquisition-ranked improvement |
+| [September 28 campaign audit](evidence/2026-09-28-campaign-archive-audit.md) | 15/15 identities, STL hashes and recorded SEA normalizations matched; terminal BO report | Read-only inspection of an intervention-containing archive; SEA is **J/g**, with slicer mass; no independent fabrication certification |
 
-Results are limited to evidence listed in `artifact_manifest.yaml`. Historical
-test notes and runtime snapshots provide context but are not silently promoted
-into this paper's evaluated result set.
+The [setup chapter](05_experimental_setup.md#setup-of-the-retained-campaign)
+explains the campaign geometry, objective and mass denominator. The dated
+records remain authoritative for their individual conditions and warnings.
 
-## Evidence Basis
+## Principal Results
 
-- `E-INSPECT-ARCH-001`: inspected FastAPI and graph structure.
-- `E-INSPECT-CAMPAIGN-001`: [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md), including hashes, owner identity, curves, SEA normalization and retained failed attempts.
-- `E-LIVE-LOOP-001`: [one supervised mixed-mode iteration](evidence/2026-09-07-supervised-closed-loop.md), with raw archives retained locally and a public result/hash index.
-- `E-LIVE-LOOP-002`: [later September 7 one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with measured-data quality, Analysis-to-BO feedback, and next-design continuity.
-- `E-TEST-DOC-001`: automated documentation-governance and publication
-  contract tests.
+| Result ID | Result | Unit and denominator | Environment | Status | Evidence |
+|---|---|---|---|---|---|
+| R-ARCHIVE-15 | Fifteen completed observations with generated STL, canonical SS curves and metrics; final BO report | 15/15 identity/hash/formula checks in one campaign | Archive inspection | `supported` within archive scope | `E-INSPECT-CAMPAIGN-001` |
+| R-LOOP-01 | UTM clearance → Analysis → BO-managed LHS → next Design/Specimen entry | One observed feedback iteration, no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-001` |
+| R-LOOP-02 | One-cycle demonstration completed with 2,113 measured CSV samples; BO objective 1.941513759 MJ/m³; next Design/Specimen reached | One selected cycle; no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-002` |
+| R-ARCH-01 | 19 configured graph nodes, 68 declared graph edges, and 12 stage-dispatch entries | Configuration entries at one commit | Inspection | `supported` | `E-INSPECT-ARCH-001` |
+| R-API-01 | 346 FastAPI `APIRoute` entries and 353 total application routes | Route entries at one import baseline | Inspection | `supported` | `E-INSPECT-ARCH-001` |
+| R-DOC-01 | 23 focused documentation tests passed in the initial validator cycle | 23 selected tests, 0 failures | Test | `supported` for the tested contracts | `E-TEST-DOC-001` |
+| R-LIVE-01 | Independently certified end-to-end fabrication of every campaign specimen | No independent fabrication-audit denominator | Live | `not_evaluated` | Archive completion alone is insufficient |
+| R-SCI-01 | Scientific improvement over a baseline | No study denominator | Comparative | `not_evaluated` | No qualifying evidence |
+| R-SAFE-01 | Reduction in unsafe or unintended physical actions | No scenario denominator | Simulation/live | `not_evaluated` | No qualifying evidence |
 
-Each record names its environment, commit, command, inputs, outputs, and hash.
+R-ARCH-01 and R-API-01 are historical architecture counts, not throughput,
+quality or stability measures. R-DOC-01 validates documentation tooling, not
+system behavior or scientific validity. The invocation archive contains
+485 attempts: 471 completed, 13 failed and one cancelled. Those are invocation
+outcomes, not a physical-task success rate or fifteen independent campaigns.
 
 ## Evaluation Matrix
 
@@ -89,24 +98,6 @@ Each record names its environment, commit, command, inputs, outputs, and hash.
 | Extension behavior across representative adapters | RQ4 | Test/browser/live as applicable | `not_evaluated` | No paper-scoped matrix | General compatibility is not claimed. |
 | Browser operator workflows | RQ3, RQ4 | Browser | `not_evaluated` | No paper-scoped browser record | Existing historical audits are not reclassified automatically. |
 | End-to-end scientific outcome | RQ1–RQ3 | Simulation/live plus domain protocol | `not_evaluated` | No qualifying record | No accuracy, yield, discovery, or optimization outcome is reported. |
-
-## Principal Results
-
-| Result ID | Result | Unit and denominator | Environment | Status | Evidence |
-|---|---|---|---|---|---|
-| R-ARCH-01 | 19 configured graph nodes, 68 declared graph edges, and 12 stage-dispatch entries | Configuration entries at one commit | Inspection | `supported` | `E-INSPECT-ARCH-001` |
-| R-API-01 | 346 FastAPI `APIRoute` entries and 353 total application routes | Route entries at one import baseline | Inspection | `supported` | `E-INSPECT-ARCH-001` |
-| R-DOC-01 | 23 focused documentation tests passed in the initial validator cycle | 23 selected tests, 0 failures | Test | `supported` for the tested contracts | `E-TEST-DOC-001` |
-| R-LOOP-01 | UTM clearance → Analysis → BO-managed LHS → next Design/Specimen entry | One observed feedback iteration, no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-001` |
-| R-LOOP-02 | One-cycle demonstration completed with 2,113 measured CSV samples; BO objective 1.941513759 MJ/m³; next Design/Specimen reached | One selected cycle; no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-002` |
-| R-ARCHIVE-15 | Fifteen completed observations with generated STL, canonical SS curves and metrics; final BO report | 15/15 identity/hash/formula checks in one campaign | Archive inspection | `supported` within archive scope | `E-INSPECT-CAMPAIGN-001` |
-| R-LIVE-01 | Independently certified end-to-end fabrication of every campaign specimen | No independent fabrication-audit denominator | Live | `not_evaluated` | Archive completion alone is insufficient |
-| R-SCI-01 | Scientific improvement over a baseline | No study denominator | Comparative | `not_evaluated` | No qualifying evidence |
-| R-SAFE-01 | Reduction in unsafe or unintended physical actions | No scenario denominator | Simulation/live | `not_evaluated` | No qualifying evidence |
-
-The first two rows are architecture counts, not throughput, quality, or
-stability metrics. The third row validates documentation tooling, not system
-or scientific behavior.
 
 ## RQ1 Assessment
 
@@ -131,6 +122,15 @@ history. These invocation outcomes are not a physical-task success-rate estimate
 An exhaustive failure-class recovery benchmark remains separate work.
 
 ## RQ2 Assessment
+
+The campaign audit checks the Design result's specimen identity against
+Specimen and Analysis, rather than relying on a Design manifest that may
+describe the incoming previous specimen. It matches preserved STL and
+curve/metric hashes, and checks the recorded SEA normalization. Iteration 15
+ends with BO's `final_report`, decision `completed`, and no next candidate.
+These are useful lineage findings; neither the hashes nor the formula check
+independently identifies the physical material. Retained curve-quality and
+boundary-peak warnings remain part of interpretation.
 
 The artifact schema and validator support `C-TRACE-DOC-01` only partially.
 They prevent supported claims from referencing missing evidence and validate
@@ -175,6 +175,23 @@ statistical superiority evidence.
 These gaps are release and study-planning inputs, not zero-valued results.
 
 ## Verification
+
+<a id="scope"></a>
+
+Results are limited to evidence listed in `artifact_manifest.yaml`. Historical
+test notes and runtime snapshots provide context but are not silently promoted
+into this paper's evaluated result set.
+
+<a id="evidence-basis"></a>
+
+- `E-INSPECT-ARCH-001`: inspected FastAPI and graph structure.
+- `E-INSPECT-CAMPAIGN-001`: [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md), including hashes, owner identity, curves, SEA normalization and retained failed attempts.
+- `E-LIVE-LOOP-001`: [one supervised mixed-mode iteration](evidence/2026-09-07-supervised-closed-loop.md), with raw archives retained locally and a public result/hash index.
+- `E-LIVE-LOOP-002`: [later September 7 one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with measured-data quality, Analysis-to-BO feedback, and next-design continuity.
+- `E-TEST-DOC-001`: automated documentation-governance and publication
+  contract tests.
+
+Each record names its environment, commit, command, inputs, outputs, and hash.
 
 Initial synthesis: 2026-08-09; live records added on 2026-09-07; retained campaign
 audited on 2026-09-28. Older architecture/test records keep their original

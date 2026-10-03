@@ -28,11 +28,17 @@ supersedes: []
 
 ## Summary
 
-AX4LAB has several views of the same experimental system, not several independent
-experiment engines. The Main GUI selects the runtime context; Live GUI presents
-agent reports and conversation; device workspaces expose specialized settings;
-Runtime IDE exposes executable composition; Knowledge exposes retained context;
-Replay reads recorded sessions.
+Use this atlas when you know what you want to do but cannot find the right screen
+or do not know which status to trust. For a complete operating sequence, use the
+[GUI task guide](gui.md); for a paused run, use the
+[recovery chooser](run_resume.md). The page map below is the quickest route to a
+workspace, while the figures explain the controls and evidence to look for there.
+
+AX4LAB's screens share one experiment system. Main chooses the runtime context;
+Live shows that run's reports and conversation. A workspace configures or acts
+on its device/service, Runtime IDE lets you inspect the workflow, Knowledge
+provides retained context, and Replay reads recorded events. Opening a second
+window does not create a second experiment controller.
 
 All screenshots below are **1920 × 1080 browser-content captures at 100% scale**,
 taken on 29 September 2026. Open an image to inspect its original resolution.
@@ -42,12 +48,22 @@ addresses, credentials and local paths are redacted where present.
 
 ## Scope
 
-This document explains where information and controls live, how the views relate,
-and which details belong in the corresponding specialist reference. It is not a
-new operating procedure, a hardware test, or proof that every visible status is
-fresh. The photographed session had completed its fifteenth cycle; some reports
-still expose missing or historical information. No experiment was started for
-these figures.
+Read each image as a screen-location example, not a recommended experiment or
+live readiness check. The photographed session had completed its fifteenth cycle;
+some reports still expose missing or historical information. No experiment was
+started for these figures. Idle, stale, empty and blocked states are retained so
+you can recognize them instead of expecting every panel to show success.
+
+When opening a screen for your own run:
+
+1. Confirm the run/cycle/specimen or device profile before interpreting a value.
+2. Check whether the view is LIVE, a workspace, or REPLAY. A workspace preview
+   is not the current agent's verification evidence.
+3. Read observation time, verdict and blocker together. A picture, selected tab
+   or completed upload is not by itself physical completion.
+4. Follow the owner's result to its retained artifacts. If a field is absent,
+   keep it unknown; use the task/recovery guide rather than repeating hardware
+   actions to make the screen look complete.
 
 ## Source of Truth
 
@@ -83,6 +99,11 @@ for historical inspection.
 
 ## 2. Main GUI: Entry and Runtime Control
 
+Start with the upper dashboard to check model availability and Run Control.
+Then scroll to **Device Workspaces** to open a specific setup page. Choose the
+workspace by the task, not by the order of its cards: these launchers are not
+the experiment's step sequence.
+
 ![Main dashboard: LLM control and run control](assets/screenshots/2026-09-29/main-dashboard.png)
 
 **Figure GUI-1.** The upper dashboard separates model/backend availability from
@@ -105,6 +126,12 @@ any values. See [Test Mode](../runtime/test_mode.md) for the distinction between
 virtual bridges, installed-printer validation and physical printing.
 
 ## 3. Live GUI: Persistent Shell and Selected Agent
+
+To investigate a stage, first read the top strip, then single-click the relevant
+agent in the left binder. Start with **Report** for the result, **Backend** for
+its execution trace, and **Timeline** for event order. Choose **Artifacts** when
+you need the saved file itself. The context strip must still match the run and
+stage you intended to inspect.
 
 ![Live GUI with agent binder, report, chat and event dock](assets/screenshots/2026-09-29/live-overview.png)
 
@@ -176,6 +203,11 @@ entry is evidence to inspect, not authorization to repeat a device command.
 
 ### Printer
 
+Open **Open 3D GUI** from Main and check the selected printer before editing
+connection or defaults. Scroll to **Print Start & Early Layers** for slicing
+options. Save/re-slice before expecting changed settings in a new artifact;
+use the printer task guide for the later supervised publish step.
+
 ![Printer workspace with telemetry and preparation controls](assets/screenshots/2026-09-29/printer.png)
 
 **Figure GUI-9.** The top of `/printer` combines selected-printer identity,
@@ -188,10 +220,16 @@ started for this capture; unavailable telemetry is left visible.
 XYZ speed scale, start-point prime, independent early-layer/Z caps, bed leveling
 and calibration. These are saved installation values, not universal defaults.
 Changing a profile requires saving and re-slicing; it does not rewrite an
-already-generated file. See the [3DP guide](../tutorials/device_workspace_3dp_usage.ko.md)
+already-generated file. See the [3DP guide](../tutorials/device_workspace_3dp_usage.en.md)
 and [Bambu bridge](../device_bridges/bambu_x2d_bridge.md).
 
 ### Manipulation
+
+Choose the workspace tab for your task before changing settings. A direct
+**Inference / Rollout** selection and **Manipulation Agent Bridge** task have
+separate saved defaults. For recording controls and saved-dataset checks, use
+[robot workspace tasks](gui.md#operate-the-robot-workspace); a visible pose or
+loaded policy is not permission to start a competing robot session.
 
 ![LeRobot workspace navigation and setup](assets/screenshots/2026-09-29/lerobot.png)
 
@@ -212,6 +250,12 @@ the existing loop route. Do not assume that inspecting a standalone rollout form
 changes the agent's selected profile. See [LeRobot bridge](../device_bridges/lerobot_bridge.md).
 
 ### Vision, Equipment and PLC
+
+Use Vision's workspace for camera identity/setup and Live VIS for run-scoped
+inspection verdicts. In Equipment, select/check the worker before authoring or
+executing a Flow. In PLC, distinguish transport status from a latch or verified
+physical reset. If a safety gate is active, follow its recovery path instead of
+switching workspace/profile to bypass it.
 
 ![Vision camera and ROS bridge workspace](assets/screenshots/2026-09-29/device-bridge-vision-utm.png)
 
@@ -247,6 +291,12 @@ filled with synthetic points for documentation. See [BO](../agents/bo_agent.md).
 
 ## 5. Runtime IDE and Module Management
 
+Runtime IDE is also an operating aid: inspect the graph and select nodes to
+understand the current route or a missing handoff without modifying it.
+Double-click an agent node to inspect its internal graph tab. Editing, saving a
+version, management loading and runtime activation are distinct operations;
+none is required merely to look at the execution evidence.
+
 ![Runtime IDE toolbar and runtime summary](assets/screenshots/2026-09-29/ide.png)
 
 **Figure GUI-19.** Runtime IDE separates the run summary, graph/version controls,
@@ -269,6 +319,12 @@ membership and runtime activation are separate states. See
 [Modularity](../modularity.md); selecting a module does not start it.
 
 ## 6. Knowledge: Reference, Memory and Delivery
+
+Use Wiki for explanations and source links, Source Library for retained source
+documents, Memory for accessible experiment notes, and Agent Delivery when you
+need to check what context was supplied. Check access scope and source freshness
+alongside the result. A receipt records delivery, not proof that an agent used
+the text in its decision.
 
 ![Knowledge Workspace Wiki article](assets/screenshots/2026-09-29/knowledge-wiki.png)
 
@@ -339,6 +395,12 @@ See [Replay](run_replay.md) for coverage, image mapping and missing-data behavio
 
 ## Verification
 
+The following is the retained capture-method record for 29 September 2026,
+not a procedure required to use the screens or a new hardware validation.
+
+<details>
+<summary>Capture method and exclusions</summary>
+
 The screenshot collection used Chromium/Playwright with device scale factor 1,
 fresh browser contexts and the current application's templates/assets. The
 dedicated Browser plugin was not available. The browser blocked write/control
@@ -354,6 +416,8 @@ No model, print, robot motion, camera load, recovery or server restart was start
 The [capture inventory](assets/screenshots/2026-09-29/capture_manifest.json)
 records routes, dimensions and image hashes. Screenshots and local links are
 checked independently of hardware or scientific validation.
+
+</details>
 
 ## Related Documents
 

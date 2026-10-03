@@ -1,10 +1,35 @@
 # Agent evidence preservation
 
+Use **Artifacts** to find the files behind a reported result: the original curve,
+image, model, log or plotted numbers. Finding a file proves it was retained, not
+that the physical step or its verification succeeded.
+
+## Find the result for the right attempt
+
+1. In Live GUI, confirm the run in the context strip, select the agent, and open
+   **Artifacts**. The default list includes all recorded cycles for that agent.
+2. Narrow the session, loop and agent filters to your question. If an older file
+   is unclassified, choose **All files** and inspect its path and identity rather
+   than assuming it belongs to the currently displayed cycle.
+3. Open or download the relevant PNG/SVG, CSV, image or log. For a plotted result,
+   keep the CSV and the owner's result together so the figure can be interpreted.
+4. Compare the run, zero-based loop, attempt and execution ID with the owner's
+   Report/Backend trace. A BO iteration number is not an archive-loop identity.
+   Check `evidence_index.json` for gaps and `artifact_coverage.json` for owner
+   coverage before treating an absent file as a failed experiment.
+
+If a file is missing, report the gap with those identities. Do not substitute a
+current camera image or another attempt's output. To inspect what was visible
+at an earlier event, use [Replay](run_replay.md); its session-wide file explorer
+and recorded point have different time scopes.
+
 ![Live artifact explorer](assets/screenshots/2026-09-29/live-artifacts.png)
 
 *Live GUI → Artifacts, 1920 × 1080, 2026-09-29. Session, loop and agent filters
 scope the file list; All files broadens inspection beyond the current context.
 Private paths are redacted. Browsing evidence does not execute it.*
+
+## What is preserved
 
 Every agent invocation owns an immutable run, zero-based loop, attempt, and
 execution ID. The common archive retains inputs, outputs, decisions/handoffs,
@@ -31,6 +56,8 @@ An interrupted/running invocation is not declared complete. Unknown or missing
 historical data is not synthesized. In particular, a current `/tmp/latest` image
 must never replace an old cycle's missing image. New live captures may snapshot
 the explicit camera evidence directories through the existing archive.
+
+## Support: derived plots and historical backfill
 
 Plot export uses saved numbers only: no agent invocation, model fitting, metric
 recalculation, verification retry or device action. It runs in one separate

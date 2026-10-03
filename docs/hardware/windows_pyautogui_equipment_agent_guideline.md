@@ -1,5 +1,36 @@
 # Lab Equipment Agent / Windows Bridge 통합 운영 지침
 
+이 문서는 연결된 Windows worker로 장비 작업을 실행할 때, 무엇을 선택하고
+어떤 증거를 확인해야 하는지 설명합니다. 최초 설치와 연결은
+[Windows 연결 가이드](windows_pyautogui_bridge_windows_setup.md)를 먼저 따릅니다.
+HTTP 성공, 화면 클릭 성공, UTM 물리 시험 완료는 서로 다른 결과입니다.
+
+## 실행 전부터 결과 확인까지
+
+1. Linux `/equipment/windows`에서 사용할 worker를 선택하고 `Health`, `Programs`로
+   연결과 등록 프로그램을 확인합니다. 실험에서 사용할 exact Profile과
+   program/Skill version을 확인하며, unavailable 상태에서 다른 provider로 임의
+   전환하지 않습니다.
+2. Equipment Agent Manager의 Flow와 선택된 Skill 순서, 필요한 Vision 슬롯을
+   검토합니다. Vision을 요구하는 Profile이라면 최신 실행 식별자에 묶인 증거 또는
+   사용 가능한 Vision tool이 필요합니다. 둘 다 없으면 실행 전 차단이 정상입니다.
+3. 물리 장비 작업은 해당 Profile의 live 승인과 정지 경로를 확인한 후 기존
+   Equipment 실행 경로로 요청합니다. 진행 중인 실험을 수동 Windows 프로그램
+   실행으로 보조하려고 하지 않습니다.
+4. Live GUI → EQP에서 같은 `EquipmentExecutionRecord`의 진행 상태를 확인하고,
+   Backend/Artifacts에서 원시 단계 기록, 화면 증거와 출력 파일을 확인합니다.
+   Windows `Latest Local Result`는 worker의 결과이며 Linux의 완료 판정을
+   대신하지 않습니다.
+5. Profile이 요구한 파일 hash/row probe, identity와 Vision cross-check가
+   충족됐는지 확인합니다. Analysis로 넘기기 전에는 Manipulation의 post-test
+   clear와 새로운 Vision clearance도 통과해야 합니다.
+
+partial file이나 timeout이면 증거를 보존하고 중단 사유를 검토합니다. timeout은
+실행 효과가 불명확한 상태이므로 같은 Skill을 즉시 다시 실행하지 않습니다.
+지원 요청에는 run/specimen/request/sequence와 execution ID, 실패 코드, 단계 로그를
+포함하되 인증키는 제외합니다. 선택 단계만 실패했고 실행 이벤트가 전혀 없다면
+[제한된 Equipment 선택 복구](../gui/equipment_selection_recovery.md)를 확인합니다.
+
 ## 구조 원칙
 
 Linux ATR이 판단과 실행 기록을 소유하고 Windows Bridge는 경량 PyAutoGUI worker로 동작합니다.

@@ -39,47 +39,68 @@ supersedes: []
 
 # Experimental Setup
 
-## Status at a Glance
+<a id="summary"></a>
 
-| At a glance | Details |
-|---|---|
-| Topic | Evaluation environments, protocols and required evidence |
-| Evidence boundary | Protocol definition; planned evaluations are not completed results |
-| Recorded basis | 2026-08-09 · [Scope and verification](#verification) |
+The reported experiment is a retained Gyroid compression campaign, not a
+measurement of every supported laboratory configuration. To interpret its
+results, distinguish the settings recorded for that campaign from the platform's
+defaults and from the proposed evaluation protocols later in this chapter.
+The two earlier September 7 integration records used a different objective and
+remain separate demonstrations.
 
-## Summary
+## Setup of the retained campaign
 
-ATR evaluation is organized by evidence environment rather than by a single
-binary “works” label. Static inspection, automated tests, replay, simulation,
-browser observation, and live-hardware execution answer different questions.
-This chapter defines the shared setup and the information every result must
-record.
+The [September 28 audit](evidence/2026-09-28-campaign-archive-audit.md)
+examined fifteen completed Analysis observation sets. The campaign varied cell
+size from **6–9 mm** and wall thickness from **0.6–0.9 mm**, with **30 mm**
+specimen dimensions. These are campaign settings, not global design defaults.
+Relative density remained derived.
 
-## Scope
+Each retained set includes generated Gyroid STL, canonical stress–strain data,
+PNG/SVG curves, metrics and a BO record. The curve files contain 48,005 or
+48,006 rows. Mass is **slicer-reported**, not measured on a balance. The recorded
+specific energy absorption (SEA) uses energy to 50% of initial height divided
+by that mass:
 
-The current package includes repository inspection, documentation contract
-tests, a fifteen-observation archive audit, and retained supervised mixed-mode closed-loop records linked in
-[Results](06_evaluation_and_results.md). Broader comparative campaigns remain
-evaluation work.
+```text
+SEA [J/g] = energy_absorption_50pct_mJ / 1000 / mass_g
+```
 
-The working-tree Orchestrator Setup contract also has a bounded verification
-record for next-new-run admission and provider-case aggregation. It belongs to
-the `test`/controlled-local boundary, not to this chapter's live-environment
-rows or a complete campaign result; see the
-[runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
+For this 30 mm geometry, the 50% endpoint corresponds to **15 mm**. It is not a
+hardcoded platform travel limit. The audit reproduced the recorded normalization
+within `1e-6` J/g; it did not independently recalculate the raw-curve integral.
+The best way to interpret a value is therefore to keep its curve, mass source,
+geometry and endpoint together.
 
-The application setup combines existing instruments with VLA-enabled robot
-manipulation and structured software coordination. To evaluate the hardware
-simplification thesis, a future comparison should record reused equipment,
-added robot hardware, bespoke fixtures, integration effort, and operating cost
-against a clearly specified alternative. The current run is not that cost study.
+The experiment used a changing working tree and recovery interventions, not a
+single fingerprinted clean commit. Inspection was performed at `e70daa1`.
+The public audit is not a complete hardware inventory, calibration record,
+model/process fingerprint or independent per-cycle fabrication certification.
+Where those details are unavailable in the public record, they remain
+unreported; supported platform configurations must not be substituted for them.
 
-## Evidence Basis
+## Earlier supervised integration setup
 
-Requirements, checked-in configuration, graph/runtime contracts, test suites,
-and the paper evidence schema define the initial setup. Machine and equipment
-inventories must be added to an evidence record when those environments are
-actually used.
+Both September 7 records skipped deposition while exercising live equipment
+and the feedback handoff. Their objective was volume-normalized energy density
+in **MJ/m³**, not the later campaign's mass-normalized SEA in **J/g**. They
+must not be combined into one optimization curve.
+
+The [first record](evidence/2026-09-07-supervised-closed-loop.md) includes an
+operator-reported specimen substitution. Its transported value
+`1.275e-06 MJ/m³` is not a publishable material measurement for the requested
+design. The [later record](evidence/2026-09-07-latest-cycle-demonstration.md)
+contains 2,113 numeric compression samples and a `1.941513759 MJ/m³` BO
+objective. The earlier substitution and near-zero value are not attributed to
+that later run. Both show supervised integration; neither establishes a
+full-manufacturing or acquisition-ranked improvement result.
+
+## Evaluation plan beyond these records
+
+The following environments and protocols define how further questions should
+be evaluated. They are not a claim that the retained campaign completed every
+listed protocol or baseline. Static inspection, tests, artifact replay,
+simulation, browser observation and live execution answer different questions.
 
 ## Evaluation Environments
 
@@ -197,6 +218,10 @@ Primary measures:
 
 ## Controls and Baselines
 
+For the hardware-reuse thesis, compare reused instruments, added robot hardware,
+bespoke fixtures, integration effort and operating cost against a specified
+alternative. The retained campaign is not that cost study.
+
 A comparative experiment MUST name a baseline that answers the same objective
 under the same environment and stopping rule. Useful baseline classes may
 include a linear scripted pipeline, the same graph without knowledge feedback,
@@ -221,6 +246,32 @@ defaults. A venue-specific comparison matrix, statistical power analysis and
 independent physical fabrication audit remain outside the recorded evaluation.
 
 ## Verification
+
+<a id="scope"></a>
+
+The current package includes repository inspection, documentation contract
+tests, a fifteen-observation archive audit, and retained supervised mixed-mode closed-loop records linked in
+[Results](06_evaluation_and_results.md). Broader comparative campaigns remain
+evaluation work.
+
+The working-tree Orchestrator Setup contract also has a bounded verification
+record for next-new-run admission and provider-case aggregation. It belongs to
+the `test`/controlled-local boundary, not to this chapter's live-environment
+rows or a complete campaign result; see the
+[runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
+
+The application setup combines existing instruments with VLA-enabled robot
+manipulation and structured software coordination. To evaluate the hardware
+simplification thesis, a future comparison should record reused equipment,
+added robot hardware, bespoke fixtures, integration effort, and operating cost
+against a clearly specified alternative. The current run is not that cost study.
+
+<a id="evidence-basis"></a>
+
+Requirements, checked-in configuration, graph/runtime contracts, test suites,
+and the paper evidence schema define the initial setup. Machine and equipment
+inventories must be added to an evidence record when those environments are
+actually used.
 
 Initial protocol reviewed on 2026-08-09. The current artifact manifest also
 contains the 2026-09-07 live integration records and 2026-09-28 retained-campaign

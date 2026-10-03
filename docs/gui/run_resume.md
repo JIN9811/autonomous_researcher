@@ -1,9 +1,38 @@
 # Resume routing and recovery evidence
 
+Use **Resume** when you want to continue the same paused experiment, preserving
+its specimen, completed work and failed-attempt evidence. Do not use **Start** as
+a substitute: starting a new run is not recovery of the existing physical job.
+
+## Choose the recovery that matches the symptom
+
+Before clicking Resume, open Live GUI, check the run/cycle/specimen in the context
+strip, and read the failed owner's Report and Backend trace. Check the actual
+device state when a physical command may have been sent. A timeout or missing
+screen update does not prove that the command had no effect.
+
+| What you see | What to do next | What recovery may repeat |
+| --- | --- | --- |
+| SPC timed out, but the printer job was verified started | Follow [existing-printer-job recovery](printer_wait_recovery.md); match the printer task before Resume | Observation of that job, then fresh downstream verification; not slicing/upload/start |
+| SPC failed during geometry or file validation before device use | Check the pre-device conditions below, then Resume the same specimen if admitted | SPC manufacturing checks; not Design |
+| ActiveCam image review failed after a completed print | Use [Vision review recovery](vision_review_recovery.md); support must establish the eligible boundary first | Fresh Vision capture and the normal downstream tail; not print/ejection |
+| `EQUIPMENT_WORKFLOW_SELECTION_REJECTED`, before any Equipment lifecycle event | Use [Equipment selection recovery](equipment_selection_recovery.md); contact support for checkpoint/restore | Equipment selection and the gated tail; not completed fabrication/transfer |
+| E-STOP, PLC latch, active safety source, unknown device effect, or a different failure | Leave the run paused; retain evidence and use the device/Guardian recovery path | No generic retry is authorized |
+
+After an admitted Resume, watch the same run's stage and new attempt in Timeline
+and the selected owner's Report. If it remains blocked, read the returned reason;
+do not delete an old checkpoint, incident, or claim to make it proceed. Save the
+run ID, cycle, specimen ID, failure code, execution/session ID and relevant
+[artifacts](artifact_preservation.md) for support. A new attempt is not itself a
+successful completion; look for the owner's result and downstream verification.
+
+## What Resume guarantees
+
 Resume continues an existing paused task or selects a matching, proven recovery
-boundary. It does not start a new run or silently report success when no task
-exists. Running tasks are idempotent: repeated clicks never dispatch a second
-stage. Safety flags, active safety sources and the PLC latch remain authoritative.
+boundary. It does not start a new run or report success when no task exists.
+Repeated clicks on a running task never dispatch a second stage, but they are
+not a way to bypass a blocker. Safety flags, active safety sources and the PLC
+latch remain authoritative. Closing or refreshing Live GUI does not stop a run.
 
 Prepared ROS, image review, printer-wait, Equipment selection and Guardian
 review checkpoints retain their existing handlers. Routing checks the run,

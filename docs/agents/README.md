@@ -27,110 +27,18 @@ related_docs:
 supersedes: []
 -->
 
-Verification scope: full-document read and static source/configuration inspection
-at `dd0d772`; no hardware, model-provider or service execution. Dated test and
-physical-evidence entries below retain their original scope and are not rerun claims.
+<a id="agent-reference-index"></a>
 
-# Agent Reference Index
+# Understand the agents
 
-## Summary
+Each agent owns a particular part of the experiment, from agreeing on a plan
+to interpreting measurements. Start with the role involved in your task;
+the individual references explain its inputs, completion evidence, and
+recovery boundary.
 
-This index is the canonical entry point for the ten executable Autonomous
-Researcher (ATR) Framework agents used by AX4LAB. Each Reference explains what the agent
-actually owns, what it does not own, its orchestration-plan handoffs, data contracts,
-internal steps, APIs, tools and external connections, state and evidence,
-runtime modes, safety gates, error recovery, operator surfaces, and current
-verification boundary.
-
-The individual agent References retain their declared verification baselines.
-The [2026-09-28 code/documentation audit](../maintenance/code_documentation_audit_20260928.md)
-adds current main-code checks and the retained fifteen-iteration campaign;
-earlier test-local "no hardware run" statements do not describe the entire
-project's current evidence inventory. RPT is implemented in a separate
-development worktree and is not an additional stage in this main-loop inventory.
-The shared [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
-Reference describes the newer run/loop/agent/invocation storage contract,
-including failed/cancelled calls, file snapshots, and saved-loop GUI access.
-The [Modularity Reference](../modularity.md) explains core versus specialist
-ownership, Package composition, Device Bridges, and configuration lifecycle.
-
-## Status at a Glance
-
-| At a glance | Details |
-|---|---|
-| Inventory | Ten executable agents on the existing registered graph/module path |
-| Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis and BO reuse numerical services without a device bridge |
-| Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
-| Configuration ownership | Orchestrator/BO keep existing Setup fields; Knowledge/Guardian declarations use owner validation and explicit future-run module apply |
-| Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
-| Figures | Ten Sunburst role overviews plus editable agent figures; Orchestrator now includes Flow, Execution, and Connections views |
-| Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
-
-## Reading the References
-
-In IDE and document figures, **LLM** marks the High decision; **LLM call** marks
-the process that sends context to it and consumes its response. See the shared
-[node-label contract](../runtime/three_level_control_model.md#llm-node-labels).
-
-The [Manipulation Reference](manipulation_agent.md#installed-package-and-executable-structure)
-covers its two composite execution operations, source-bound control-area figure,
-eight owner frontend cards and shared LeRobot dependency. An Agent Package is a
-composition contract; the Device Bridges view shows the actual bridge components.
-
-The [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
-covers its composite owner, source-backed five-area view, module-owned Live
-report, and Analysis-owned measurement processing.
-
-The [BO Reference](bo_agent.md#installed-package-and-executable-structure)
-covers the single discovered owner, executable composite task, source-backed
-five-area view and module-owned Live report. Its package has no Device Bridge;
-LHS, BoTorch and benchmark computation remain existing referenced services.
-
-The [Vision Reference](vision_agent.md#installed-package-and-executable-structure)
-documents the installed package, composite observation operation and shared
-five-area IDE/document projection. Its new validation uses virtual equipment and
-registered model calls; it does not add physical validation claims.
-
-Start with the role overview and available status summary, then read the
-responsibility map, handoffs, decision/tools, API connections, and evidence.
-The [API and Connection Matrix](agent_api_connection_matrix.md) distinguishes
-LLM choices, executable tools, connected services, and operator surfaces.
-
-## Scope
-
-Included:
-
-- ten Python agent implementations and module manifests;
-- the primary graph and handoff order;
-- owned, connected, operator, and shared APIs;
-- registered tools, services, bridges, providers, devices, and model routes;
-- state, events, artifacts, storage, modes, safety, and recovery contracts.
-
-Excluded:
-
-- a duplicate of the complete OpenAPI schema;
-- hardware-specific operating procedures already maintained elsewhere;
-- unsupported scientific, safety-effectiveness, or live-reliability claims;
-- legacy guideline files as current authority.
-
-## Visual Contract
-
-The [Design Reference](design_agent.md) establishes the role/workflow reading
-order used by the restructured References. High, Middle, Low, Guardian/Safety,
-and Knowledge/Evidence describe responsibility areas, not five sequential
-model calls. Orchestrator and Guardian retain their control-plane layouts;
-each owning Reference defines where its LLM decisions actually occur.
-
-Each Reference opens with a representative role overview. These generated
-overviews use GPT Image 2.5 Sunburst and supplement the unchanged editable
-Flow, Execution, and applicable Connections figures below.
-[Current generation prompts](../assets/presentation/sunburst-paper-figures.jsonl)
-and [figure provenance/style](../assets/presentation/README.md) record the shared
-paper-figure brief. Conceptual pictures do not replace execution evidence.
-
-Figures are `inspection`-backed explanatory projections. The executable code,
-primary graph, module manifests, imported FastAPI routes, and bridge/service
-implementations remain authoritative.
+For everyday operation, use the [user manual](../tutorials/user_manual.en.md)
+and [Live GUI guide](../gui/gui.md). This index is for understanding who does
+what, or finding the owner of a result or interface.
 
 ## Canonical Inventory
 
@@ -167,34 +75,6 @@ agents without repeating full implementation prose.
 | Guardian | [Control areas](assets/figures/guardian_control_areas.svg) · [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
 
 </details>
-
-## Three-Level Control Classification
-
-This classification applies only to the **automatic experiment loop**. Device
-Workspaces are manual setup, commissioning, training, and direct-control
-surfaces outside that hierarchy, even when they reuse the same services and
-bridges. The complete contract and diagram are in the
-[Three-Level Control Model](../runtime/three_level_control_model.md).
-
-| Agent | High-Level Control relationship | Middle-Level Control ownership | Low-Level Control boundary |
-|---|---|---|---|
-| Orchestrator | LLM intent, availability and admitted action review | Existing runtime supervision, contract/plan builders and tool dispatch | No direct device execution |
-| Design | LLM candidate suitability and bounded tool choice | Candidate generation, inspection, validation and handoff | No direct device execution |
-| Specimen Making | LLM fabrication suitability and bounded tool choice | Geometry, manufacturing checks, existing printer API calls and handoff | Selected Printer Fleet provider and printer |
-| Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
-| Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
-| Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
-| Analysis | LLM processing and measurement-review decisions | Parsing, units, curves, metrics and objective evaluation | No direct device execution |
-| Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
-| Bayesian Optimization | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
-| Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
-
-The control direction is `High-Level -> Middle-Level -> Low-Level`; telemetry
-and evidence return upward. Recovery stays with the owner of the failed
-invariant: device reconnection is Low-Level, rebuilding an agent output is
-Middle-Level, and choosing retry/review/another cycle/terminal state is
-High-Level only where an existing LLM decision participates. Deterministic
-routing remains Middle; classification never inserts new model calls.
 
 ## Orchestration Plan Reading Map
 
@@ -234,16 +114,132 @@ This is a reading projection, not a replacement for
 runtime dispatch, supervisor overlays, evidence flows, conditional branches,
 sidecars, and explicit `complete` and `error` nodes.
 
-## Reader Paths
+## Read a role in context
 
-| Reader | Start here | Then read |
-|---|---|---|
-| Paper reviewer | [Matrix](agent_api_connection_matrix.md) | System, platform, and interface paper chapters |
-| Operator | Relevant physical agent | Safety/effect, errors/recovery, GUI, then hardware Guide |
-| Agent developer | Relevant agent Reference | Python class, module manifest, adjacent handoff owner |
-| API integrator | Matrix API view | Relevant Reference API and connection tables, then OpenAPI |
-| Maintainer | Matrix + all changed References | source paths, verification, limitations, legacy notes |
-| Safety reviewer | [Guardian](guardian_agent.md) and physical agents | approval, stop, uncertain-effect, evidence sections |
+A role reference starts with its responsibility and handoffs. Read those first,
+then follow its tools, evidence, and recovery sections for your question.
+The [connection matrix](agent_api_connection_matrix.md) compares APIs and effects
+without duplicating every reference. [Device bridges](../device_bridges/README.md)
+describe how the requested actions reach equipment.
+
+Use [loop artifacts](../runtime/loop_artifact_archiving.md) to trace a result to
+its run, loop, agent, and invocation—including failed or cancelled calls.
+For composition and configuration changes, read [modularity](../modularity.md)
+and [Runtime IDE](../runtime/runtime_ide.md).
+
+<a id="summary"></a>
+
+## Scope and evidence
+
+The main loop has ten executable agents. RPT is developed in a separate worktree;
+it is not an extra stage in this inventory. The
+[2026-09-28 audit](../maintenance/code_documentation_audit_20260928.md) relates
+main-code inspection to the retained 15-observation campaign. An individual
+reference's earlier “no hardware run” limitation applies to its named check,
+not to every later experiment.
+
+Conceptual diagrams explain responsibility; code, graph configuration, and
+recorded evidence establish implementation and execution facts. Static
+documentation review does not rerun hardware or model inference.
+
+## Technical reading
+
+<details>
+<summary>Control layers, package structure, and figure conventions</summary>
+
+## Three-Level Control Classification
+
+This classification applies only to the **automatic experiment loop**. Device
+Workspaces are manual setup, commissioning, training, and direct-control
+surfaces outside that hierarchy, even when they reuse the same services and
+bridges. The complete contract and diagram are in the
+[Three-Level Control Model](../runtime/three_level_control_model.md).
+
+| Agent | High-Level Control relationship | Middle-Level Control ownership | Low-Level Control boundary |
+|---|---|---|---|
+| Orchestrator | LLM intent, availability and admitted action review | Existing runtime supervision, contract/plan builders and tool dispatch | No direct device execution |
+| Design | LLM candidate suitability and bounded tool choice | Candidate generation, inspection, validation and handoff | No direct device execution |
+| Specimen Making | LLM fabrication suitability and bounded tool choice | Geometry, manufacturing checks, existing printer API calls and handoff | Selected Printer Fleet provider and printer |
+| Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
+| Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
+| Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
+| Analysis | LLM processing and measurement-review decisions | Parsing, units, curves, metrics and objective evaluation | No direct device execution |
+| Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
+| Bayesian Optimization | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
+| Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
+
+The control direction is `High-Level -> Middle-Level -> Low-Level`; telemetry
+and evidence return upward. Recovery stays with the owner of the failed
+invariant: device reconnection is Low-Level, rebuilding an agent output is
+Middle-Level, and choosing retry/review/another cycle/terminal state is
+High-Level only where an existing LLM decision participates. Deterministic
+routing remains Middle; classification never inserts new model calls.
+
+## Reading the References
+
+In IDE and document figures, **LLM** marks the High decision; **LLM call** marks
+the process that sends context to it and consumes its response. See the shared
+[node-label contract](../runtime/three_level_control_model.md#llm-node-labels).
+
+The [Manipulation Reference](manipulation_agent.md#installed-package-and-executable-structure)
+covers its two composite execution operations, source-bound control-area figure,
+eight owner frontend cards and shared LeRobot dependency. An Agent Package is a
+composition contract; the Device Bridges view shows the actual bridge components.
+
+The [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
+covers its composite owner, source-backed five-area view, module-owned Live
+report, and Analysis-owned measurement processing.
+
+The [BO Reference](bo_agent.md#installed-package-and-executable-structure)
+covers the single discovered owner, executable composite task, source-backed
+five-area view and module-owned Live report. Its package has no Device Bridge;
+LHS, BoTorch and benchmark computation remain existing referenced services.
+
+The [Vision Reference](vision_agent.md#installed-package-and-executable-structure)
+documents the installed package, composite observation operation and shared
+five-area IDE/document projection. Its new validation uses virtual equipment and
+registered model calls; it does not add physical validation claims.
+
+Start with the role overview and available status summary, then read the
+responsibility map, handoffs, decision/tools, API connections, and evidence.
+The [API and Connection Matrix](agent_api_connection_matrix.md) distinguishes
+LLM choices, executable tools, connected services, and operator surfaces.
+
+## Visual Contract
+
+The [Design Reference](design_agent.md) establishes the role/workflow reading
+order used by the restructured References. High, Middle, Low, Guardian/Safety,
+and Knowledge/Evidence describe responsibility areas, not five sequential
+model calls. Orchestrator and Guardian retain their control-plane layouts;
+each owning Reference defines where its LLM decisions actually occur.
+
+Each Reference opens with a representative role overview. These generated
+overviews use GPT Image 2.5 Sunburst and supplement the unchanged editable
+Flow, Execution, and applicable Connections figures below.
+[Current generation prompts](../assets/presentation/sunburst-paper-figures.jsonl)
+and [figure provenance/style](../assets/presentation/README.md) record the shared
+paper-figure brief. Conceptual pictures do not replace execution evidence.
+
+Figures are `inspection`-backed explanatory projections. The executable code,
+primary graph, module manifests, imported FastAPI routes, and bridge/service
+implementations remain authoritative.
+
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Inventory | Ten executable agents on the existing registered graph/module path |
+| Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis and BO reuse numerical services without a device bridge |
+| Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
+| Configuration ownership | Orchestrator/BO keep existing Setup fields; Knowledge/Guardian declarations use owner validation and explicit future-run module apply |
+| Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
+| Figures | Ten Sunburst role overviews plus editable agent figures; Orchestrator now includes Flow, Execution, and Connections views |
+| Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
+
+</details>
+
+<details>
+<summary>Interface vocabulary and API ownership</summary>
 
 ## Terminology
 
@@ -283,6 +279,39 @@ For example:
 Effect labels are conservative. A route that can eventually cause physical or
 desktop action is `physical_possible` even when the common example uses Test
 mode.
+
+## Scope
+
+Included:
+
+- ten Python agent implementations and module manifests;
+- the primary graph and handoff order;
+- owned, connected, operator, and shared APIs;
+- registered tools, services, bridges, providers, devices, and model routes;
+- state, events, artifacts, storage, modes, safety, and recovery contracts.
+
+Excluded:
+
+- a duplicate of the complete OpenAPI schema;
+- hardware-specific operating procedures already maintained elsewhere;
+- unsupported scientific, safety-effectiveness, or live-reliability claims;
+- legacy guideline files as current authority.
+
+## Reader Paths
+
+| Reader | Start here | Then read |
+|---|---|---|
+| Paper reviewer | [Matrix](agent_api_connection_matrix.md) | System, platform, and interface paper chapters |
+| Operator | Relevant physical agent | Safety/effect, errors/recovery, GUI, then hardware Guide |
+| Agent developer | Relevant agent Reference | Python class, module manifest, adjacent handoff owner |
+| API integrator | Matrix API view | Relevant Reference API and connection tables, then OpenAPI |
+| Maintainer | Matrix + all changed References | source paths, verification, limitations, legacy notes |
+| Safety reviewer | [Guardian](guardian_agent.md) and physical agents | approval, stop, uncertain-effect, evidence sections |
+
+</details>
+
+<details>
+<summary>Provenance, maintenance, and older guidelines</summary>
 
 ## Authority and Conflict Resolution
 
@@ -358,6 +387,12 @@ decision modules, ten manifests, graph handoffs, Analysis report routes,
 Knowledge Markdown/source route installers, and owning References were inspected.
 Documentation checks validate links and publication structure; no device,
 model-inference, or new physical-cycle test was performed for this update.
+
+The later full-document and static source/configuration review used
+`dd0d772` on 2026-09-29. Named physical and provider test records keep their
+original dates and scope.
+
+</details>
 
 ## Related Documents
 

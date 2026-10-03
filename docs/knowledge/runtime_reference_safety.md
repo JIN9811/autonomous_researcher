@@ -1,5 +1,15 @@
 # Runtime Wiki reference safety audit — 2026-09-18
 
+This dated audit explains why browsing an entire Wiki article and supplying
+context to an operational decision have different limits. For normal reading,
+memory management and delivery inspection, use [Wiki and Memory](wiki_memory.md).
+For a runtime-reference investigation, compare the owner, freshness and actual
+delivered excerpt; do not insert a whole article or copy an example setting into
+the current decision to compensate for an absent reference.
+
+The findings and recorded checks below retain their September 18 scope. This
+reader guidance does not revise any Wiki article or its reviewed runtime excerpt.
+
 Scope: all 23 public AX4LAB Wiki pages and the actual LLM decision entrypoints of
 ORC, DSN, SPC, VIS, MAN, EQP, ANL, KNW, BO and GRD. This audit does not establish
 that a Wiki page caused the observed Vision rejection. The recorded rejection

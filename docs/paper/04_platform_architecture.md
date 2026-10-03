@@ -38,15 +38,7 @@ supersedes: []
 
 # Platform Architecture
 
-## Status at a Glance
-
-| At a glance | Details |
-|---|---|
-| Topic | Modules, providers, workspaces and integration boundaries |
-| Evidence boundary | Implementation inspection; not universal adapter compatibility |
-| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
-
-## Summary
+<a id="summary"></a>
 
 The ATR platform exposes extension surfaces for agent modules, execution
 graphs, model backends, device bridges, durable knowledge, and operator
@@ -54,24 +46,14 @@ workspaces. This is the secondary contribution: it matters because it enables
 new laboratory capabilities to enter the closed-loop system through declared
 contracts instead of bypassing its gates and evidence paths.
 
-## Scope
-
-This chapter describes extension categories and their contract boundaries. It
-does not promise that arbitrary third-party components are compatible or safe.
-
-## Source of Truth
-
-The platform surface is observed in module manifests and UI descriptors,
-backend/model routing, device bridges, FastAPI routes, graph management, and
-web workspaces. Knowledge storage, source intake and deployment descriptions
-were refreshed against `5542ef2`; dated route counts below retain their
-original baseline.
-
 ## Platform Role in the System
 
-The platform is not a separate product narrative attached to the paper. Its
-role is to answer RQ4: how can a new capability participate in RQ1–RQ3 without
-weakening stage, safety, and evidence contracts?
+Extending the platform means adding a capability without moving authority away
+from its existing owner. A new instrument belongs behind a device bridge; new
+reasoning belongs in an agent; a different sequence belongs in a graph. An
+operator-facing panel exposes those contracts but does not acquire their
+execution rights. This is the RQ4 question: can a new capability participate
+in the loop while preserving its safety and evidence boundaries?
 
 An extension is system-compatible only when it:
 
@@ -94,6 +76,11 @@ An extension is system-compatible only when it:
 | Operator workspace | FastAPI route plus static/template surface | API authorization, explicit mutation, audit event | Exposes control and review | Route surface inspected; browser coverage varies |
 
 ## Module and Graph Contracts
+
+For an implementation task, first choose the owner boundary in the table above,
+then use the [modularity guide](../modularity.md) to follow draft, validation,
+application and run-pinning behavior. The [interface appendix](appendix_a_interfaces.md)
+locates the exact contract; this chapter explains why the boundary matters.
 
 Module manifests bind stable identifiers to handlers, schemas, and optional
 presentation descriptors. UI metadata is treated as presentation configuration,
@@ -189,6 +176,19 @@ breadth if read as user-visible features. Optional external services may be
 unavailable in a clean local environment.
 
 ## Verification
+
+<a id="scope"></a>
+
+This chapter describes extension categories and their contract boundaries. It
+does not promise that arbitrary third-party components are compatible or safe.
+
+<a id="source-of-truth"></a>
+
+The platform surface is observed in module manifests and UI descriptors,
+backend/model routing, device bridges, FastAPI routes, graph management, and
+web workspaces. Knowledge storage, source intake and deployment descriptions
+were refreshed against `5542ef2`; dated route counts below retain their
+original baseline.
 
 Knowledge and deployment descriptions and figures were rechecked by static
 inspection on 2026-09-12 against `5542ef2`, without starting services or devices.

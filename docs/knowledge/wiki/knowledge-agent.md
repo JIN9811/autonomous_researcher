@@ -1,5 +1,5 @@
 ---
-{"topic_id":"knowledge-agent","owner":"knowledge","source_refs":["docs/knowledge/wiki_memory.md","docs/knowledge/publication.md","docs/agents/knowledge_agent.md"],"source_revision":{"docs/knowledge/wiki_memory.md":"fc555dfc74bd8a383c2b86cfdd60d31f84ee2f53ef02b7aa4ac852cc12f81fdf","docs/knowledge/publication.md":"61f17ba92f6bedb7a5f3cc1b7181b45c82a602205d54bf0d29e520e500a7aa7a","docs/agents/knowledge_agent.md":"2f265e264737f33f64acace7ac37f82879dadf1fcd74b94d89de8eeca9192bce"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: knowledge-agent","status":"reviewed"}
+{"topic_id":"knowledge-agent","owner":"knowledge","source_refs":["docs/knowledge/wiki_memory.md","docs/knowledge/publication.md","docs/agents/knowledge_agent.md"],"source_revision":{"docs/knowledge/wiki_memory.md":"6f25c22ca5f150dce959a4cd39bb90997c0bac9736baa0e45cc9d8f4ba5954d4","docs/knowledge/publication.md":"f71f8100eda149366894f004e9ad9f06dbea0cc5a1d9c2e1a9011d8eda67fe70","docs/agents/knowledge_agent.md":"2f265e264737f33f64acace7ac37f82879dadf1fcd74b94d89de8eeca9192bce"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: knowledge-agent","status":"reviewed"}
 ---
 
 # Knowledge Stores — Wiki, Memory and Source Library

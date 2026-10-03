@@ -30,16 +30,25 @@ invoke models, mutate Knowledge stores or operate devices.
 
 # AX4LAB Wiki and Memory
 
-## Status at a Glance
+Use the Wiki to understand AX4LAB, Source Library to consult submitted
+references, execution Markdown to inspect run observations, and private memory
+to retain confirmed personal context. Choosing the right store avoids treating
+a platform explanation or remembered preference as evidence from this run.
 
-| At a glance | Details |
-|---|---|
-| Public knowledge | Reviewed AX4LAB Wiki pages; repository source references and freshness |
-| Private memory | Separate scoped store with explicit confirmation and deletion |
-| Default access | Wiki-only when no trusted server principal is available |
-| Existing records | Source Library, execution Markdown, ontology and operational memory remain separate authoritative records |
-| Integration status | Explicit agent context, grounded ORC Chat, five-tab Workspace and Live evidence cards implemented |
-| Verification | Scoped regressions and registered API/vLLM response checks passed; semantic-use and browser acceptance remain partial |
+## Choose a Knowledge task
+
+| You want to… | Start here | Check before relying on it |
+|---|---|---|
+| Understand a role or workflow | Wiki tab; [platform guide](wiki/platform-overview.md) | Page freshness and cited sources |
+| Add or retrieve a manual or paper | [Source Library guide](manual_rag_knowledge.en.md) · [한국어](manual_rag_knowledge.ko.md) | Ready publication, original and exact applicability |
+| Find an observation from a run | [Execution Markdown guide](markdown_memory_operations.en.md) · [한국어](markdown_memory_operations.ko.md) | Run/cycle/attempt identity and original Analysis evidence |
+| Manage a personal preference | Memory tab or the [bounded Chat commands](#chat-memory-commands) | Trusted identity, scope, revision and separate confirmation |
+| Check whether a model received context | Agent Delivery or Live evidence | Delivery is not demonstrated use |
+
+The default installation is Wiki-only when no trusted server principal is
+available. An unavailable private tab is not an instruction to sign in through
+a new AX4LAB login flow: private access requires the installation's trusted
+identity integration. Do not change permissions just to make an example work.
 
 ## Knowledge Ownership
 
@@ -59,6 +68,10 @@ A source change can make a page stale; stale content is not asserted as the
 current platform contract.
 
 ### Reading the expanded Wiki
+
+Open a topic, read the explanation, and inspect its freshness before following
+its advice. Use **Sources & verification** when you need the underlying source
+or hash. A stale page is context to investigate, not a current operating contract.
 
 Start with the [platform guide](wiki/platform-overview.md). The reviewed corpus
 includes ten agent roles and separate explanations of the closed loop, control
@@ -90,6 +103,11 @@ local file-serving route. Memory and Delivery retain literal text rendering.
 Freshness stays visible; hashes and source metadata are under Sources & verification.
 
 ## Private Memory Lifecycle
+
+With authorized private access, first inspect the candidate's text and scope.
+Confirm only the current revision you intend to retain, then read it back within
+the same scope. To revise or forget it, use the separate proposal and confirmation
+commands below; a first request alone is not the completed change.
 
 | Action | Meaning |
 |---|---|
@@ -131,6 +149,11 @@ it is a bounded guard, not exhaustive data-loss prevention.
 
 ## Retrieval and Delivery Evidence
 
+When an answer appears to depend on remembered context, inspect its references
+and the delivery record. Follow the cited record rather than assuming that a
+search result influenced the answer. The states below describe different
+evidence, and an unavailable lookup must not look like a successful empty search.
+
 | State | Evidence required |
 |---|---|
 | Retrieved | Matching scoped records were selected |
@@ -151,24 +174,23 @@ expand tool authority. Absence of a citation is not a deliberate exclusion.
 
 ![Knowledge Workspace: shared Wiki article](../gui/assets/screenshots/2026-09-29/knowledge-wiki.png)
 
-*Knowledge Workspace: shared Wiki article.*
+*Open the Wiki topic, then check freshness and Sources & verification before treating its description as current.*
 
 ![Source Library and provenance controls](../gui/assets/screenshots/2026-09-29/knowledge-sources.png)
 
-*Source Library and provenance controls.*
+*Use Source Library to inspect source progress, then open a ready result and its original/provenance.*
 
 ![Private Memory with access boundary](../gui/assets/screenshots/2026-09-29/knowledge-memory.png)
 
-*Private Memory with access boundary.*
+*The Memory tab refuses private reads without trusted identity; this capture does not show a sign-in or permission-grant action.*
 
 ![Agent Delivery with access boundary](../gui/assets/screenshots/2026-09-29/knowledge-delivery.png)
 
-*Agent Delivery with access boundary.*
+*Agent Delivery exposes its access boundary. When authorized, distinguish delivered context from a validated citation in the returned answer.*
 
 Wiki, sources, private memory and delivery receipts answer different questions. The capture browser had Wiki-only access; the private tabs correctly refused reads without a trusted identity. No private records were fabricated or permissions changed.
 Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
 See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
-
 
 The existing `/knowledge` page provides Wiki, Memory, Source Library, Agent
 Delivery and Ontology tabs. Lists use scoped cursors; detail reads and lifecycle

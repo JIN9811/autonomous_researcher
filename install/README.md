@@ -1,43 +1,51 @@
-# Install
+<a id="install"></a>
 
-This folder contains setup notes and launchers for the local
-`autonomous_researcher` checkout.
+# Install and reach your first virtual experiment
 
-Source audit: 2026-09-29 against `dd0d772`; this review did not install software,
-restart services, or commission hardware. Host-specific verification below is
-retained evidence rather than a new test result.
+Use this guide to prepare a workstation, open AX4LAB and complete a first virtual
+experiment. You do not need a printer, robot, camera or local model server for the
+API-only path. Add those integrations after the core application works.
 
-ATR supports two inference modes:
+Keep the source checkout: the supported operator installation is the repository
+plus its `.venv`, not a standalone wheel. Configuration, web templates, graph YAML,
+install helpers and local memory directories are read from that checkout.
+`python -m build` remains a packaging sanity check, not the deployment procedure.
 
-- Local-first: use `vllm`, `ollama`, or `nemoclaw` first, then fall back to the
-  OpenAI API when `configs/models.yaml` sets `backend.fallback: openai`.
-- API-only: set `AUTONOMOUS_BACKEND=openai` in `.env` to skip local AI entirely.
+Choose the inference route before installing optional runtimes:
 
-`openai` is intentionally the lowest-priority static fallback unless the
-operator explicitly selects it as the active backend or enables the Main GUI
-`API Key` Loading control. When that API-key cell is loaded, OpenAI becomes the
-first inference route until it is unloaded again.
+| Route | What to prepare | How it is selected |
+|---|---|---|
+| API-only | An OpenAI API key and network access | `AUTONOMOUS_BACKEND=openai` in `.env` |
+| Local-first | A configured `vllm`, `ollama` or `nemoclaw` server | Select the local backend; `backend.fallback: openai` in `configs/models.yaml` permits API fallback |
+
+With local-first routing, the active local model and its model fallback are tried
+before the OpenAI fallback. Explicitly selecting `openai`, or loading Main's
+`API Key` cell, makes OpenAI the first route; unloading that cell removes the
+temporary preference. Installing a local runtime alone does not select it.
 
 ## Recommended Fresh-Install Flow
 
-Use this order on a new PC:
+The bootstrap is the normal installation path. The manual environment commands
+in the OS sections below are alternatives for an existing checkout, not a second
+installation to run after bootstrap.
 
-1. Clone the private repository.
-2. Run the platform bootstrap for the host OS.
-3. Run `doctor` to see which optional device/tool dependencies are still
-   missing.
-4. Install only the external runtimes needed for that workstation: local AI,
-   Bambu/Prusa slicing, LeRobot/RealSense, Windows equipment bridge, or graph
-   database.
+After bootstrap, follow only your OS path:
+[Windows API-only configuration](#windows-quick-start-api-key-no-local-ai) or
+[Linux/WSL configuration](#linux--wsl-quick-start). Both lead to the same virtual
+first-run exercise before any optional device installation.
 
-Linux/WSL default:
+1. Clone the private repository and enter it.
+2. Run the bootstrap for your host OS.
+3. Configure private inference credentials using the matching OS section below.
+4. Run the non-actuating readiness check, start the server, then follow
+   [your first virtual experiment](#complete-the-first-run).
+
+Linux or WSL:
 
 ```bash
 git clone <private-repo-url> autonomous_researcher
 cd autonomous_researcher
 bash install/bootstrap_linux.sh
-atr doctor
-atr up
 ```
 
 Windows supported path:
@@ -46,24 +54,24 @@ Windows supported path:
 git clone <private-repo-url> autonomous_researcher
 cd autonomous_researcher
 powershell -ExecutionPolicy Bypass -File .\install\bootstrap_windows.ps1
-python -m app.serve
 ```
 
-Windows limitations:
+Choose the host that fits the work you intend to do:
 
 - Native Windows is the supported path for API-key GUI/API use and the
   Windows PyAutoGUI bridge server.
 - The Linux `atr` launcher is intended for Linux, WSL, or Git Bash. Native
   Windows starts the backend with `python -m app.serve`.
-- LeRobot live hardware, RealSense RSUSB, local NemoClaw/vLLM, Dockerized
-  slicers, and Linux device permissions require WSL/Linux or separate
-  conda/toolchain setup.
+- LeRobot live hardware, RealSense RSUSB, local NemoClaw/vLLM and Dockerized
+  slicers need WSL/Linux or their separately prepared conda/toolchain environment.
+  Linux device permissions are configured on the Linux host, not in PowerShell.
 - Hardware memory files such as `memory/bambu_connection.json`,
   `memory/prusa_connection.json`, and `memory/lerobot_device_ports.json` are
   intentionally not copied through Git. Recreate them from the GUI on each PC.
 
-The doctor command is non-actuating. It does not start printers, robots, model
-servers, or camera streams:
+After configuration, use `doctor` to distinguish missing core dependencies from
+optional capabilities you have not chosen to install. It does not start printers,
+robots, model servers or camera streams:
 
 ```bash
 atr doctor
@@ -77,15 +85,11 @@ Before installing `atr`, run the same check directly:
 .venv/bin/python scripts/doctor.py
 ```
 
-Supported distribution model:
-
-- The supported operator install is a source checkout plus `.venv`.
-- `python -m build` is kept as a packaging sanity check so Python package
-  discovery does not accidentally include runtime artifacts, but the generated
-  wheel is not the primary deployment artifact for the full GUI/device system.
-- Do not delete the source checkout after installing dependencies; runtime
-  config, web templates, graph YAML, install helpers, and local memory folders
-  are expected to remain under the repository root.
+On native Windows, use `.\.venv\Scripts\python.exe scripts/doctor.py --core-only`.
+Resolve a core failure before proceeding. A missing printer or LeRobot dependency
+is not a reason to install every optional stack for an API-only virtual exercise.
+Use [Requirements](../REQUIREMENTS.md) for dependency/version details. The active
+application requires no graph database; runtime graph YAML is a different feature.
 
 ## Windows Quick Start (API Key, No Local AI)
 
@@ -102,7 +106,7 @@ Required:
 - PowerShell 5.1 or PowerShell 7+
 - An OpenAI API key
 
-Recommended:
+Only if your later work needs them:
 
 - Miniconda or Mambaforge for LeRobot environments
 - Microsoft C++ Build Tools only if a Python dependency has to build from source
@@ -110,7 +114,8 @@ Recommended:
 
 ### 2. Create the Main Python Environment
 
-Run from PowerShell:
+If bootstrap already created `.venv` and installed requirements, skip this step.
+For manual setup, enter your actual checkout path in PowerShell:
 
 ```powershell
 cd "$env:USERPROFILE\Documents\autonomous_researcher"
@@ -124,10 +129,11 @@ If your Python command is not `py -3.11`, use the installed Python 3.11+ path.
 
 ### 3. Configure API-Key Inference
 
-Create `.env` from the example:
+Create `.env` from the example only if it does not already exist. Otherwise edit
+the existing file so that you retain its private settings:
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 notepad .env
 ```
 
@@ -164,85 +170,24 @@ used only after those fail.
 python -m app.serve
 ```
 
-Open:
+Open Main first:
 
 ```text
 http://127.0.0.1:7860/
-http://127.0.0.1:7860/live
-http://127.0.0.1:7860/docs
 ```
 
-Stop the server with `Ctrl+C` in the PowerShell window.
+When Main loads, continue to [complete the first run](#complete-the-first-run).
+`/live` opens the Live conversation and `/docs` opens the documentation, but loading
+a page is not proof that a model is ready or a run has started. Stop the server
+with `Ctrl+C` in this PowerShell window only after active work has finished.
 
 The Bash `atr` launcher below is for Linux, WSL, or Git Bash. Native Windows can
 run the same backend through `python -m app.serve` and the browser UI.
 
-### 5. Windows LeRobot Conda Environment
-
-LeRobot workflows must run outside the main `.venv` in a conda environment.
-The ATR bridge invokes them with:
-
-```text
-conda run --no-capture-output -n lerobot ...
-```
-
-Create the environment:
-
-```powershell
-$conda = "$env:USERPROFILE\miniconda3\Scripts\conda.exe"
-winget install -e --id Anaconda.Miniconda3 --scope user
-& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
-& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
-& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
-& $conda create -y -n lerobot python=3.10
-& $conda run -n lerobot python -m pip install --upgrade pip
-```
-
-Clone and install the LeRobot checkout outside this repository, then install it
-editable inside the `lerobot` environment according to the LeRobot version you
-are using. In ATR, keep these defaults unless your local setup differs:
-
-```yaml
-configs/lerobot.yaml:
-  conda_executable: conda
-  conda_env_name: lerobot
-```
-
-When `conda_executable` is left as `conda`, ATR first uses `conda` from PATH and
-then auto-detects common user installs such as
-`%USERPROFILE%\miniconda3\Scripts\conda.exe`.
-
-For SmolVLA training/rollout experiments, the tracked `smolvla_conda_env_name`
-uses the isolated `lerobot-pi05-torch211` environment. Prepare that environment
-as described in [Requirements](../REQUIREMENTS.md#optional-smolvla-training-branch),
-then install the extra and cache the required Hub repos there:
-
-```bash
-cd ~/lerobot_pi05
-conda run --no-capture-output -n lerobot-pi05-torch211 python -m pip install -e ".[smolvla]"
-conda run --no-capture-output -n lerobot-pi05-torch211 hf download lerobot/smolvla_base --max-workers 1
-conda run --no-capture-output -n lerobot-pi05-torch211 hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
-```
-
-Use the `/lerobot` GUI page for port detection, teleoperation, recording,
-training, and rollout. Hardware actions still require live confirmation gates.
-
-### 6. Optional Windows Equipment Bridge
-
-If this same or another Windows PC controls UTM software through PyAutoGUI,
-copy the complete bridge package and install it in an interactive Windows session:
-
-```powershell
-.\Pyautogui_server_for_window\INSTALL_WINDOWS_BRIDGE.cmd
-```
-
-Pair the selected worker with its one-time four-digit console code in Linux
-ATR's Lab Equipment Workspace. Do not distribute a model/API key to Windows.
-See [Windows bridge setup](../Pyautogui_server_for_window/README.md).
-
 ## Linux / WSL Quick Start
 
-Use this path on Linux workstations, WSL, or Git Bash environments.
+Use this manual alternative on Linux or WSL if you did not run bootstrap. Git Bash
+can use the Bash launcher, but it does not supply Linux hardware/runtime support.
 
 ```bash
 cd /path/to/autonomous_researcher
@@ -250,24 +195,28 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 ```
 
-For API-only operation:
+Edit `.env` in your editor. Keep one intentional value for each key and never put
+real credentials in the tracked `.env.example`. For API-only operation, set:
 
-```bash
-printf '\nAUTONOMOUS_BACKEND=openai\nOPENAI_API_KEY=<your-api-key>\n' >> .env
-python -m app.serve
+```text
+AUTONOMOUS_BACKEND=openai
+OPENAI_API_KEY=<your-api-key>
 ```
 
-For local-first operation with OpenAI as final fallback:
+For an already configured local-first backend, set:
 
-```bash
-printf '\nAUTONOMOUS_BACKEND=vllm\nOPENAI_API_KEY=<your-api-key>\n' >> .env
-python -m app.serve
+```text
+AUTONOMOUS_BACKEND=vllm
+OPENAI_API_KEY=<your-api-key>
 ```
 
-Install the optional `atr` terminal launcher only on Linux, WSL, or Git Bash:
+API fallback additionally needs `backend.fallback: openai` in `configs/models.yaml`.
+You may start with `python -m app.serve` from the activated environment, or install
+the convenience launcher below. Bootstrap users can skip launcher installation
+if `atr` already resolves to this checkout.
 
 ## Install `atr`
 
@@ -299,13 +248,34 @@ source ~/.zshrc
 
 ## Start Server
 
-From any terminal:
+After the readiness check, start the server from a terminal:
 
 ```bash
 atr up
 ```
 
-Stop the server from any terminal:
+Open `http://localhost:7860`. Keep the terminal available for startup errors.
+If another instance is already serving an experiment, use that instance rather
+than restarting it. Once the page loads, follow the first-run section below.
+
+### Complete the first run
+
+Main should show **Run Control** and the model/backend controls. Select the prepared
+inference route, then use the [English first-run walkthrough](../docs/tutorials/first_autonomous_run.en.md)
+or [한국어 첫 실험 안내](../docs/tutorials/first_autonomous_run.ko.md). It takes you through
+**Test Mode Settings → Virtual Bridge**, one cycle, plan review, stage evidence and
+saved output. **Test mode alone is not hardware-free**: Installed Printer can send
+an ejection-only artifact, and Physical Print uses the full print path. Per-agent
+boundaries also matter.
+
+The installation journey is complete when you can open the resulting run's
+artifacts and identify its terminal result, not merely when the server starts.
+For a blocked run, retain its ID and failure details and use
+[run recovery](../docs/gui/run_resume.md); restarting the server is not Resume.
+
+### Shut down after active work finishes
+
+On Linux/WSL, stop this checkout's server with:
 
 ```bash
 atr down
@@ -325,13 +295,16 @@ atr
 
 ## Common Commands
 
-Open GUI pages:
+The following is a lookup reference, not a sequence to execute during installation.
+Begin with read-only navigation and status; the later groups change configuration,
+load models or control runs.
+
+Open GUI pages (without starting an experiment):
 
 ```bash
 atr gui
 atr live
 atr docs
-atr down
 ```
 
 Runtime status:
@@ -341,7 +314,9 @@ atr status
 atr events
 ```
 
-Run control:
+Run control changes execution state. Check the saved profile and per-agent physical
+boundaries before `start`, including `start test`. A resume continues an eligible
+existing run and can repeat a recovery step; it is not a new start.
 
 ```bash
 atr run start test
@@ -352,7 +327,7 @@ atr run stop
 atr run safe-stop
 ```
 
-Inference backend:
+Inspect or change the inference backend:
 
 ```bash
 atr backend
@@ -362,7 +337,7 @@ atr backend ollama
 atr backend openai
 ```
 
-GPU/model control:
+GPU/model control changes model availability; do not unload a model in active use:
 
 ```bash
 atr gpu clear
@@ -373,13 +348,21 @@ atr model unload e4b
 atr model unload 31b
 ```
 
-Live GUI chat API:
+Live GUI chat API submits planning/execution requests through the conversation.
+These are not read-only status commands:
 
 ```bash
 atr chat bootstrap "Plan a PLA compression specimen experiment"
 atr chat "테스트 모드"
 atr chat "실험 수행"
 ```
+
+### Advanced: runtime graphs and modules
+
+For inspecting workflow composition, use the [Runtime IDE guide](../docs/runtime/runtime_ide.md).
+The commands below are the CLI counterpart. Validation and inspection are distinct
+from saving, activating or running an edited graph; do not modify the active loop
+as an installation check.
 
 Runtime graph management:
 
@@ -448,11 +431,88 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_supervisor.ps1
 ```
 
-From the Live GUI, open `Windows Bridge` to scan the internal network, select the
-Windows PC, enter its four-digit code, and Pair & Save. Running `program1` is a
+From **Main → Device Workspaces → Windows Automation** (`/equipment/windows`),
+scan the internal network, select the Windows PC, enter its four-digit code, and
+use **Pair & Save**. Running `program1` is a
 separate operator-triggered check, not part of discovery or pairing.
 
+<a id="5-windows-lerobot-conda-environment"></a>
+
+## Optional: Windows LeRobot Conda Environment
+
+This is a separate device setup task, not step five of API-only installation.
+Finish the virtual exercise first unless you are commissioning a robot workstation.
+
+LeRobot workflows must run outside the main `.venv` in a conda environment.
+The ATR bridge invokes them with:
+
+```text
+conda run --no-capture-output -n lerobot ...
+```
+
+Create the environment:
+
+```powershell
+$conda = "$env:USERPROFILE\miniconda3\Scripts\conda.exe"
+winget install -e --id Anaconda.Miniconda3 --scope user
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+& $conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+& $conda create -y -n lerobot python=3.10
+& $conda run -n lerobot python -m pip install --upgrade pip
+```
+
+Clone and install the LeRobot checkout outside this repository, then install it
+editable inside the `lerobot` environment according to the LeRobot version you
+are using. In ATR, keep these defaults unless your local setup differs:
+
+```yaml
+configs/lerobot.yaml:
+  conda_executable: conda
+  conda_env_name: lerobot
+```
+
+When `conda_executable` is left as `conda`, ATR first uses `conda` from PATH and
+then auto-detects common user installs such as
+`%USERPROFILE%\miniconda3\Scripts\conda.exe`.
+
+For SmolVLA training/rollout experiments, the tracked `smolvla_conda_env_name`
+uses the isolated `lerobot-pi05-torch211` environment. Prepare that environment
+as described in [Requirements](../REQUIREMENTS.md#optional-smolvla-training-branch),
+then install the extra and cache the required Hub repos there. The following is
+a **Linux/WSL** example for that external checkout, not a PowerShell continuation:
+
+```bash
+cd ~/lerobot_pi05
+conda run --no-capture-output -n lerobot-pi05-torch211 python -m pip install -e ".[smolvla]"
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download lerobot/smolvla_base --max-workers 1
+conda run --no-capture-output -n lerobot-pi05-torch211 hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
+```
+
+Use the `/lerobot` GUI page for port detection, teleoperation, recording,
+training, and rollout. Hardware actions still require live confirmation gates.
+
+<a id="6-optional-windows-equipment-bridge"></a>
+
+## Optional Windows Equipment Bridge
+
+If this same or another Windows PC controls UTM software through PyAutoGUI,
+copy the complete bridge package and install it in an interactive Windows session:
+
+```powershell
+.\Pyautogui_server_for_window\INSTALL_WINDOWS_BRIDGE.cmd
+```
+
+Pair the selected worker with its one-time four-digit console code in Linux
+ATR's **Main → Device Workspaces → Windows Automation** workspace. Do not distribute
+a model/API key to Windows.
+See [Windows bridge setup](../Pyautogui_server_for_window/README.md).
+
 ## Packaged Piper TTS
+
+The remaining sections install optional capabilities. Choose the printer, robot
+or voice integration you actually use; none is required for the first API-only
+virtual run.
 
 LeRobot recording voice cues use ATR-packaged Piper English TTS by default.
 Install or repair the local runtime and voice model from the repository root:
@@ -571,6 +631,9 @@ Use a different backend for `run` and `chat` commands:
 ATR_BACKEND=vllm atr run start test
 ```
 
+This overrides inference routing, not the hardware boundary. The example starts a
+test run using its saved execution profile; inspect that profile first.
+
 ## Reinstall After Moving The Repo
 
 The generated `atr` command stores the repository path from install time.
@@ -588,3 +651,23 @@ Force install only if you know the existing command is safe to replace:
 ```bash
 ATR_FORCE_INSTALL=1 bash install/install_cli.sh
 ```
+
+## If setup stops here
+
+| What you see | What to check next |
+|---|---|
+| `atr` is not found | Open a new terminal after launcher installation; check shell PATH and the installed checkout path |
+| Main does not load | Read server startup output and confirm the URL/port before attempting device actions |
+| Main loads but inference fails | Selected backend, private key, model availability and provider quota; a GUI page alone does not test inference |
+| Doctor reports an optional stack missing | Install it only if the selected workflow uses it; consult the corresponding Requirements section |
+| Slicer wrapper exists but slicing fails | The wrapper is not the slicer; resolve the actual executable and selected printer profile |
+| Connection settings disappeared on a new PC | Recreate private `memory/` settings in the appropriate workspace; they are intentionally absent from Git |
+
+For device operation after installation, use the
+[operator manual](../docs/tutorials/user_manual.en.md) or
+[한국어 운영 안내](../docs/tutorials/user_manual.ko.md). For contributing code, see
+[CONTRIBUTING](../CONTRIBUTING.md).
+
+Source audit: 2026-09-29 against `dd0d772`. That review did not install software,
+restart services or commission hardware. The editorial restructuring does not
+constitute a new installation or physical verification.

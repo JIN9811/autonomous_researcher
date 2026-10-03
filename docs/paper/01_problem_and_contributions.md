@@ -38,15 +38,7 @@ supersedes: []
 
 # Problem and Contributions
 
-## Status at a Glance
-
-| At a glance | Details |
-|---|---|
-| Topic | Motivation, research questions and system/platform contributions |
-| Evidence boundary | [Claim boundaries](09_claim_evidence_traceability.md); contribution statements are not performance results |
-| Recorded basis | 2026-08-09 · [Scope and verification](#verification) |
-
-## Summary
+<a id="summary"></a>
 
 ATR transforms existing laboratories by adding structured AI layers above
 their equipment. High/Middle/Low control separates decisions, procedures, and
@@ -54,23 +46,12 @@ execution; Guardian/Safety and Knowledge/Evidence support the loop across those
 levels. A VLA-enabled robot arm connects physical stages, complementing API
 and desktop-controlled instruments.
 
-The novelty is the system-level combination: simple, reusable hardware with
-advanced software coordination. Reduced replacement and bespoke-fixture needs
+AX4LAB is the platform described here; ATR Framework is the research framework
+name used in this paper. The system-level contribution is the combination of
+reusable hardware and explicit software coordination, not the mere presence of
+an LLM or robot. Reduced replacement and bespoke-fixture needs
 are design advantages, not the sole contribution. Compression testing is one
 application, not a platform constraint.
-
-## Scope
-
-This chapter states what the repository is designed to contribute and how
-those statements will be evaluated. It does not claim comparative scientific
-performance or general safety effectiveness.
-
-## Evidence Basis
-
-The contribution boundaries are derived from the executable graph,
-orchestrator/controller contracts, runtime References, and approved
-paper-structure design. The initial claim statuses are provisional until the
-full artifact manifest is validated.
 
 ## Problem
 
@@ -91,7 +72,6 @@ ATR combines specialist decision layers with existing execution mechanisms.
 VLA-based manipulation provides an alternative to task-specific transfer
 hardware, while the LeRobot boundary permits supported robot substitutions
 with corresponding calibration and policy validation:
-
 
 | Integration layer | Responsibility | Reference |
 |---|---|---|
@@ -132,6 +112,13 @@ through declared schemas, policies, and evidence paths.
 
 ## Contributions
 
+The architecture mechanisms above address different parts of the research
+problem. Hierarchical control separates judgment from execution; specialist
+agents connect domains through a resumable graph; VLA-enabled manipulation
+connects physical stages through a bridge. The graph and evidence model are
+the primary contributions evaluated here. Gates and extensibility support those
+contributions, rather than serving as independent claims of safety or savings.
+
 | Priority | Contribution | RQ | Initial claim | Current evidence state |
 |---|---|---|---|---|
 | Primary | A declared, resumable multi-agent graph spanning the research loop | RQ1 | `C-SYS-ARCH-01` | `supported` by bounded repository inspection |
@@ -140,6 +127,9 @@ through declared schemas, policies, and evidence paths.
 | Secondary | Module, backend, bridge, graph, and workspace extension surfaces | RQ4 | `C-PLAT-EXT-01` | `supported` as an inspected architecture claim |
 
 ## Relationship to Existing Systems
+
+The relevant comparison is how systems coordinate experiments, preserve evidence
+and bound external actions—not how many routes or agents a repository contains.
 
 The repository structure was informed by public research-code patterns in
 [NIMO](https://github.com/NIMS-DA/nimo),
@@ -171,6 +161,19 @@ superiority comparison. Recorded failed attempts remain visible rather than
 being erased by later completion; see [current results](06_evaluation_and_results.md).
 
 ## Verification
+
+<a id="scope"></a>
+
+This chapter states what the repository is designed to contribute and how
+those statements will be evaluated. It does not claim comparative scientific
+performance or general safety effectiveness.
+
+<a id="evidence-basis"></a>
+
+The contribution boundaries are derived from the executable graph,
+orchestrator/controller contracts, runtime References, and approved
+paper-structure design. The initial claim statuses are provisional until the
+full artifact manifest is validated.
 
 Verified on 2026-08-09 against graph and controller baseline `0b7627b` and the
 current code snapshot. Claim statuses are machine-checked in

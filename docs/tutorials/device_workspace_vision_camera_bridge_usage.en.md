@@ -24,10 +24,15 @@ supersedes: []
 
 ## Goal and preparation
 
-Configure the UTM camera, verify a fresh frame, and distinguish a workspace pose
-test from a run's Vision decision. Use a configured ROS/UTM installation and the
-correct camera. Coordinate with the operator before starting/stopping ROS or
-releasing a camera owned by an active robot session.
+Prepare a UTM camera that keeps its saved configuration and delivers a fresh frame.
+That is the core setup task in Steps 1–4. Afterward, inspect a run's actual Vision
+decision, or choose the optional pose diagnostic and calibration sections only
+when you need them. A successful workspace test is not a completed run verification.
+
+You need the intended camera and a configured ROS/UTM installation. Check with the
+operator before starting or stopping ROS, or releasing a camera used by an active
+robot session. If another session owns the device, coordinate access rather than
+using a release button to force a new capture.
 
 Open **Main → Device Workspaces → Vision**, or `/device-bridge/vision-utm`.
 The 1920 × 1080 figures were captured read-only on 29 September 2026; camera capture,
@@ -36,6 +41,9 @@ Blank fields/panels are real unqueried state, not a successful setup example.
 
 ## Step 1 — Read the current camera configuration
 
+Read the saved state before deciding whether setup needs changing. UTM camera
+settings are separate from LeRobot's top/wrist camera settings.
+
 1. Select **Runtime Bridge**.
 2. Click **Load Config** to read the stored settings.
 3. Inspect **Camera Profile**, device path, dimensions, camera FPS and pixel format.
@@ -43,24 +51,32 @@ Blank fields/panels are real unqueried state, not a successful setup example.
 
 ![Runtime Bridge controls and camera profile](../gui/assets/screenshots/2026-09-29/device-bridge-vision-utm.png)
 
-**Expected:** the saved camera profile is displayed. Do not infer a correct device
-from an empty form or from a previously captured image.
-The UTM camera configuration is distinct from LeRobot's top/wrist camera settings.
+The figure locates **Runtime Bridge** and the camera form. After loading, you should
+be able to identify the saved device and capture settings. An empty form or an old
+image cannot establish which camera will be used. If the saved configuration is
+already correct, leave it unchanged and proceed to the runtime check.
 
 ## Step 2 — Select and save the actual device
+
+Only change the configuration when it does not describe the camera you intend
+to use. A detected device still needs to be matched to the physical installation.
 
 1. If configuration is needed, click **Detect Devices**.
 2. Select the intended entry in **Detected Cameras**, then check **Device path**.
 3. Set width/height, camera FPS and a pixel format supported by this device.
 4. Click **Apply Camera**, then **Load Config** to verify persistence.
 
-**Expected:** the intended device/profile survives reload. Configuration is stored
-locally under `memory/device_bridge/utm_camera_config.json`.
-Do not copy the camera path from another computer or use private serials from a
-screenshot. For supported settings and dependencies, see
-[UTM Vision Bridge](../device_bridges/utm_vision_bridge.md).
+After **Load Config**, compare the device, dimensions, FPS and format with what
+you saved. They are stored locally in `memory/device_bridge/utm_camera_config.json`.
+This establishes persistence, not frame delivery. Do not copy a path from another
+computer or private serials from a screenshot. The
+[UTM Vision Bridge](../device_bridges/utm_vision_bridge.md) lists supported settings
+and dependencies if detection or saving fails.
 
 ## Step 3 — Start or check the UTM ROS runtime
+
+Now check whether the saved camera can supply the required runtime evidence.
+Reading configuration alone does not open a working stream.
 
 1. Confirm no active experiment depends on the runtime you intend to change.
 2. Use **ROS Loading** when startup is required.
@@ -69,69 +85,100 @@ screenshot. For supported settings and dependencies, see
 
 ![Live Frame Evidence and ROS graph area](assets/screenshots/2026-09-29/vision-frame.png)
 
-**Expected:** a fresh frame with matching source and usable runtime evidence.
-This screenshot deliberately shows no captured frame; it does not demonstrate ROS
-or camera success. A graph picture or a loaded-process label alone is insufficient.
-**ROS Unloading** and **Release Camera Ports** change resource ownership; do not use
-them during a working run merely to refresh the browser.
+Read **Bridge Result** for the camera source, fresh frame/runtime evidence and any
+failure details. A loaded-process label or ROS graph picture alone is insufficient.
+The figure deliberately contains no captured frame: use it to locate the evidence
+area, not as an example of success. **ROS Unloading** and **Release Camera Ports**
+change resource ownership; they are not browser refresh controls and must not be
+used during a working run merely to update the picture.
 
 ## Step 4 — Check the preview without confusing rates
+
+Observe the stream long enough to distinguish a current preview from a retained
+still image:
 
 1. In **Live Frame Evidence**, set **Preview FPS**.
 2. Click **Play Live**.
 3. Verify that the image changes and its status/evidence is current.
 4. Click **Stop Live** when you finish observing.
 
-**Expected:** a current preview from the configured topic.
-Preview FPS requests browser delivery rate; it does not raise the camera's acquisition
-rate. If the picture is slow, compare source/frame freshness before increasing preview
-FPS. Check the actual camera/USB/ROS stream when the source itself is slow.
-See [UTM ROS bridge](../hardware/utm_ros_vision_runtime_bridge.md).
+Check the configured topic and frame freshness, not just whether pixels are visible.
+**Preview FPS** requests a browser delivery rate; it cannot raise camera acquisition
+rate. If the preview is slow, compare frame timestamps with the source stream before
+increasing the preview setting. A slow source needs a camera/USB/ROS check, described
+in the [UTM ROS bridge](../hardware/utm_ros_vision_runtime_bridge.md).
 
-## Step 5 — Use pose diagnostics for their stated purpose
+The setup task is complete when the intended configuration survives reload and a
+fresh authorized frame is visible in your environment. Keep the selected device,
+source/topic and check result for later diagnosis. To assess an experiment, continue
+to [run verification](#inspect-the-runs-actual-verification); neither a pose test nor
+calibration is required merely to finish camera setup.
 
-Select **Specimen Pose Test**.
+<a id="step-5--use-pose-diagnostics-for-their-stated-purpose"></a>
+
+## Optional: diagnose a pose source
+
+Open **Specimen Pose Test** when you need to isolate a pose-source problem. Select
+the diagnostic by its source rather than trying every button until one passes.
 
 ![Pose test modes and their distinct sources](assets/screenshots/2026-09-29/vision-pose.png)
 
-1. Use **Load Pose Status** to inspect tracker/camera-lease state.
-2. For a non-camera contract check, use **Virtual Pose Test**.
-3. A supervised **Live D455F Snapshot** uses the configured D455F topics.
-4. **D405 Smoke Snapshot** is a separate hardware-path diagnostic.
-5. Inspect **Snapshot Payload**, **Pose Summary** and **Pose API Result** together.
+1. Use **Load Pose Status** to inspect the tracker and camera ownership/lease.
+2. Choose the intended diagnostic from the table below.
+3. Inspect **Snapshot Payload**, **Pose Summary** and **Pose API Result** together.
 
-**Expected:** the result identifies its source/mode and specimen. A virtual result
-does not prove detection in a real scene. A D405 smoke test is not a replacement for
-the loop's chosen camera.
-**Release VLA Camera** can disrupt an owner session; do not press it while inference
-is active simply because this panel says no result.
+| Diagnostic | What it checks | What it cannot establish |
+|---|---|---|
+| Virtual Pose Test | The pose contract without a physical camera | Detection in a real scene |
+| Live D455F Snapshot | The configured D455F topics under supervision | Completion of a separate run's verification |
+| D405 Smoke Snapshot | A separate D405 hardware path | A substitute for the loop's selected camera |
 
-## Step 6 — Inspect the run's actual verification
+The figure groups diagnostics that use different sources. Read the result's source,
+mode and specimen identity before interpreting it. Preserve a virtual result as
+virtual even if it passes. **Release VLA Camera** can disrupt the owning session;
+an empty panel is not a reason to press it while inference is active.
 
-Return to Live and select **VIS → Report**.
+<a id="step-6--inspect-the-runs-actual-verification"></a>
+
+## Inspect the run's actual verification
+
+For an active experiment, return to Live and select **VIS → Report**. This is where
+you determine whether the required observation and decision belong to that run.
 
 ![Vision Agent observation and verification report](../gui/assets/screenshots/2026-09-29/live-vision.png)
 
-Check the run/cycle, selected observation (Active Cam or verification slot), captured
-image, ROI and decision evidence. A new image and a completed LLM decision occur at
-different times. Image delivery alone is not a verification pass.
+1. Match the run and cycle to the experiment being reviewed.
+2. Check the selected observation (**Active Cam** or verification slot), image and
+   region of interest (ROI).
+3. Read the associated decision evidence. Image delivery and completion of the LLM
+   decision occur at different times, so a new picture alone is not a pass.
 
-**Expected:** a current run-bound capture and matching decision for the required step.
+Use the historical figure to locate the observation and verification report, then
+look for a current capture and matching decision for the required step in your run.
 Workspace diagnostics do not mark that step complete. If the camera moved, realign
-the physical view to the configured ROI or follow an explicitly reviewed calibration
-change; do not change thresholds just to obtain a pass.
-See [Vision Agent](../agents/vision_agent.md).
+the physical view to the configured ROI or use an explicitly reviewed calibration
+change; do not alter thresholds merely to obtain a pass. The
+[Vision Agent](../agents/vision_agent.md) explains observation roles. If review fails,
+preserve the image, decision and exact reason, then consult
+[Vision review recovery](../gui/vision_review_recovery.md) before resuming the run.
 
-## Step 7 — Calibrate only when required
+<a id="step-7--calibrate-only-when-required"></a>
+
+## Maintenance only: calibrate the camera
+
+Calibration changes the camera model and requires an available camera in a maintenance
+window. Do not include it in ordinary page navigation or interrupt a working experiment
+to reproduce this guide.
 
 1. Prepare the actual checkerboard and measure its square size in metres.
 2. Enter **Checkerboard size**, **Square size m** and the intended calibration file.
 3. Use **Calibrate** only in a maintenance window with the camera available.
 4. Inspect the calibration output; **Stop Calibrate** closes that calibration session.
 
-**Expected:** calibration evidence for that camera and target, not just a filled path.
-A placeholder such as 9×6 is not an instruction to use a different board.
-Do not recalibrate a working experiment as part of ordinary page navigation.
+Inspect the produced calibration evidence and confirm that it describes the actual
+camera and target. A filled output path does not prove that calibration succeeded.
+A placeholder such as 9×6 is an input example, not a reason to use a different board.
+Keep the calibration result with the configuration it supports.
 
 ## Troubleshooting and completion
 
@@ -144,6 +191,8 @@ Do not recalibrate a working experiment as part of ordinary page navigation.
 | Slow preview | Actual acquisition/ROS rate versus preview delivery rate |
 | Pose test passes but VIS waits | Test mode/source versus the required run-bound verification |
 
-Complete this exercise only when configuration persistence and a fresh authorized
-frame have been checked in your own environment. The documentation captures themselves
-do not satisfy those checks. Continue with [operator walkthroughs](user_manual.en.md).
+Report the outcome of the task you actually performed: saved configuration and fresh
+frame for setup, source-specific evidence for a diagnostic, or a run-bound image and
+decision for verification. The documentation captures satisfy none of those checks
+for today's session. Keep results and failures distinguishable, and return to the
+[operator manual](user_manual.en.md) for run recovery or other device tasks.

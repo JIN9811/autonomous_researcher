@@ -37,15 +37,7 @@ supersedes: []
 
 # Appendix B: Hardware and Deployment
 
-## Status at a Glance
-
-| At a glance | Details |
-|---|---|
-| Topic | Deployment roles, dependencies and hardware boundaries |
-| Evidence boundary | Topology inspection; not certification of every deployment |
-| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
-
-## Summary
+<a id="summary"></a>
 
 ATR can coordinate the primary application with remote model services, GUI
 workers and laboratory devices. Active Knowledge/source stores remain on the
@@ -53,18 +45,18 @@ primary host; an active graph database is not required. A supported interface is
 not the same as a validated deployment; each result must name the topology it
 actually used.
 
-## Scope
+## Choose the deployment required by your task
 
-This appendix describes deployment roles and paper evidence requirements. It
-does not publish private network addresses, credentials, or a universal
-installation recipe.
+A reader validating the paper needs only the inspection topology below.
+Reanalysis needs the recorded inputs and analysis dependencies. A new experiment
+needs the actual model, worker and device configuration specified by its
+protocol. Do not install or start every supported service simply because it
+appears in the topology.
 
-## Source of Truth
-
-Bootstrap/configuration sources, bridge implementations, the Windows worker,
-and web/API surfaces define the available roles. Knowledge deployment was
-rechecked against `5542ef2`; earlier deployment evidence keeps its original
-configuration and date.
+Before a higher-tier reproduction, list each required role, who operates it,
+what evidence establishes readiness, and how an uncertain effect will be
+stopped and reviewed. Missing calibration or equipment inventory remains
+unreported information; generic platform support cannot fill it in.
 
 ## Deployment Roles
 
@@ -145,6 +137,19 @@ equipment bill of materials, cross-topology compatibility certification, or
 independently reproducible public raw dataset.
 
 ## Verification
+
+<a id="scope"></a>
+
+This appendix describes deployment roles and paper evidence requirements. It
+does not publish private network addresses, credentials, or a universal
+installation recipe.
+
+<a id="source-of-truth"></a>
+
+Bootstrap/configuration sources, bridge implementations, the Windows worker,
+and web/API surfaces define the available roles. Knowledge deployment was
+rechecked against `5542ef2`; earlier deployment evidence keeps its original
+configuration and date.
 
 Knowledge deployment roles were refreshed against `5542ef2` on 2026-09-12 by
 static inspection. No optional service or device was started.

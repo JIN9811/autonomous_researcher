@@ -1,5 +1,28 @@
 # Hardware alert lifecycle
 
+Use this page when a device appears healthy again but Live GUI still shows an
+alert or the run is paused. An **active** alert can block progress. A **resolved**
+alert is retained history, including the observation that cleared it; neither
+status by itself starts or resumes equipment.
+
+## Check whether the fault is current
+
+1. Read the Guardian report's gate/incident evidence and the device owner's
+   report. Match the device profile and connection identity, not just the run ID.
+2. Inspect a fresh device monitor observation. For the narrowly eligible Bambu
+   error described below, a qualifying healthy report can resolve the alert
+   automatically; restarting the server or acknowledging old history is not
+   required to make that observation count.
+3. If the alert resolves, check the printer's job state separately. A failed,
+   cancelled or paused job does not become a completed or resumed job. Use the
+   [matching recovery procedure](run_resume.md) before requesting Resume.
+4. If the alert stays active, retain the reason code, incident ID and observation
+   timestamp. E-STOP/PLC, latched interlocks and unknown error classes need their
+   explicit recovery path. Do not clear them by changing profiles or dismissing
+   history.
+
+## Resolution rules and retained history
+
 Hardware history and active blocking evidence use a common lifecycle in the
 controller, LangGraph runtime, Guardian pre-gates, Guardian agent, and Knowledge
 incident projection. Resolving an alert does not erase its original code,

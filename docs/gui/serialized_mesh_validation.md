@@ -1,6 +1,25 @@
 # Serialized specimen mesh validation
 
-Generated gyroid meshes are now checked after writing the STL, not only in
+Use the generated specimen's **Validity** field to distinguish a rejected mesh
+from one that has not been checked. A plausible preview is not evidence that the
+STL on disk passed manufacturing gates.
+
+## When a specimen is rejected
+
+Open Live GUI → SPC and inspect the geometry, mesh-quality and wall-thickness
+results for the same specimen. In its artifacts, locate the STL and
+`geometry_report.serialized_mesh_cleanup`; compare the reported STL SHA-256 with
+the file used for the handoff. Missing evidence remains unverified, not passing.
+
+If generation failed before any device operation, the
+[pre-device SPC recovery conditions](run_resume.md#spc-retry-before-device-execution)
+describe when Resume can repeat SPC for the same specimen. Do not manually repair
+the retained STL, relax a failed gate, or treat a preview as permission to print.
+If a printer request may already have occurred, use job-bound recovery instead.
+
+## What the on-disk check does
+
+Generated gyroid meshes are checked after writing the STL, not only in
 memory. STL float32 serialization can collapse very small triangles even when
 the pre-export mesh has already been cleaned.
 

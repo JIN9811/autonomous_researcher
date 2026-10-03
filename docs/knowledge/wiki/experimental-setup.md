@@ -1,5 +1,5 @@
 ---
-{"topic_id":"experimental-setup","owner":"documentation","source_refs":["docs/agents/orchestrator_agent.md","docs/modularity.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"760edc6b269c1c35dacfece350d325186db98a55c47224bfcef102ee5a5f7d0c","docs/modularity.md":"f73b0dc4867aed165801d21a319d63daf5f0ab1e1e9909046d4ab13dca2926a2"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: experimental-setup","status":"reviewed"}
+{"topic_id":"experimental-setup","owner":"documentation","source_refs":["docs/agents/orchestrator_agent.md","docs/modularity.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"760edc6b269c1c35dacfece350d325186db98a55c47224bfcef102ee5a5f7d0c","docs/modularity.md":"bffc918f5ef651b143bf7a9b1778d524b9367cd93f4a87f1a4c86166bba3b2fb"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: experimental-setup","status":"reviewed"}
 ---
 
 # Experimental Setup — Agreeing on a Run Contract

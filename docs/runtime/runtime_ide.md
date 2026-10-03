@@ -64,165 +64,24 @@ supersedes: []
 
 # Runtime IDE Reference
 
-## Status at a Glance
-
-| At a glance | Details |
-|---|---|
-| Purpose | Configure and inspect orchestration graphs and agent modules |
-| Workspace | `/ide` |
-| Coverage | Editing, validation, versioning, Package/core-owner configuration, run control and evidence inspection |
-| Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
-| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator/Equipment/Analysis graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
-
-## Applied Module Membership
-
-Manipulation now exposes its installed owner through `/api/modules/manipulation`.
-The graph has two Middle composite operations: task execution and result delivery.
-Seventeen CODE details point to actual LLM, software, bridge, validation and evidence
-symbols. High is agent-local LLM reasoning; Middle is API/internal software and
-composite workflows; Low is actual device/bridge execution. Guardian/Safety and
-Knowledge/Evidence are cross-cutting responsibilities. CODE relationships do not
-add executable commands or split the existing transfer/clearance procedure.
-The [Manipulation figure](../agents/assets/figures/manipulation_control_areas.svg)
-uses the same source-bound graph with the light document theme.
-
-Package Manager links `manipulation@1.0.0` to `lerobot@1.0.0`; Vision references that
-same bridge alongside `camera_vision@1.0.0`. Device Bridges shows one LeRobot with
-ten internal capability groups. The original canvas background, ports, legend and
-Inspector remain shared. Manipulation's owner frontend supplies its eight existing
-cards through the module host, while shared telemetry, polling and 3D viewer
-lifecycle remain unchanged. Absent or deactivated owner modules supply no current
-Manipulation card. The original `/lerobot` workspace stays available through its
-declared bridge references.
-
-The Live GUI Resource header polls the existing read-only `/api/devices/state`
-snapshot every five seconds, independently of chat, selected agent and completed-run
-freezing. Session refreshes preserve host telemetry. GPU/RAM percentages remain
-compact; missing values display `-`, and cached readings carry `*` with the timestamp
-and refresh status in the tooltip. This polling does not issue device commands.
-
-The Live GUI bottom dock keeps a one-line current-stage / next-stage summary above
-the **Events** and **Device Bridges** tabs. Idle and terminal runs do not present
-historical handoffs as scheduled work. Events are newest-first rows with time,
-agent, event type and message; existing filters and trace selection remain available.
-Bridge summaries expand to show their declared endpoints and existing workspace,
-health and preflight actions. Missing health evidence is shown as `Unknown`, not
-inferred from the presence of an endpoint. Expansion survives polling, and folding
-the dock retains its summary and selected tab. Run, GPU and LLM status cards are not
-duplicated in this dock. Bridge rows retain their expanded content height and scroll
-vertically within the dock instead of overlapping subsequent rows. Tab selection
-and disclosure do not execute bridge actions.
-The registry is read from the existing device snapshot; execution routes are unchanged.
-
-Live chat opens each newly visible agent bubble automatically and closes the
-previous automatically opened bubble when the next agent or operator bubble
-appears. Streaming updates and unchanged polling do not toggle it. Manually
-reopened history keeps the existing three-bubble limit; completed-loop summaries
-remain initially collapsed and can still be reopened manually. Chat-panel pinning
-is independent of message expansion.
-
-Artifacts uses a compact folder tree and one-line file list, scoped by default to
-the selected agent across all indexed loops. A loop filter narrows the view explicitly. Darker folder navigation, lighter file rows
-and a restrained cyan selection distinguish the regions without large artifact
-cards. Selecting a file reveals its preview and original/download actions;
-conversation-only results join the same explorer without a separate preview section. See
-[Live GUI file explorer](loop_artifact_archiving.md#live-gui-file-explorer) for
-archive identity, session coverage and preview limits.
-
-The Agent Binder context menu dismisses when the pointer leaves both its source
-icon and the menu, when focus moves outside, or when the surrounding page scrolls
-or loses window focus. Escape and existing menu actions remain available; moving
-between the source icon and menu does not dismiss it.
-
-Vision now uses the same installed module contract as Design and Specimen.
-`/api/modules/vision` exposes its executable graph and source-bound implementation
-catalog; edited valid graphs drive the registered Vision owner. The original graph
-canvas, ports, curves, labels, legend, Inspector and five control areas are reused.
-Composite observation/review internals appear as CODE relationships, not fabricated
-extra execution or model-call steps. The [Vision document figure](../agents/assets/figures/vision_control_areas.svg)
-is generated from this catalog in the shared light document theme.
-
-Package Manager and Device Bridges remain separate: `vision@1.0.0` owns the
-`camera_vision@1.0.0` observation bridge dependency. Opening that bridge shows its
-actual observation components and preserves draft membership. LeRobot retains the
-existing motion/capture/return and stop lifecycle. The live frontend module reuses
-all six Vision cards and UTM verification tabs without introducing polling.
-
-Equipment now exposes its installed owner at `/api/modules/equipment`. Its two
-Middle operations retain the existing composite task and result-delivery
-boundaries. Source-bound CODE relationships show the actual suitability and
-terminal-review LLM decisions in High, software supervision and validation in
-Middle, Windows/local worker execution in Low, and Guardian/Evidence as
-cross-cutting responsibilities. `equipment@1.0.0` composes the existing
-`windows_pyautogui@1.0.0` bridge; no second transport or management layout was
-introduced. The [Equipment document figure](../agents/assets/figures/equipment_control_areas.svg)
-uses the same installed catalog and shared light document renderer.
-
-The module-owned frontend supplies the existing Equipment report and nine card
-IDs while the Live host retains polling, run/process synchronization and action
-delegation. An inactive owner supplies no current cards or frontend asset. The
-generic module canvas renders the executable Equipment graph and source catalog;
-the Profile-bound Skill Flow remains a separate read-only workspace.
-
-Analysis exposes its installed owner at `/api/modules/analysis`. Its two Middle
-operations retain `analysis.task` and `analysis.deliver`. High LLM processing and
-evidence-review decisions select bounded actions; Middle numerical processing
-computes measured curves, metrics and the configured objective. Guardian quality
-gates and Knowledge provenance remain cross-cutting. There is no device bridge
-or Low hardware owner in this package. The
-[Analysis document figure](../agents/assets/figures/analysis_control_areas.svg)
-uses the same source catalog and shared light document renderer.
-
-The module-owned frontend supplies measured response, metrics, quality,
-provenance and BO handoff cards. An inactive owner supplies no current Analysis
-cards or frontend asset.
-
-BO now exposes its installed owner at `/api/modules/bo`. The executable view is
-the composite `bo.task` → `bo.deliver` path, while CODE relationships expand
-the actual policy/review, parameter-space, BoTorch/benchmark, validation and
-evidence sources. Its source catalog intentionally has no Low node: numerical
-optimization is Middle software, not a Device Bridge or physical effect. The
-[BO document figure](../agents/assets/figures/bo_control_areas.svg) uses this
-same catalog and the shared light document renderer.
-
-The module-owned Live frontend retains the initial-LHS, posterior/acquisition,
-decision, ranking, recommendation and Design-request composition. It uses the
-existing selected-owner report hydration and the common host; an inactive BO
-owner supplies no current cards or frontend asset. Existing BO Workspace
-settings and routes remain separate and unchanged.
-
-Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
-owner lists before a graph is applied. The preview uses the same graph-linked
-owner catalog as ORC; it neither queries equipment nor activates the draft.
-Save Version continues to use the existing validated graph activation path.
-
-| State/action | Result |
-|---|---|
-| Open or close a module editor | Editor visibility only; not runtime activation |
-| Save a version without activation | Keep the applied membership unchanged |
-| Apply a valid graph while idle | Update graph-attached Live GUI manifests and owner/setup discovery; Design also enforces installed-module execution/asset admission |
-| Remove a module reference | Detach only when no graph binding remains; retain files, settings, history and shared bridges |
-| Invalid graph or active run | Reject activation without partial membership changes |
-
-Installed modules remain in `/api/modules` for editing and re-addition;
-unattached catalog drafts do not appear in `/api/runtime/agent-manifests`.
-Graph-attached generated/presentation modules remain visible. The Design
-frontend is attached through the common manifest-driven host, with cleanup on
-exclusion and stale-load protection. Other agents retain their existing
-implementation boundaries until individually migrated.
-
-Removing a node still requires a valid remaining route. This feature does not
-automatically skip experimental stages or implement running-job hot swaps.
-See [Design lifecycle implementation](../oldversion/superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
-
 ## Summary
 
-ATR Runtime IDE is the operator-facing configuration, execution, and
-observation surface at `/ide`. It presents the graph and module contracts used
-by the backend, lets an operator build a draft, validate and compile it, inspect
-dry-run evidence, create an immutable version, activate a validated graph or
-module, start an allowed run mode, resolve approvals, and inspect events and
-artifacts.
+Open `/ide` to inspect a workflow, understand a blocked run, or prepare a
+configuration change. You do not need to edit or launch anything to use its
+graph, event and artifact views. Use `/live` for the ongoing agent reports;
+use the owning device workspace for device-specific setup or recovery.
+
+For observation, follow [inspect a run](#inspect-a-run-without-changing-it).
+For a change, follow [the graph workflow](#change-a-graph-for-a-future-run).
+For a reported error, use [Errors and Recovery](#errors-and-recovery).
+Schemas and APIs follow the operating tasks so that you can look up the exact
+contract when needed.
+
+The key distinction is draft versus active configuration. Opening, importing,
+validating or structurally dry-running a draft does not activate it. The main
+IDE **Save Version** action does activate the validated graph; it is not a
+draft-only save. A new run uses the saved active target, not unsaved editor
+content.
 
 The IDE is not an independent workflow engine. `app/main.py` owns its APIs,
 `graphs/*` owns validation and persistence, and
@@ -230,6 +89,26 @@ The IDE is not an independent workflow engine. `app/main.py` owns its APIs,
 workspaces and bridge implementations own device-specific effects. The IDE
 projects and controls those components through bounded interfaces; it does not
 replace their authority.
+
+### Inspect a run without changing it
+
+1. Open `/ide`, or follow a graph/node link from Live. Confirm the selected run
+   ID and current stage; idle and completed runs are not scheduled new work.
+2. Select the relevant node and inspect its current trace and events. A CODE
+   relationship explains implementation, not an extra executed step.
+3. Open the linked artifact in the selected run, preview it and use the original
+   or download action when you need the full file. Match run, loop, agent and
+   attempt before comparing outputs.
+4. Check any pending approval against its current action and evidence. Merely
+   reading the queue does not approve it.
+5. If the view is stale or a result is missing, use the recovery table. A missing
+   event is not proof that no physical action occurred; avoid launching a new
+   run or replaying a motion as a diagnostic.
+
+You have completed this inspection when you can identify the run state and the
+evidence for it, or name the missing evidence. The recent-events API is not a
+complete historical log reader; retained run JSONL and artifacts have their
+own storage lifetimes.
 
 ## Scope
 
@@ -312,20 +191,19 @@ Important boundaries:
 
 ![Runtime IDE entry controls](../gui/assets/screenshots/2026-09-29/ide.png)
 
-*Runtime IDE entry controls.*
+*Start with Main System and identify the run. Inspecting the page does not activate a draft or start execution.*
 
 ![Runtime IDE graph canvas and explorer](../gui/assets/screenshots/2026-09-29/ide-graph.png)
 
-*Runtime IDE graph canvas and explorer.*
+*Select a node for its Inspector and trace. Validate/Compile report on the draft; Save Version is the separate activation action.*
 
 ![Module Management library and designer](../gui/assets/screenshots/2026-09-29/module-management.png)
 
-*Module Management library and designer.*
+*Module Management selects what to edit. Loading a module here is not graph attachment or runtime activation.*
 
 Runtime IDE is the composition/editor surface, not the Live report. Graph drafts, validation/dry-run gates and activation remain distinct; opening either page does not activate a draft.
 Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
 See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
-
 
 | Surface | Operator purpose | Primary API/state | Persisted change | Highest possible effect |
 |---|---|---|---|---|
@@ -393,6 +271,11 @@ displayed activation evidence in the browser. The backend still revalidates
 every submitted payload; client state is never the execution authority.
 
 ## Module and Bridge Descriptor Editing
+
+Before editing, identify which configuration you intend to change. The module
+canvas edits registered module operations; the Equipment Profile Skill Flow is
+authored separately in Agent Manager. Bridge action descriptors are metadata,
+not a shortcut to invoke the described action.
 
 ### Five-area editable module canvas
 
@@ -632,6 +515,14 @@ not proof that any live run or safety gate is effective.
 
 ### Experimental Package drafts
 
+To exchange an experiment, export the intended graph and retained module drafts,
+then import them as detached state. Review dependencies and unresolved local
+bindings before any separate save. For Knowledge/Guardian declarations, choose
+the owner, edit its settings, **Validate Draft**, and only then explicitly
+**Apply for Future Runs** while activation is permitted. Inspect the resulting
+version; no import or validation starts a run. See the
+[package exchange task](../../packages/README.md#exchange-an-experiment-draft).
+
 The toolbar's **Export Package** and **Import Package** controls exchange an
 Experimental Package: the orchestration graph, Agent Package references and
 retained module drafts. This is separate from graph-only YAML exchange.
@@ -731,6 +622,8 @@ status is recorded in the [implementation plan](../oldversion/superpowers/plans/
 
 ## Operator Workflow
 
+### Change a graph for a future run
+
 Use this order for a normal graph change:
 
 1. **Open with context.** Enter `/ide` directly or follow a graph/node/module
@@ -750,15 +643,23 @@ Use this order for a normal graph change:
 7. **Save Version.** The main IDE control validates again, creates a version,
    activates the graph, and records the exact active digest. Recheck the
    activation checklist and version result.
-8. **Choose run mode.** Prefer test for configuration exercise. Replay or
-   fault-injection require appropriate inputs. Live requires explicit operator
-   confirmation plus graph and downstream device gates.
+8. **Choose run mode and resolved profile.** For an exercise without equipment
+   actuation, confirm `virtual_bridge` and that every resolved device is virtual.
+   **TEST alone is not a no-hardware guarantee**: installed-printer and
+   physical-print profiles retain their explicit device authority. TEST normally
+   still calls real models unless an offline fixture was explicitly configured.
+   Replay and fault-injection need appropriate inputs. Live additionally needs
+   operator confirmation, graph gates and downstream device gates.
 9. **Launch the saved active target.** Do not treat unsaved editor state as the
    run payload. Inspect the run id, active stage, approval queue, device state,
    and health.
-10. **Observe and recover.** Use timeline, event detail, node inspector,
-    artifact lineage, preview/download, and replay. Pause/stop for bounded
-    recovery; edit a new draft and repeat the gates for configuration defects.
+10. **Inspect the result.** Follow the addressed run's events and artifact
+    lineage to its continuation, terminal or review state. Open the saved
+    artifacts and verify their run/attempt identity; function completion or a
+    visible file alone does not establish physical or scientific success.
+    Pause/stop for bounded recovery; for configuration defects, edit a new
+    draft and repeat the gates. Artifact/runtime replay is not permission to
+    replay a robot motion.
 
 For a module-only change, validate and dry-run the module, save its version,
 then repeat graph validation/dry-run if the attached module changes the active
@@ -768,7 +669,7 @@ graph's effective behavior.
 
 | Mode | Primary use | Graph gate | Operator/device gate | Effect boundary |
 |---|---|---|---|---|
-| `test` | Configured simulator I/O with normal agent decisions; deterministic responses require an explicit offline fixture | Active graph must validate and compile | No live confirmation; individual test substitutes still define their own limits | No implied physical effect or success |
+| `test` | Configuration exercise with normal agent decisions; simulator I/O only when all resolved devices are virtual | Active graph must validate and compile | No IDE live confirmation; installed-printer/physical-print selections retain their explicit device authority | TEST alone does not prevent actuation; real model calls remain normal, and no success is implied |
 | `replay` | Re-evaluate saved/selected runtime context and stage route | Active graph validates/compiles; replay inputs must resolve | No automatic hardware authority | Event/config comparison only unless a separate implementation explicitly allows more |
 | `fault-injection` | Exercise retry/error/Guardian paths | Active graph validates/compiles; fault name/stage accepted by runtime | No live confirmation | Injected runtime behavior, not physical validation |
 | `live` | Execute the saved active orchestration target | Valid compile plus matching active-config dry-run digest; workspace graph requires `metadata.executable_from_runtime_ide=true` | IDE confirmation checkbox, Guardian/approval rules, tool and bridge allow flags, device preflight | Physical effects may occur only through the owning bridge/device path |
@@ -905,6 +806,147 @@ storage policy.
 Do not repair a configuration failure by editing active YAML concurrently with
 an active run or by bypassing the validator. Do not repair an unknown physical
 effect by assuming a missing event means “nothing happened.”
+
+## Applied Module Membership
+
+Manipulation now exposes its installed owner through `/api/modules/manipulation`.
+The graph has two Middle composite operations: task execution and result delivery.
+Seventeen CODE details point to actual LLM, software, bridge, validation and evidence
+symbols. High is agent-local LLM reasoning; Middle is API/internal software and
+composite workflows; Low is actual device/bridge execution. Guardian/Safety and
+Knowledge/Evidence are cross-cutting responsibilities. CODE relationships do not
+add executable commands or split the existing transfer/clearance procedure.
+The [Manipulation figure](../agents/assets/figures/manipulation_control_areas.svg)
+uses the same source-bound graph with the light document theme.
+
+Package Manager links `manipulation@1.0.0` to `lerobot@1.0.0`; Vision references that
+same bridge alongside `camera_vision@1.0.0`. Device Bridges shows one LeRobot with
+ten internal capability groups. The original canvas background, ports, legend and
+Inspector remain shared. Manipulation's owner frontend supplies its eight existing
+cards through the module host, while shared telemetry, polling and 3D viewer
+lifecycle remain unchanged. Absent or deactivated owner modules supply no current
+Manipulation card. The original `/lerobot` workspace stays available through its
+declared bridge references.
+
+The Live GUI Resource header polls the existing read-only `/api/devices/state`
+snapshot every five seconds, independently of chat, selected agent and completed-run
+freezing. Session refreshes preserve host telemetry. GPU/RAM percentages remain
+compact; missing values display `-`, and cached readings carry `*` with the timestamp
+and refresh status in the tooltip. This polling does not issue device commands.
+
+The Live GUI bottom dock keeps a one-line current-stage / next-stage summary above
+the **Events** and **Device Bridges** tabs. Idle and terminal runs do not present
+historical handoffs as scheduled work. Events are newest-first rows with time,
+agent, event type and message; existing filters and trace selection remain available.
+Bridge summaries expand to show their declared endpoints and existing workspace,
+health and preflight actions. Missing health evidence is shown as `Unknown`, not
+inferred from the presence of an endpoint. Expansion survives polling, and folding
+the dock retains its summary and selected tab. Run, GPU and LLM status cards are not
+duplicated in this dock. Bridge rows retain their expanded content height and scroll
+vertically within the dock instead of overlapping subsequent rows. Tab selection
+and disclosure do not execute bridge actions.
+The registry is read from the existing device snapshot; execution routes are unchanged.
+
+Live chat opens each newly visible agent bubble automatically and closes the
+previous automatically opened bubble when the next agent or operator bubble
+appears. Streaming updates and unchanged polling do not toggle it. Manually
+reopened history keeps the existing three-bubble limit; completed-loop summaries
+remain initially collapsed and can still be reopened manually. Chat-panel pinning
+is independent of message expansion.
+
+Artifacts uses a compact folder tree and one-line file list, scoped by default to
+the selected agent across all indexed loops. A loop filter narrows the view explicitly. Darker folder navigation, lighter file rows
+and a restrained cyan selection distinguish the regions without large artifact
+cards. Selecting a file reveals its preview and original/download actions;
+conversation-only results join the same explorer without a separate preview section. See
+[Live GUI file explorer](loop_artifact_archiving.md#live-gui-file-explorer) for
+archive identity, session coverage and preview limits.
+
+The Agent Binder context menu dismisses when the pointer leaves both its source
+icon and the menu, when focus moves outside, or when the surrounding page scrolls
+or loses window focus. Escape and existing menu actions remain available; moving
+between the source icon and menu does not dismiss it.
+
+Vision now uses the same installed module contract as Design and Specimen.
+`/api/modules/vision` exposes its executable graph and source-bound implementation
+catalog; edited valid graphs drive the registered Vision owner. The original graph
+canvas, ports, curves, labels, legend, Inspector and five control areas are reused.
+Composite observation/review internals appear as CODE relationships, not fabricated
+extra execution or model-call steps. The [Vision document figure](../agents/assets/figures/vision_control_areas.svg)
+is generated from this catalog in the shared light document theme.
+
+Package Manager and Device Bridges remain separate: `vision@1.0.0` owns the
+`camera_vision@1.0.0` observation bridge dependency. Opening that bridge shows its
+actual observation components and preserves draft membership. LeRobot retains the
+existing motion/capture/return and stop lifecycle. The live frontend module reuses
+all six Vision cards and UTM verification tabs without introducing polling.
+
+Equipment now exposes its installed owner at `/api/modules/equipment`. Its two
+Middle operations retain the existing composite task and result-delivery
+boundaries. Source-bound CODE relationships show the actual suitability and
+terminal-review LLM decisions in High, software supervision and validation in
+Middle, Windows/local worker execution in Low, and Guardian/Evidence as
+cross-cutting responsibilities. `equipment@1.0.0` composes the existing
+`windows_pyautogui@1.0.0` bridge; no second transport or management layout was
+introduced. The [Equipment document figure](../agents/assets/figures/equipment_control_areas.svg)
+uses the same installed catalog and shared light document renderer.
+
+The module-owned frontend supplies the existing Equipment report and nine card
+IDs while the Live host retains polling, run/process synchronization and action
+delegation. An inactive owner supplies no current cards or frontend asset. The
+generic module canvas renders the executable Equipment graph and source catalog;
+the Profile-bound Skill Flow remains a separate read-only workspace.
+
+Analysis exposes its installed owner at `/api/modules/analysis`. Its two Middle
+operations retain `analysis.task` and `analysis.deliver`. High LLM processing and
+evidence-review decisions select bounded actions; Middle numerical processing
+computes measured curves, metrics and the configured objective. Guardian quality
+gates and Knowledge provenance remain cross-cutting. There is no device bridge
+or Low hardware owner in this package. The
+[Analysis document figure](../agents/assets/figures/analysis_control_areas.svg)
+uses the same source catalog and shared light document renderer.
+
+The module-owned frontend supplies measured response, metrics, quality,
+provenance and BO handoff cards. An inactive owner supplies no current Analysis
+cards or frontend asset.
+
+BO now exposes its installed owner at `/api/modules/bo`. The executable view is
+the composite `bo.task` → `bo.deliver` path, while CODE relationships expand
+the actual policy/review, parameter-space, BoTorch/benchmark, validation and
+evidence sources. Its source catalog intentionally has no Low node: numerical
+optimization is Middle software, not a Device Bridge or physical effect. The
+[BO document figure](../agents/assets/figures/bo_control_areas.svg) uses this
+same catalog and the shared light document renderer.
+
+The module-owned Live frontend retains the initial-LHS, posterior/acquisition,
+decision, ranking, recommendation and Design-request composition. It uses the
+existing selected-owner report hydration and the common host; an inactive BO
+owner supplies no current cards or frontend asset. Existing BO Workspace
+settings and routes remain separate and unchanged.
+
+Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
+owner lists before a graph is applied. The preview uses the same graph-linked
+owner catalog as ORC; it neither queries equipment nor activates the draft.
+Save Version continues to use the existing validated graph activation path.
+
+| State/action | Result |
+|---|---|
+| Open or close a module editor | Editor visibility only; not runtime activation |
+| Save a version without activation | Keep the applied membership unchanged |
+| Apply a valid graph while idle | Update graph-attached Live GUI manifests and owner/setup discovery; Design also enforces installed-module execution/asset admission |
+| Remove a module reference | Detach only when no graph binding remains; retain files, settings, history and shared bridges |
+| Invalid graph or active run | Reject activation without partial membership changes |
+
+Installed modules remain in `/api/modules` for editing and re-addition;
+unattached catalog drafts do not appear in `/api/runtime/agent-manifests`.
+Graph-attached generated/presentation modules remain visible. The Design
+frontend is attached through the common manifest-driven host, with cleanup on
+exclusion and stale-load protection. Other agents retain their existing
+implementation boundaries until individually migrated.
+
+Removing a node still requires a valid remaining route. This feature does not
+automatically skip experimental stages or implement running-job hot swaps.
+See [Design lifecycle implementation](../oldversion/superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
 
 ## Verification
 

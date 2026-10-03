@@ -13,7 +13,7 @@ scope:
   - repository
   - paper
   - korean_companion
-summary: AX4LAB의 시스템 기여와 이를 지원하는 플랫폼을 소개하는 한국어 메인 문서.
+summary: AX4LAB의 목적, 사용 순서와 연구 근거를 안내하는 한국어 시작 문서.
 related_docs:
   - README.md
   - docs/paper/README.md
@@ -27,237 +27,201 @@ related_docs:
 supersedes: []
 -->
 
-![AX4LAB — 자율 연구 플랫폼](docs/assets/branding/ax4lab-banner.png)
-
-<div align="center">
-
 # AX4LAB
-
 <sub>Powered by the ATR Framework</sub>
 
-<p>
-  <a href="README.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 이상"></a>
-  <a href="docs/agents/agent_api_connection_matrix.md"><img src="https://img.shields.io/badge/FastAPI-10324D?style=flat&amp;logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
-  <a href="docs/runtime/langgraph_runtime.md"><img src="https://img.shields.io/badge/LangGraph-10324D?style=flat&amp;logo=langgraph&amp;logoColor=white" alt="LangGraph"></a>
-  <a href="docs/device_bridges/lerobot_bridge.md"><img src="https://img.shields.io/badge/LeRobot-10324D?style=flat&amp;logo=huggingface&amp;logoColor=white" alt="LeRobot"></a>
-  <a href="README.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
-</p>
+[English](README.md) · [사용자 문서](docs/README.ko.md) · [연구와 실험 근거](docs/paper/README.md)
 
-<p align="center"><a href="README.md">English</a></p>
+![AX4LAB — 자율 연구 플랫폼](docs/assets/branding/ax4lab-banner.png)
 
-### 간결한 하드웨어. 체계적인 AI. 자율 실험실.
+AX4LAB은 설계를 제안하고, 시편을 만들고 옮겨 시험한 뒤, 측정 결과를 바탕으로
+다음 실험을 선택하는 과정을 연결합니다. 역할별 AI 에이전트, 실행 절차,
+장비 연결 소프트웨어를 조합해 기존 프린터·로봇팔·PC로 조작하는 계측기를
+하나의 실험 흐름에서 사용할 수 있게 합니다.
 
-<p>
-  <strong>기존 실험실에 멀티에이전트 AI를 더합니다.</strong><br>
-  연구 판단과 절차, 장비 실행을 연결합니다.<br>
-  AI 기반 로봇부터 API 제어 장비, PC로 조작하는 계측기까지 함께 다룹니다.
-</p>
-
-<p>
-  <strong>장비는 재사용하고, VLA로 연결하고, 소프트웨어로 조율합니다.</strong><br>
-  전용 지그와 별도 이송 자동화에 대한 의존을 줄이면서<br>
-  기존 장비와 작업 환경을 유지하도록 설계했습니다.
-</p>
-
-</div>
-
-<p align="center">
-  <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB 로고" width="180">
-</p>
-
-<div align="center">
-
-| 문서 | 주요 내용 |
-|:---:|:---:|
-| **[논문 개요](docs/paper/README.md)** | 연구 배경, 기여, 논문 구성과 읽는 순서. |
-| **[시스템 아키텍처](docs/paper/02_system_architecture.md)** | 오케스트레이션, 에이전트별 책임, 실행 인터페이스. |
-| **[모듈화](docs/modularity.md)** | 코어·전문 owner, Package, Device Bridge, 설정 수명주기. |
-| **[에이전트 상세 문서](docs/agents/README.md)** | 각 에이전트의 역할, LLM 판단, 도구, 검증 현황. |
-| **[Device Bridges](docs/device_bridges/README.md)** | 로봇, 실험 장비, 해석 도구의 연동 규약. |
-| **[Runtime IDE](docs/runtime/runtime_ide.md)** | 실행 계획 편집, 실행 제어, 런 상태 확인. |
-| **[결과와 근거](docs/paper/06_evaluation_and_results.md)** | 실증 결과와 이를 뒷받침하는 아티팩트. |
-| **[설치와 운영](install/README.md)** | 설치, 설정, 운영 절차. |
-| **[전체 문서](docs/README.md)** | 상세 문서, 가이드, 문서 작성 규칙. |
-
-</div>
-
-## Graphical Abstract
-
-![멀티에이전트 AI 오케스트레이션과 Device Bridge를 통해 AI 기반 장비, API 제어 장비, PC 조작 장비를 연결하는 AX4LAB](docs/assets/presentation/laboratory-transformation-sunburst.webp)
-
-*멀티에이전트 오케스트레이션이 Device Bridge를 통해 기존 장비를 연결합니다.*
-
-## 연구 배경
-
-<sub>자율 실험실 도입을 어렵게 만드는 장벽.</sub>
-
-자율 실험실을 구축하려면 AI 모델을 추가하는 것만으로는 부족합니다.
-사람이 조작하도록 설계된 기존 장비를 연결해야 하고, 전용 자동화를 도입하려면
-하드웨어와 소프트웨어, 엔지니어링 비용이 추가로 필요합니다.
-
-- **도입 비용:** 정상적으로 쓰던 장비를 자동화 대응 장비로 교체하거나 전용 이송 시스템을 추가하면 초기 투자가 커집니다.
-- **통합 난이도:** API 제어 장비, PC로 조작하는 계측기, 수작업 시편 이송처럼 서로 다른 인터페이스를 하나의 실험 과정으로 연결해야 합니다.
-- **재구성 부담:** 특정 작업, 지그, 장비 조합에 맞춘 자동화는 실험이 달라질 때 상당한 재통합 작업이 필요할 수 있습니다.
-
-이러한 장벽은 [자율 실험실의 접근성](https://www.nature.com/articles/s41467-025-59231-1)과
-[모듈형 실험실 인터페이스](https://www.nist.gov/programs-projects/development-standards-support-modular-and-autonomous-laboratory-ecosystem)에 관한 연구로 이어지고 있습니다.
-우리가 다루는 질문은 다음과 같습니다. **새 실험 워크플로우가 생길 때마다
-자동화를 다시 구축하지 않고, 기존 실험실을 어떻게 자율화할 수 있을까요?**
-
-![기존 실험실의 자율화를 가로막는 세 장벽: 도입 비용, 통합 난이도, 재구성 부담](docs/assets/presentation/self-driving-lab-barriers.webp)
-
-## 시스템 기여
-
-AX4LAB은 **계층적 자동화, 멀티에이전트 조율, VLA 기반 매니퓰레이션**을
-결합해 기존 실험실을 자율화합니다. ATR Framework를 기반으로 기존 장비를
-유지하면서, 통합 로직을 재사용 가능한 소프트웨어 인터페이스와
-각 에이전트가 담당하는 절차에 배치합니다.
-
-![병렬로 결합되는 세 가지 시스템 기여: 계층적 자동화, 멀티에이전트 조율, VLA 기반 매니퓰레이션](docs/assets/presentation/ax4lab-transformation-approach.webp)
-
-| 시스템 기여 | 장벽을 낮추는 방식 | 상세 문서 |
-|---|---|---|
-| 계층적 자동화와 Device Bridges | High-Level 판단, Middle-Level 절차, Low-Level 도구를 구분해 연구 로직을 API·PC·로봇 인터페이스와 분리하고 기존 장비를 연결합니다. | [장비 인터페이스](docs/device_bridges/README.md) |
-| 멀티에이전트 조율 | 전문 에이전트가 작업 판단, 절차, 근거 전달 규약을 담당합니다. Orchestration Plan이 이 기능들을 조합하므로 변경 범위를 관련 에이전트와 인터페이스에 집중할 수 있습니다. | [에이전트별 책임](docs/agents/README.md) |
-| VLA 기반 물리 작업 연결 | 학습된 정책으로 동작하는 로봇팔이 수작업 이송 단계를 연결해 작업별 전용 이송 지그의 대안을 제공합니다. LeRobot은 지원 로봇의 연동과 작업 조율을 분리합니다. | [Manipulation](docs/agents/manipulation_agent.md) |
-
-핵심 기여는 이 요소들을 **재사용 가능한 연구 프레임워크로 통합한 것**입니다.
-간결한 하드웨어, 고도화된 소프트웨어 조율, 명확한 에이전트 간 인계를 통해
-실험 피드백을 연결합니다. 현재의 [실험 사이클](docs/paper/03_closed_loop_method.md)은
-이 아키텍처를 적용한 하나의 실행 구성입니다.
-
-## 시스템 아키텍처
-
-프레임워크는 에이전트 간 조율, 에이전트 내부의 책임, 실험 장비와의 연동을
-구분합니다.
-
-### 프레임워크
-
-Orchestrator는 연구 의도를 에이전트 작업으로 구체화하고, 구성 가능한
-Orchestration Plan을 통해 결과를 조율합니다. 전문 에이전트는 하나의 고정된
-순서를 정의하는 대신, 계획에 필요한 기능을 제공합니다.
-
-<p align="center">
-  <img src="docs/assets/presentation/framework-overview.webp" alt="연구 의도, 구성 가능한 Orchestration Plan, 전문 에이전트 간 작업과 결과 교환" width="70%">
-</p>
-
-- 작업 라우팅과 전문 에이전트 조율 — [시스템 아키텍처](docs/paper/02_system_architecture.md).
-- 실행 계획 설정과 모니터링 — [Runtime IDE](docs/runtime/runtime_ide.md).
-
-### 에이전트
-
-High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도구는
-실행을 담당합니다. Guardian/Safety와 Knowledge/Evidence는 이 책임 전반에
-걸쳐 작용하며, 별도의 순차 실행 단계가 아닙니다. LLM은 해당 에이전트에
-허용된 도구와 근거를 바탕으로 판단합니다.
-
-![High-Level 판단, Middle-Level 절차, Low-Level 도구와 공통으로 적용되는 Guardian/Safety 및 Knowledge/Evidence](docs/assets/presentation/agent-architecture.webp)
-
-- 제어 계층별 책임과 공유 근거 — [제어 모델](docs/runtime/three_level_control_model.md).
-
-### 장비 연동
-
-에이전트의 절차는 도구와 Device Bridge를 통해 실험실의 기능을 사용합니다.
-이 어댑터는 학습된 로봇 정책, 장비 API, PC로 조작하는 계측기를 수용하며,
-장비별 실행을 연구 계획과 분리합니다.
-
-![에이전트 도구와 Device Bridge를 통한 로봇 정책, API 제어 장비, PC 조작 계측기 연동](docs/assets/presentation/integration-architecture.webp)
-
-- 도구 호출, 데이터 규약, 외부 연결 — [API 및 연결 매트릭스](docs/agents/agent_api_connection_matrix.md).
-
-## Orchestration Route
-
-[![에이전트 실행 경로, 제어 게이트, Device Bridge와 근거 연결을 보여주는 메인 GUI 런타임 맵](docs/assets/readme/orchestration-route.svg)](docs/assets/readme/orchestration-route.svg "원본 크기의 SVG 열기")
-
-메인 GUI의 런타임 맵으로, 설정된 에이전트 인계와 조건부 복귀 경로를
-제어·Device Bridge·근거 연결과 함께 보여줍니다.
-
-- 그래프 설정과 실행 상태 확인 — [런타임 맵과 IDE](docs/runtime/runtime_ide.md).
-
-## 실증과 근거
-
-최신 [캠페인 아카이브 검증](docs/paper/evidence/2026-09-28-campaign-archive-audit.md)에서는
-**완료된 실험 관측 15개**의 Gyroid STL, 응력–변형률 곡선, 물성,
-BO 입력·다음 추천 기록을 대조했습니다. 산출물 해시와 SEA 정규화가 일치하며,
-실패 시도와 복구 이력도 보존되어 있습니다. 이는 기록된 다중 사이클 실행의
-근거이지, 무인 제조나 대조 실험 대비 과학적 우월성의 증명은 아닙니다.
-
-이전 감독하 혼합 모드 1사이클 실증은 당시의 적층 생략·시편 동일성 한계와
-함께 별도 기록으로 유지합니다.
-
-압축시험은 현재의 적용 사례이며, **플랫폼 자체의 범위를 정의하지 않습니다**.
-
-| 확인할 내용 | 근거 |
-|---|---|
-| 기록된 사이클에서 무엇이 완료되었나요? | [Closed-loop 결과](docs/paper/06_evaluation_and_results.md) |
-| 각 주장은 어떤 아티팩트로 뒷받침되나요? | [주장–근거 대응표](docs/paper/09_claim_evidence_traceability.md) |
-| 검증을 어떻게 재현할 수 있나요? | [재현 방법](docs/paper/07_reproducibility.md) |
-| 사이클별 산출물은 어디에 보관되나요? | [루프 아티팩트 보관](docs/runtime/loop_artifact_archiving.md) |
-
-에이전트별 API, 로컬 모델, 가상 장비 검증은 각 상세 문서에 기록되어 있으며,
-실제 장비 검증을 대신하지는 않습니다. 비용 비교, 과학적 효용,
-독립적인 여러 캠페인에 걸친 신뢰성은 추가 평가 대상입니다.
-[문서 정합성 점검](docs/maintenance/code_documentation_audit_20260928.md)에서
-메인 구현, 테스트, 캠페인 근거, 별도 RPT 개발 상태를 구분합니다.
-
-## 에이전트 상세 문서
-
-각 문서는 역할 구조도와 현재 상태로 시작하며, 워크플로우, 도구,
-인터페이스, 아티팩트, 검증 내용을 이어서 설명합니다.
-
-| 에이전트 | 담당 역할 | 상세 문서 |
-|---|---|---|
-| Orchestrator | 범위가 있는 연구 의도를 해석하고 인계를 조율하며 확정 Setup은 다음 새 실행에만 수용 | [Orchestrator](docs/agents/orchestrator_agent.md) |
-| Design | 후보 적합성을 검토하고 설계 명세를 생성 | [Design](docs/agents/design_agent.md) |
-| Specimen Making | 제작 적합성을 평가하고 준비 도구를 호출 | [Specimen Making](docs/agents/specimen_agent.md) |
-| Vision | 관측을 수행하고 시각적 근거를 검토 | [Vision](docs/agents/vision_agent.md) |
-| Manipulation | 로봇 스킬을 선택하고 이송 완료를 검토 | [Manipulation](docs/agents/manipulation_agent.md) |
-| Lab Equipment | 저장된 워크플로우를 실행하고 데이터 획득 결과를 검토 | [Lab Equipment](docs/agents/equipment_agent.md) |
-| Analysis | 측정 데이터를 파싱하고 물성·SEA 및 BO에 전달할 근거를 산출 | [Analysis](docs/agents/analysis_agent.md) |
-| Knowledge | Markdown 지식을 정리하고 범위에 맞는 맥락을 검색 | [Knowledge](docs/agents/knowledge_agent.md) |
-| Bayesian Optimization | 최적화 전략을 선택하고 수치 도구의 제안을 검토 | [BO](docs/agents/bo_agent.md) |
-| Guardian | 실행 근거를 검토하고 계속 진행할지 판단하는 데 의견을 제공 | [Guardian](docs/agents/guardian_agent.md) |
-
-## 플랫폼 기여
-
-지원 플랫폼은 실험 로직을 장비 인터페이스, 모델 백엔드, 운영자
-워크스페이스와 분리합니다. 이러한 확장 지점은 실증된 시스템을 재사용할 수
-있게 하며, 다른 실험실에 적용할 때는 별도의 연동과 검증이 필요합니다.
-
-[플랫폼 아키텍처](docs/paper/04_platform_architecture.md) ·
-[Runtime IDE](docs/runtime/runtime_ide.md) ·
-[인터페이스 규약](docs/paper/appendix_a_interfaces.md)
-
-## Device Bridge 상세 문서
-
-| 기능 | 인터페이스 역할 | 상세 문서 |
-|---|---|---|
-| 프린터 플릿 | 프린터 제공자를 선택하고 조율 | [Printer Fleet](docs/device_bridges/printer_fleet_bridge.md) |
-| Bambu Lab | 프린터 제어와 제작 아티팩트 관리 | [Bambu X2D](docs/device_bridges/bambu_x2d_bridge.md) |
-| Prusa | 프린터 제공자 연동 | [Prusa MK4S](docs/device_bridges/prusa_mk4s_bridge.md) |
-| 로보틱스 | 학습 정책 실행, 리플레이, 로봇 워크스페이스 | [LeRobot](docs/device_bridges/lerobot_bridge.md) |
-| PC 조작 계측기 | 저장된 GUI 워크플로우와 데이터 획득 | [Windows PyAutoGUI](docs/device_bridges/windows_pyautogui_bridge.md) |
-| 시험 영역 비전 | 카메라 관측과 검증 근거 | [UTM Vision](docs/device_bridges/utm_vision_bridge.md) |
-| 가상 장비 | 실제 장비 없이 검증하기 위한 결정론적 대체 장비 | [Base and Simulators](docs/device_bridges/base_simulator_bridges.md) |
+현재 적용 사례는 Gyroid 시편의 반복 압축시험입니다. 이는 프레임워크를 활용한
+한 가지 구성이지, 모든 실험실이 같은 재료와 장비, 순서를 써야 한다는 뜻은 아닙니다.
 
 ## 시작하기
 
-실제 1920 × 1080 화면으로 Main/Live, 에이전트 리포트, 장비 Workspace,
-Runtime IDE와 Replay를 설명한
-[GUI 구조·화면 안내](docs/gui/visual_structure.md)를 참고하세요.
+지금 하려는 일에 맞는 문서부터 읽으세요. 프로그램을 사용하기 위해 내부 구현
+문서부터 모두 읽을 필요는 없습니다.
 
-| 독자 | 시작할 문서 |
+| 하려는 일 | 읽는 순서 |
 |---|---|
-| 연구자·리뷰어 | [문제 정의와 기여](docs/paper/01_problem_and_contributions.md) → [결과](docs/paper/06_evaluation_and_results.md) |
-| 운영자 | [설치](install/README.md) → [첫 실행 튜토리얼](docs/tutorials/first_autonomous_run.ko.md) → [Device Bridges](docs/device_bridges/README.md) |
-| 개발자 | [런타임 상세 문서](docs/runtime/current_code_snapshot.md) → [에이전트 API](docs/agents/agent_api_connection_matrix.md) |
-| 기여자 | [기여 가이드](CONTRIBUTING.md) → [문서 작성 규칙](docs/standards/documentation_standard.md) |
+| 처음 설치하고 실험 한 번 완료하기 | [설치](install/README.md) → [첫 실험](docs/tutorials/first_autonomous_run.ko.md) |
+| 이미 설치된 시스템 사용하기 | [사용자 가이드](docs/tutorials/user_manual.ko.md) → [작업별 문서](docs/README.ko.md) |
+| 화면 구성과 버튼 위치 익히기 | [GUI 화면 안내](docs/gui/visual_structure.md) |
+| 실험 방법과 결과 검토하기 | [연구 개요](docs/paper/README.md) → [결과](docs/paper/06_evaluation_and_results.md) |
+| 기능을 추가하거나 실행 흐름 바꾸기 | [모듈 구성](docs/modularity.md) → [Runtime IDE](docs/runtime/runtime_ide.md) |
 
-실제 장비를 연결하기 전에 [운영 조건과 한계](docs/paper/08_safety_ethics_and_limitations.md)를
-확인하세요. 취약점 제보 절차는 [보안 정책](SECURITY.md)에 안내되어 있습니다.
+장비를 사용하기 전에는 [실행 모드](docs/runtime/test_mode.md)를 먼저 선택하세요.
+가상 브릿지, 설치된 실제 프린터를 활용하는 테스트, 실제 출력은 작동 범위가
+서로 다릅니다. **TEST라는 표시만으로 장비가 움직이지 않는다고 판단하면 안 됩니다.**
+첫 실험 가이드에서 각 경로에 필요한 준비와 확인 절차를 안내합니다.
+
+## 실험을 진행하는 방법
+
+실험 목적을 설명하고 설정을 검토하는 데서 시작합니다. 실행이 승인되면
+Orchestrator가 작업을 조율하고, 각 에이전트가 담당 작업을 수행한 뒤 근거를
+돌려줍니다. Live GUI에서는 현재 작업과 리포트를 확인하고, 필요한 경우
+운영자 요청에 응답합니다. 요청이 접수됐다는 표시와 실제 장비 동작이 완료됐다는
+판정은 구분해서 봐야 합니다.
+
+![실험 상태, 에이전트 선택 영역과 리포트를 보여주는 Live GUI](docs/gui/assets/screenshots/2026-09-29/live-overview.png)
+
+*상단에서 현재 상태를 확인하고, 왼쪽에서 에이전트를 선택한 뒤, 리포트에서
+판정 근거를 살펴봅니다. 특정 시점에 촬영한 화면 예시입니다.
+[화면 안내](docs/gui/visual_structure.md)에 촬영 조건과 개별 기능이 설명돼 있습니다.*
+
+자주 하는 작업은 다음 문서에서 바로 찾을 수 있습니다.
+
+- [출력 옵션 바꾸기](docs/tutorials/device_workspace_3dp_usage.ko.md):
+  이동 속도 비율과 출력 시작·종료 동작을 설정합니다.
+- [카메라와 검증 이미지 확인하기](docs/tutorials/device_workspace_vision_camera_bridge_usage.ko.md).
+- [런 일시정지·재개하기](docs/gui/run_resume.md),
+  [프린터 대기 문제 해결하기](docs/gui/printer_wait_recovery.md).
+- [저장된 런 다시 보기](docs/gui/run_replay.md),
+  [사이클별 산출물 찾기](docs/runtime/loop_artifact_archiving.md).
+
+읽기 전용 Replay는 저장된 기록을 보여주는 기능입니다. 로봇 replay는 실제
+동작을 재생하는 기능이므로 서로 혼동하지 마세요. 장비를 다룰 때는 해당 준비
+절차와 [운영 조건·한계](docs/paper/08_safety_ethics_and_limitations.md)를 확인해야 합니다.
+
+<a id="연구-배경"></a>
+<a id="시스템-기여"></a>
+
+## 왜 이런 구조를 사용하나요?
+
+기존 실험실의 장비는 제어 방식이 제각각입니다. 장비를 모두 교체하거나 전용
+이송 장치를 추가하고, 실험이 바뀔 때마다 연결을 다시 구현하면 자동화 도입과
+유지가 어려워집니다. AX4LAB은 이를 줄이기 위해 세 가지 책임을 나눕니다.
+
+- **판단:** 에이전트가 작업과 현재 근거를 해석합니다.
+- **절차:** 소프트웨어가 허용된 순서로 작업하고 결과를 확인합니다.
+- **장비 실행:** 브릿지가 로봇 정책, 장비 API 또는 PC 프로그램과 통신합니다.
+
+이렇게 나누면 장비별 처리 방식을 연구 계획과 분리하고 기존 기능을 재사용할 수
+있습니다. 다만 연결 소프트웨어가 있다고 장비까지 준비되는 것은 아닙니다.
+다른 실험실에 적용할 때는 별도의 연동과 검증이 필요합니다.
+[연구 배경](docs/paper/01_problem_and_contributions.md)에서 이 문제와 관련 연구를 설명합니다.
+
+<a id="시스템-아키텍처"></a>
+<a id="프레임워크"></a>
+<a id="에이전트"></a>
+<a id="장비-연동"></a>
+<a id="플랫폼-기여"></a>
+
+## 각 부분은 어떻게 연결되나요?
+
+Orchestrator는 Orchestration Plan으로 전문 에이전트의 작업을 연결합니다.
+허용된 도구와 절차가 실행을 맡고, 수치 계산 기능이 측정 물성과 BO 추천값을
+계산합니다. Guardian의 점검과 Knowledge의 기록은 여러 단계에 걸쳐 사용됩니다.
+
+![연구 목적을 실행 계획과 전문 에이전트의 작업·결과로 연결하는 구조](docs/assets/presentation/framework-overview.webp)
+
+전체 관계는 [시스템 구조](docs/paper/02_system_architecture.md)에서,
+판단·절차·장비 실행의 구분은 [제어 모델](docs/runtime/three_level_control_model.md)에서
+확인할 수 있습니다. 기능을 구성하거나 확장하려면 [모듈 구성 안내](docs/modularity.md)를 읽으세요.
+
+## Orchestration Route
+
+[![에이전트 인계, 제어 조건과 근거 연결을 보여주는 실행 경로](docs/assets/readme/orchestration-route.svg)](docs/assets/readme/orchestration-route.svg)
+
+이 지도는 다음 작업으로 넘어가거나 이전 단계로 돌아가는 이유를 파악할 때
+유용합니다. 조건부 경로도 포함하므로 모든 런이 각 노드를 한 번씩 방문하는 것은
+아닙니다. [Runtime IDE 안내](docs/runtime/runtime_ide.md)에서 설정된 그래프와
+현재 실행을 확인하는 방법을 설명합니다.
+
+## 실증과 근거
+
+[보존된 캠페인 검토](docs/paper/evidence/2026-09-28-campaign-archive-audit.md)는
+**완료된 실험 관측 15개**를 사이클별 Gyroid STL, 응력–변형률 곡선, 물성,
+BO 입력·다음 추천 기록과 대조한 결과입니다. 산출물 해시와 SEA 정규화를 확인했으며,
+실패 시도와 운영자 개입, 복구 이력도 함께 보존되어 있습니다.
+
+이는 기록된 다중 사이클 실행을 뒷받침합니다. 무인 제조, 비교 대상 대비 비용
+우위, 대조 실험으로 확인한 과학적 우월성을 입증하는 자료는 아닙니다.
+이전 감독하 혼합 모드 실증은 적층 생략과 시편 동일성의 한계를 포함해 별도로
+기록돼 있습니다. 에이전트별 API·로컬 모델·가상 장비 검증도 실제 장비 검증과 구분합니다.
+
+[결과 해석](docs/paper/06_evaluation_and_results.md),
+[주장별 근거](docs/paper/09_claim_evidence_traceability.md),
+[재현 방법](docs/paper/07_reproducibility.md)으로 이어서 읽을 수 있습니다.
+[당시 구현 점검](docs/maintenance/code_documentation_audit_20260928.md)에서는 main과
+별도 RPT 개발 상태도 구분합니다. 다른 브랜치의 기능이 현재 설치돼 있다고 가정하지 마세요.
+
+## 에이전트 상세 문서
+
+정확한 역할, 완료 근거 또는 인터페이스를 확인할 때 참고하세요.
+일상적인 조작은 위의 사용자 가이드에서 시작하는 편이 빠릅니다.
+
+<details>
+<summary>역할과 상세 규약 펼치기</summary>
+
+| 에이전트 | 담당 역할 | 상세 문서 |
+|---|---|---|
+| Orchestrator | 실험 목적과 확정 설정을 검토하고 승인된 작업을 조율 | [Orchestrator](docs/agents/orchestrator_agent.md) |
+| Design | 후보 적합성 검토와 설계 명세 생성 | [Design](docs/agents/design_agent.md) |
+| Specimen Making | 제작 적합성 검토와 준비 도구 호출 | [Specimen Making](docs/agents/specimen_agent.md) |
+| Vision | 이미지 촬영과 시각적 근거 검토 | [Vision](docs/agents/vision_agent.md) |
+| Manipulation | 저장된 로봇 스킬 실행과 이송 완료 검토 | [Manipulation](docs/agents/manipulation_agent.md) |
+| Lab Equipment | 저장된 장비 절차 실행과 측정 결과 검토 | [Lab Equipment](docs/agents/equipment_agent.md) |
+| Analysis | 측정 데이터에서 물성·SEA와 BO용 근거 산출 | [Analysis](docs/agents/analysis_agent.md) |
+| Knowledge | Markdown 지식 정리와 필요한 맥락 검색 | [Knowledge](docs/agents/knowledge_agent.md) |
+| Bayesian Optimization | 최적화 전략 선택과 수치 추천 검토 | [BO](docs/agents/bo_agent.md) |
+| Guardian | 실행 근거 확인과 계속 진행할지 검토 | [Guardian](docs/agents/guardian_agent.md) |
+
+[에이전트 문서 읽는 법](docs/agents/README.md) · [API·연결 관계](docs/agents/agent_api_connection_matrix.md)
+
+</details>
+
+## Device Bridge 상세 문서
+
+<details>
+<summary>장비별 연결 규약 펼치기</summary>
+
+| 기능 | 인터페이스 역할 | 상세 문서 |
+|---|---|---|
+| 프린터 플릿 | 프린터 제공자 선택과 조율 | [Printer Fleet](docs/device_bridges/printer_fleet_bridge.md) |
+| Bambu Lab | 프린터 제어와 제작 산출물 관리 | [Bambu X2D](docs/device_bridges/bambu_x2d_bridge.md) |
+| Prusa | 프린터 제공자 연동 | [Prusa MK4S](docs/device_bridges/prusa_mk4s_bridge.md) |
+| 로봇 | 학습 정책 실행과 실제 로봇 동작 재생 | [LeRobot](docs/device_bridges/lerobot_bridge.md) |
+| PC 조작 계측기 | 저장된 GUI 절차와 데이터 획득 | [Windows PyAutoGUI](docs/device_bridges/windows_pyautogui_bridge.md) |
+| 시험 영역 비전 | 카메라 관측과 검증 근거 | [UTM Vision](docs/device_bridges/utm_vision_bridge.md) |
+| 가상 장비 | 실제 장비 없이 검증하는 대체 장비 | [Base and Simulators](docs/device_bridges/base_simulator_bridges.md) |
+
+[장비별 사용 안내 찾기](docs/device_bridges/README.md).
+브릿지가 있다는 사실만으로 장비 준비나 물리적 안전이 확인되지는 않습니다.
+
+</details>
+
+<a id="graphical-abstract"></a>
+
+## 연구 개념도
+
+<details>
+<summary>개념도와 추가 설명 펼치기</summary>
+
+![멀티에이전트 조율로 기존 실험실을 연결하는 개념](docs/assets/presentation/laboratory-transformation-sunburst.webp)
+
+![도입 비용, 통합 난이도와 재구성 부담](docs/assets/presentation/self-driving-lab-barriers.webp)
+
+![계층적 자동화, 멀티에이전트 조율과 VLA 기반 이송](docs/assets/presentation/ax4lab-transformation-approach.webp)
+
+![판단·절차·도구와 공통 안전 점검·근거 관리의 관계](docs/assets/presentation/agent-architecture.webp)
+
+![로봇 정책, 장비 API와 PC 프로그램을 연결하는 브릿지](docs/assets/presentation/integration-architecture.webp)
+
+실험 관측 사진이 아닌 설명용 그림입니다.
+[그림 출처](docs/assets/presentation/README.md)와 [연구 문서](docs/paper/README.md)에서
+배경을 확인할 수 있습니다.
+
+</details>
 
 ## 인용과 라이선스
 
-저장소의 [인용 정보](CITATION.cff)와 [라이선스](LICENSE)를 참고하세요.
-[논문 문서 모음](docs/paper/README.md)은 작성 중인 연구 문서이며,
-출판 정보는 확정되는 대로 기록합니다.
+[인용 정보](CITATION.cff)를 사용하고 재사용 전에 [라이선스](LICENSE)를 확인하세요.
+[논문 문서 모음](docs/paper/README.md)은 작성 중인 연구 문서이며 출판 정보는
+확정된 내용만 기록합니다. 개발 참여는 [기여 안내](CONTRIBUTING.md),
+취약점 제보는 [보안 정책](SECURITY.md)를 참고하세요.

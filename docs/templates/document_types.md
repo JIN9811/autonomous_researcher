@@ -47,6 +47,12 @@ Earlier design decisions are historical provenance, not current authoring rules.
 - Split mixed current/future documents instead of hiding the difference in one
   label.
 - Remove instructional comments and angle-bracket prompts before activation.
+- For reader-facing guides and indexes, use the templates as a coverage
+  checklist, not a requirement to display every boilerplate heading. Follow
+  the [reader-first writing rules](../standards/documentation_standard.md#reader-first-writing):
+  purpose, preparation, action, expected result, then recovery and next steps.
+  Keep source metadata intact and move contributor detail behind the user flow.
+  Exact specialized reference layouts remain unchanged.
 
 Paper-facing chapters MUST also follow
 `docs/standards/paper_documentation_standard.md`. Use this copy-ready extension

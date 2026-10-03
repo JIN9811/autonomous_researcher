@@ -42,15 +42,7 @@ supersedes: []
 
 # Appendix A: Interfaces and Contracts
 
-## Status at a Glance
-
-| At a glance | Details |
-|---|---|
-| Topic | Agent, runtime, device and knowledge interface families |
-| Evidence boundary | [Agent API matrix](../agents/agent_api_connection_matrix.md); concrete schemas remain code-owned |
-| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
-
-## Summary
+<a id="summary"></a>
 
 This appendix connects the paper abstraction to repository interface families.
 It is a map, not a generated API specification. Exact payload fields remain in
@@ -62,17 +54,14 @@ this appendix summarizes those boundaries for the paper instead of duplicating
 them. The Agent Reference Index also provides the complete visual inventory of
 closed-loop, execution/effect, and connection figures.
 
-## Scope
+## Locate the contract you need
 
-Included are system-critical agent/stage, orchestrator, Guardian, device/model,
-knowledge, graph/module, and operator interfaces. The appendix does not list
-all FastAPI routes individually; the 346-entry count belongs to the initial
-2026-08-09 evidence, not the current API inventory.
-
-## Source of Truth
-
-The `agents/`, `orchestrator/`, `graphs/modules/`, `device_bridges/`,
-`knowledge/`, and `app/main.py` sources at baseline `0b7627b` are authoritative.
+Start with the changed responsibility, not a familiar source file. For a new
+agent handoff, inspect the owner reference and its schemas; for a device effect,
+inspect the bridge contract and failure semantics; for a graph change, inspect
+validation and activation. Read the receiving side as well as the producer so
+that required evidence survives the boundary. The map below provides entry
+points, not permission to call an endpoint or replace an active configuration.
 
 ## Contract Map
 
@@ -147,6 +136,18 @@ artifact may need generated OpenAPI/schema exports pinned to the release
 commit.
 
 ## Verification
+
+<a id="scope"></a>
+
+Included are system-critical agent/stage, orchestrator, Guardian, device/model,
+knowledge, graph/module, and operator interfaces. The appendix does not list
+all FastAPI routes individually; the 346-entry count belongs to the initial
+2026-08-09 evidence, not the current API inventory.
+
+<a id="source-of-truth"></a>
+
+The `agents/`, `orchestrator/`, `graphs/modules/`, `device_bridges/`,
+`knowledge/`, and `app/main.py` sources at baseline `0b7627b` are authoritative.
 
 The Knowledge interface row was refreshed against `5542ef2` on 2026-09-12 by
 static inspection. No API or device was invoked for this documentation refresh.

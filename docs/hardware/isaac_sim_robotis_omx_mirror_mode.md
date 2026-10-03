@@ -1,6 +1,70 @@
 # Isaac Sim ROBOTIS OMX Mirror Mode
 
-This page documents the current Isaac Sim mirror-mode baseline for the ROBOTIS OMX-AI follower arm.
+Use mirror mode to compare an OMX-AI robot session with its Isaac Sim view and
+retain synchronization evidence beside a recording. The mirror sends joint
+information into simulation; it does not command the physical arm. Starting
+teleoperation or recording is a separate action that can move the real robot.
+
+## Connect, check, then observe a session
+
+Before live probing, open `/lerobot`, detect/save the follower port, and confirm
+the saved profile is the intended robot. Isaac Sim, the OMX scene and the mirror
+extension must already be installed. Do not open a standalone Dynamixel reader
+while a LeRobot session owns the follower bus.
+
+1. In **3. Isaac Sim Link**, use **Open Isaac Sim Mirror**. Confirm the managed
+   Isaac instance opens `sim/robotis_omx/scene/omx_table_layout.usda` and the GUI
+   endpoint is `http://127.0.0.1:8766/joints` (or your explicitly configured one).
+2. Use **Check Isaac Link**. A reachable receiver is only the first check. For
+   a visible live Isaac stage, inspect `/health` for `status=ready` and
+   `apply_mode=deferred_update_tick`; `direct_http_thread` is the offline/smoke-test
+   path, not equivalent live viewport evidence.
+3. Use **Send Test Pose** for a bounded sample and inspect receiver `/state`.
+   The latest `session_id`/`sample_index` must match and `sample_count` must
+   increase. Check `status=applied` and `missing_paths=[]`; `stage_unavailable` or
+   stale state is a failure to establish mirror evidence, not a fake success.
+   In test mode, deterministic fake joint values prove only that test path.
+4. After Isaac's GUI and scene settle, press **Play** in Isaac when you want the
+   simulation to step. A paused timeline can still accept samples and update USD
+   targets without visibly stepping the viewport.
+5. Before a separately approved teleoperation/recording start, enable **Mirror
+   during Teleop / Recording**. The attached path publishes from the same LeRobot
+   process; do not start an additional standalone loop to observe that session.
+6. During and after recording, inspect `isaac_mirror.sample_count`,
+   `sync_summary`, and the returned mirror session/path. For a saved dataset,
+   check `meta/atr_pipeline.json` and
+   `sidecar/isaac_mirror/<record_session_id>.jsonl`. Match `attached_to_session_id`
+   to the recording; a receiver's total sample count alone cannot identify it.
+7. Stop the teleoperation/recording through its own controls. Its attached mirror
+   stops with it. **Close Isaac Sim Link** terminates only the managed receiver
+   process and may close its Isaac window; it does not stop robot motion,
+   rollout, recording, or an independently launched Isaac instance.
+
+Missing/unavailable mirror health is a warning in the current live teleop/record
+preflight, **not a physical-motion interlock**: the real subprocess may start and
+attach later. If synchronized evidence is required for your task, resolve the
+mirror warning before authorizing that task. A later HTTP failure is reported as
+`LEROBOT_ISAAC_MIRROR_POST_FAILED`; it is never replaced with fake mirror data.
+
+## If the simulator does not follow the session
+
+First compare endpoint, receiver health, current stage and session/sample identity.
+If samples increase but the viewport is still, check Isaac's Play state. If the
+state is stale, inspect `LEROBOT_ISAAC_MIRROR_VERIFY_STALE_STATE`, missing paths
+and the managed receiver log. Preserve the sidecar and failure evidence; do not
+retry physical motion to diagnose a display problem. Changes to scene mapping or
+calibration require the measured-alignment procedure below, not ad hoc offsets
+that conceal a wrong motor mapping.
+
+The default scene expects seven applied targets from six motors because of the
+gripper mimic. The dated continuity smoke record below reports six; that historical
+observation is retained, not promoted to today's full-scene acceptance criterion.
+
+## Reference and retained validation
+
+The remaining sections describe mappings, calibration, launch options and saved
+smoke evidence. Those results are installation-specific records, not new physical
+validation of the robot or a full grasp/contact simulator.
 
 ## Scope
 
@@ -596,13 +660,17 @@ Use the `3. Isaac Sim Link` card:
 8. Use `Close Isaac Sim Link` only when the managed receiver process should be
    terminated.
 
-During teleoperation the source of truth is:
+For standalone, non-actuating follower inspection the source path is:
 
 ```text
 physical follower Present_Position -> ATR LeRobot bridge -> Isaac mirror endpoint -> Isaac joint targetPosition
 ```
 
-Inference/rollout can also be observed by the mirror loop, but only because the physical follower moves. The bridge does not mirror policy output directly.
+Attached live teleoperation/recording instead publishes the `send_action()`
+result inside the owning LeRobot process, as described in **Live Teleoperation /
+Recording Mirror**. It does not open a second `Present_Position` reader. Neither
+path is a direct policy-output controller for the physical arm. Standalone
+inspection must not compete with an active rollout's follower-port ownership.
 
 ## Live Prerequisites
 

@@ -46,9 +46,12 @@ Main GUI: **Windows Automation · Workspace** opens the Windows bridge workspace
 
 ## Summary
 
-Windows PyAutoGUI Bridge는 Linux Equipment Runtime의 저수준 worker입니다. Windows desktop에서 검증된 프로그램을 실행하고 화면, locator, 녹화, 파일, 요청 로그를 반환합니다.
+The Windows PyAutoGUI Bridge is the low-level worker for the Linux Equipment
+Runtime. It executes validated desktop programs and returns screens, locators,
+recordings, files, and request logs.
 
-Windows Bridge는 LLM, Guardian 판단, Skill lifecycle, UTM 실험 의미, 완료 판정, Analysis handoff, ATR Controller 탐색을 소유하지 않습니다.
+It does not own LLM or Guardian decisions, the Skill lifecycle, UTM experiment
+semantics, completion assessment, the Analysis handoff, or ATR Controller discovery.
 
 ## Scope
 
@@ -92,62 +95,91 @@ inspection diagram, not a physical execution certificate.
 
 ## Inputs, Commands, and Outputs
 
-프로그램은 bounded action, target window, timeout, locator/checkpoint를 선언합니다.
+A program declares bounded actions, a target window, timeouts, and
+locators/checkpoints.
 
-- builtin `program1`은 삭제 불가 데모
-- local draft는 Windows 로컬 시험만 가능
-- deployed program은 Linux가 검증한 읽기 전용 캐시
-- retired program은 신규 실행 금지
+- Built-in `program1` is a non-deletable demonstration.
+- A local draft can be tested only on the Windows worker.
+- A deployed program is a read-only cache validated by Linux.
+- A retired program cannot start a new execution.
 
-Windows는 program 의미를 재해석하지 않고 action allowlist와 제한만 검증합니다.
+Windows validates action allowlists and bounds; it does not reinterpret the
+program's experimental meaning.
 
 ## Internal Execution
 
-Recording은 keyboard/mouse event와 monotonic timestamp를 기록하고 전체 화면을 녹화 시작부터 종료까지 고정 2 FPS로 디스크에 즉시 저장합니다. periodic JPEG와 event/boundary PNG는 append-only `timeline.jsonl`에서 `pre_frame_id`, `event_frame_id`, `post_frame_id`로 연결됩니다. RAM에는 행동 직전 판정을 위한 작은 최근 프레임 캐시만 남습니다. 사용자 Stop은 최상위 오버레이 하나로 제공하며 `RecordingManager.stop()`이 listener와 overlay를 닫은 뒤 깨끗한 최종 상태 frame을 저장하고 frame memory를 해제합니다. Bounded Evidence는 활성 중 별도 Stop을 노출하지 않고 `/recordings/status`로 종료 상태를 동기화합니다. Preview는 cursor/limit 페이지에 포함된 browser-ready frame만 반환하고 Windows 절대경로는 반환하지 않습니다.
+Recording captures keyboard/mouse events with monotonic timestamps and writes
+full-screen frames directly to disk at a fixed **2 FPS** from start to stop.
+An append-only `timeline.jsonl` connects periodic JPEGs and event/boundary PNGs
+through `pre_frame_id`, `event_frame_id`, and `post_frame_id`. Only a small
+recent-frame cache for pre-action assessment remains in RAM.
 
-`mask_regions`는 `{x, y, width, height}` 목록으로 최대 32개까지 받을 수 있습니다. 마스크는 frame buffer, event/exception evidence, visual locator 원본, checkpoint에 동일하게 적용됩니다. 비밀번호, 개인정보, 외부 시스템 화면처럼 저장하면 안 되는 영역은 녹화 시작 계약에서 선언해야 하며, 마스크 적용 실패는 무마하지 않고 녹화 오류로 반환합니다.
+One topmost overlay provides the user's Stop control.
+`RecordingManager.stop()` closes the listener and overlay, saves a clean final
+frame, and releases frame memory. Bounded Evidence exposes no separate Stop
+while active and synchronizes terminal state through `/recordings/status`.
+Preview returns only browser-ready frames in the requested cursor/limit page,
+never absolute Windows paths.
 
-Linux 전송은 `GET /recordings/{id}/package`를 사용합니다. 이 경로는 localhost에서도
-내부키 인증이 필요하며, 파일별 relative path, size, SHA-256을
-반환합니다. Linux client는 `artifacts/equipment/recording_imports/{recording_id}`에
-검증 저장하고 Windows 절대경로를 Linux artifact 경로로 치환합니다.
+Declare private screen regions when starting recording. `mask_regions`
+accepts at most **32** `{x, y, width, height}` entries. Masks apply to frame
+buffers, event/exception evidence, visual-locator source images, and checkpoints.
+A masking failure returns a recording error rather than silently saving the
+unmasked evidence.
 
-녹화 분석과 Skill 생성은 Linux에서 수행합니다. Linux annotator는 16개 source frame을 4x4 스토리보드로 구성하고 모든 청크를 선택된 공용 multimodal backend로 순차 분석한 뒤, session overview와 청크 분석을 최종 합성합니다. 각 청크 응답은 모든 source frame ID를 순서대로 반환해야 하며 누락·재정렬은 실패합니다. 완료된 청크 JSON은 안전 중단 후에도 보존됩니다. LLM은 `초기 상태 -> 행동 -> 상태 변화 -> 완료/실패 증거`를 해석하고 결과를 `workflow_summary`와 `step_transitions`로 저장합니다. 정상 실행은 이 해석을 반복 호출하지 않고 컴파일된 deterministic program만 사용합니다.
+Linux imports evidence through `GET /recordings/{id}/package`. This endpoint
+requires internal-key authentication even on localhost and returns each file's
+relative path, size, and SHA-256. Linux verifies and saves the package under
+`artifacts/equipment/recording_imports/{recording_id}`, replacing Windows
+absolute-path references with Linux artifact paths.
 
-Lab Equipment Workspace는 현재 선택된 Worker에 대해 `GET /api/equipment/workers/{bridge_id}/recordings`를 호출합니다. 이 API는 live Worker 조회만 허용하고 simulator나 다른 Worker로 fallback하지 않습니다. 사용자가 목록에서 Recording을 선택한 뒤에만 기존 package 검증·가져오기 경로를 실행합니다.
+Recording analysis and Skill generation happen on Linux. The annotator builds
+**4 × 4 storyboards from 16 source frames** and processes every chunk sequentially
+through the selected shared multimodal backend. Each chunk must return all
+source-frame IDs in order; missing or reordered IDs fail validation. Completed
+chunk JSON survives a safe stop. A final synthesis combines the session overview
+and chunk analyses. The model interprets initial state → action → state change →
+completion/failure evidence and saves `workflow_summary` and
+`step_transitions`. Normal execution uses the compiled deterministic program;
+it does not repeat this model interpretation.
+
+The workspace lists recordings for the selected worker through
+`GET /api/equipment/workers/{bridge_id}/recordings`. It queries that live worker
+only, with no simulator or other-worker fallback. Package verification and import
+begin only after the user selects a recording.
 
 ![Execution boundary](assets/figures/windows_pyautogui_02_execution_effect_boundary.svg)
 
 **Figure Windows PyAutoGUI-2.** Bounded worker execution and evidence return;
-inspection scope. Current detailed recording behavior is specified above.
+inspection scope. The recording behavior is described above.
 
 ## API Surface
 
-| API | 인증/범위 |
+| API | Authentication and scope |
 |---|---|
-| `GET /health` | local pre-pair 가능, remote는 내부키 |
-| `GET /pairing/status` | local setup |
-| `POST /pairing/new-code` | local setup |
-| `POST /pairing/complete` | 일회성 code exchange |
-| `GET /programs` | local setup/paired remote |
-| `POST /programs/validate` | local setup |
-| `POST /programs/register` | local setup 또는 paired deploy |
-| `DELETE /programs/{id}` | 삭제 가능한 local draft |
-| `POST /execute` | paired, bounded physical-possible action |
-| `POST /screenshot` | paired evidence capture |
-| `POST /locators/capture` | paired locator capture |
-| `/recordings/...` | pairing-optional recording management |
-| `GET /recordings/{id}/package` | paired recording evidence transfer |
-| `GET /artifacts`, `/request-log` | paired evidence/audit |
-| `GET /update/status` | paired Worker version/update state |
-| `POST /update/stage` | paired, bounded release staging |
-| `POST /update/apply` | paired, recording-idle process replacement |
-| `POST /update/rollback` | paired, recording-idle latest backup restore |
+| `GET /health` | Local access before pairing; internal key for remote access |
+| `GET /pairing/status` | Local setup |
+| `POST /pairing/new-code` | Local setup |
+| `POST /pairing/complete` | One-time code exchange |
+| `GET /programs` | Local setup or paired remote access |
+| `POST /programs/validate` | Local setup |
+| `POST /programs/register` | Local setup or paired deployment |
+| `DELETE /programs/{id}` | Deletable local drafts |
+| `POST /execute` | Paired, bounded action with possible physical effects |
+| `POST /screenshot` | Paired evidence capture |
+| `POST /locators/capture` | Paired locator capture |
+| `/recordings/...` | Recording management without mandatory pairing |
+| `GET /recordings/{id}/package` | Paired recording-evidence transfer |
+| `GET /artifacts`, `/request-log` | Paired evidence/audit access |
+| `GET /update/status` | Paired worker version/update state |
+| `POST /update/stage` | Paired, bounded release staging |
+| `POST /update/apply` | Paired process replacement while recording is idle |
+| `POST /update/rollback` | Paired latest-backup restoration while recording is idle |
 
 ![API connections](assets/figures/windows_pyautogui_03_api_connection_architecture.svg)
 
 **Figure Windows PyAutoGUI-3.** Existing transport and API connections;
-inspection scope, not permission to call an instrument.
+inspection scope, not permission to operate an instrument.
 
 ## Tools and Registry Integration
 
@@ -158,57 +190,98 @@ not create a second execution worker.
 
 ## Connections and Protocols
 
-`WindowsPyAutoGUIBridge`는 URL, 내부키, timeout, candidate alias를 connection memory에서 읽습니다. Scan은 코드 없이 공개 `/discovery`의 최소 메타데이터로 candidate를 식별합니다. `/discovery`는 실제 검색 시에만 호출하며 주기적 supervisor 감시는 감사 로그에 남지 않는 `text/plain` `/ping`을 5초 간격으로 사용합니다. 사용자는 검색된 Candidate 카드에 4자리 코드를 입력하고 Pair & Save로 내부키를 교환합니다. `/health`, 실행, 파일 전송, 업데이트 경로는 이 공개 검색 계약에 포함되지 않습니다. 실행 payload에 `bridge_id`가 있으면 정확히 일치하는 saved candidate를 사용하며, 찾지 못한 경우 현재 선택 worker로 대체하지 않고 차단합니다. 이후 Select/Health/Programs/Test/Run과 recording import/deploy/delete가 같은 worker identity를 사용합니다.
+`WindowsPyAutoGUIBridge` reads the URL, internal key, timeout, and candidate
+alias from connection memory. **Scan** identifies candidates from the public
+`/discovery` endpoint's minimal metadata, without a pairing code. Discovery
+runs only on an actual scan. Periodic supervision instead uses the
+`text/plain` `/ping` every **5 seconds**, without adding request-audit entries.
 
-Local Bridge와 Windows Bridge는 별도 provider 선택이며 자동 fallback 관계가 아닙니다.
+Enter the **four-digit code** in the discovered Candidate card and choose
+**Pair & Save** to exchange an internal key. Public discovery does not grant
+access to health, execution, file transfer, or updates. A request with
+`bridge_id` must match that saved candidate exactly; a missing candidate blocks
+the request rather than falling back to the currently selected worker.
+Select, Health, Programs, Test, Run, and recording import/deploy/delete retain
+the same worker identity. Local and Windows are explicit provider choices,
+not automatic fallbacks.
 
-### Saved Worker 업데이트
+<a id="saved-worker-업데이트"></a>
 
-Saved Worker 카드는 candidate alias를 URL path와 bridge payload에 동시에 전달합니다. 따라서 현재 선택 Worker를 변경하지 않고 해당 카드의 Worker만 확인·업데이트·rollback합니다. 등록되지 않은 alias는 현재 선택 Worker로 fallback하지 않고 차단합니다.
+### Update a saved worker
 
-Linux는 `Pyautogui_server_for_window/release_manifest.json`을 버전과 업데이트 파일 목록의 단일 source of truth로 사용해 package를 생성합니다. Worker 소스와 시작 명령에는 릴리스 번호를 고정하지 않습니다. Windows는 다음 교집합에 포함되는 파일만 staging합니다.
+A Saved Worker card supplies its candidate alias in both the URL path and bridge
+payload. Check, Update, and Rollback therefore target that card's worker without
+changing the selected worker. An unregistered alias is rejected.
 
-- Linux release manifest
-- Windows `UPDATE_ALLOWED_PATHS`
+Linux builds release packages from
+`Pyautogui_server_for_window/release_manifest.json`, the authority for version
+and file inventory. Source files and startup commands do not hard-code the
+release number. Windows stages only paths allowed by **both** that manifest and
+`UPDATE_ALLOWED_PATHS`, after checking per-file size/SHA-256 and the package
+digest.
 
-각 파일의 size/SHA-256과 전체 package digest가 일치해야 합니다. 설치 시 저장한 `ATR_WINDOWS_BRIDGE_INSTALL_ROOT`를 canonical package root로 사용하므로 package 원본 폴더와 설치 폴더가 이원화되지 않습니다. 일반 시작과 로그온 예약 작업은 `scripts/start_supervisor.ps1`만 호출하고 supervisor가 canonical Worker를 감시합니다. 적용 전 `updates/update_in_progress.json`을 생성해 중복 시작을 막고 현재 파일은 `updates/backups/<backup-id>`에 보존합니다. 별도 self-updater가 기존 server 종료, canonical 경로 atomic replace, dependency 동기화, canonical server 재실행, local `/ping`의 manifest 목표 버전 일치 확인을 수행합니다. `requirements-windows.txt`가 직전 backup과 동일하면 pip를 실행하지 않습니다. 정상 종료 유예가 끝나도 이전 Worker PID가 남으면 해당 Worker 프로세스 트리만 종료한 뒤 교체를 계속합니다. 교체 이후 어느 단계에서든 예외가 나면 backup을 복원하고, updater 복구까지 실패하면 독립 supervisor가 잠금 해제 후 canonical Worker를 다시 실행합니다. 복구 결과는 `updates/status.json`, supervisor 상태는 `supervisor/status.json`에 남깁니다. frozen EXE는 bundled runtime으로 기록합니다.
+The installed `ATR_WINDOWS_BRIDGE_INSTALL_ROOT` defines the canonical package
+root. Normal startup and the logon task call only
+`scripts/start_supervisor.ps1`, which supervises that worker. Applying an update
+creates `updates/update_in_progress.json` to prevent duplicate startup and keeps
+the current files in `updates/backups/<backup-id>`.
 
-recording이 활성 상태이면 apply/rollback은 `PYAUTOGUI_UPDATE_RECORDING_ACTIVE`로 차단합니다. 사용자 data root, pairing key, recording, program, locator, artifact는 release manifest에 포함하지 않습니다.
+The self-updater stops the old server, atomically replaces canonical files,
+synchronizes dependencies, restarts the canonical server, and checks that local
+`/ping` reports the target manifest version. Unchanged
+`requirements-windows.txt` skips pip. If the old worker survives its graceful
+shutdown allowance, only that worker's process tree is terminated. A subsequent
+error restores the backup; if updater recovery also fails, the independent
+supervisor releases the lock and restarts the canonical worker. Results are in
+`updates/status.json`; supervisor state is in `supervisor/status.json`.
+Frozen EXEs are recorded as bundled runtimes.
 
-구버전 Worker 또는 canonical 경로가 저장되지 않은 Worker는 첫 1회 새 package의 `INSTALL_WINDOWS_BRIDGE.cmd`로 수동 설치합니다. 이후에는 package 폴더를 다시 옮기지 않고 Saved Worker의 Check Update/Update/Rollback만 사용합니다.
+Active recording blocks apply/rollback with
+`PYAUTOGUI_UPDATE_RECORDING_ACTIVE`. User data, pairing keys, recordings,
+programs, locators, and artifacts are excluded from the release manifest.
+
+Older workers, or workers without a saved canonical root, need one manual
+installation using the new package's `INSTALL_WINDOWS_BRIDGE.cmd`. Afterward,
+use the Saved Worker controls without moving the package folder again.
 
 ## Configuration and Secrets
 
-- 설치형: `%LOCALAPPDATA%\Programs\ATR\PyAutoGUIBridge`
-- 포터블: 폴더 내부 `runtime\python`과 `data\`
-- 개발형: 동일 서버를 Linux X11에서 Local Bridge로 명시 실행
+| Deployment | Location or requirement |
+|---|---|
+| Installed | The copied package folder containing `INSTALL_WINDOWS_BRIDGE.cmd`; the installer creates `.venv` there |
+| Portable | Bundled `runtime\python` and `data\` inside the folder |
+| Development | Explicit Local Bridge using the same server on Linux X11 |
 
-설치형과 포터블은 같은 API와 프로그램 형식을 사용합니다. PyAutoGUI는 대화형 desktop이 필요하므로 Windows service로 실행하지 않습니다.
+Installed and portable deployments use the same API and program format.
+PyAutoGUI requires an interactive desktop; it does not run as a Windows service.
+The installer keeps the program in that package folder rather than creating a
+second `%LOCALAPPDATA%\Programs` copy. Its default data root is
+`%LOCALAPPDATA%\ATR\PyAutoGUIBridge`; see the
+[installation guide](../hardware/windows_pyautogui_bridge_windows_setup.md).
 
 ### Pairing and authentication
 
-최초 연결은 4자리 일회성 코드로 수행합니다.
+Initial pairing uses a four-digit, one-time code:
 
-- 유효 시간 300초
-- 최대 5회 입력
-- 성공 즉시 폐기
-- 실패 한도 도달 시 30초 lockout
-- 성공 후 내부 장기키 자동 생성
-- Windows와 Linux의 보호된 connection memory에 저장
+- Valid for **300 seconds**, with at most **5 attempts**.
+- Discarded immediately on success; **30-second lockout** after the failure limit.
+- Exchanges an automatically generated long-term internal key, saved in
+  protected Windows and Linux connection memory.
 
-사용자는 장기키를 반복 입력·복사하지 않습니다. 4자리 코드는 최초 연결 키 교환에만 쓰며, 이후 요청은 저장된 worker secret 또는 교환된 internal key를 자동 사용합니다. pairing code/internal key는 URL, 브라우저 저장소, request audit에 기록하지 않습니다.
+Users do not repeatedly copy the long-term key. Later requests use the saved
+worker secret or exchanged internal key. Neither pairing codes nor internal
+keys are written to URLs, browser storage, or the request audit.
 
-페어링 전 로컬 Console에서 허용되는 기능:
+Before pairing, the local Console permits its GUI and Health, pairing
+status/new-code functions, Program Manager, and Recording. Remote execution,
+screenshots, locators, artifacts, request logs, and updates require saved
+connection authentication. Pairing status does not invalidate a previously
+stored worker secret.
 
-- GUI와 local Health
-- pairing status/new code
-- Program Manager
-- Recording
-
-원격 `/execute`, screenshot, locator, artifact, request log와 업데이트는 저장된 연결 인증이 필요합니다. pairing 완료 여부 때문에 이미 저장된 worker secret을 무효화하지 않습니다.
-
-녹화 시작·상태·목록·미리보기·checkpoint·중지·저장·삭제는 pairing 없이 사용할 수 있습니다. `GET /recordings/{id}/package`만 녹화 증거를 Linux로 반출하므로 저장된 연결 인증을 유지합니다.
-POST 요청은 모두 `Content-Type: application/json`이어야 합니다.
+Recording start/status/list/preview/checkpoint/stop/save/delete do not require
+pairing. Exporting evidence through `GET /recordings/{id}/package` still
+requires saved connection authentication. Every POST request requires
+`Content-Type: application/json`.
 
 ### Data locations
 
@@ -222,44 +295,47 @@ POST 요청은 모두 `Content-Type: application/json`이어야 합니다.
   utm_exports/
 ```
 
-`pairing.json`, connection memory, 사용자 프로그램/녹화는 Git에 포함하지 않습니다.
-
-The module declaration references existing Linux storage without creating a
-second store: `memory/windows_pyautogui_connection.json`,
-`memory/equipment_runtime/`, `memory/equipment_skills/`, current workspace
-templates/assets and run-scoped artifacts. Windows program, locator, recording,
-request-log and export data remain under the selected worker's `<data-root>`.
+Do not commit `pairing.json`, connection memory, or user programs/recordings.
+The module reuses existing Linux storage:
+`memory/windows_pyautogui_connection.json`, `memory/equipment_runtime/`,
+`memory/equipment_skills/`, current workspace templates/assets, and run-scoped
+artifacts. Windows program, locator, recording, request-log, and export data
+remain under the selected worker's `<data-root>`. No second store is created.
 
 ## State, Events, Artifacts, and Evidence
 
-`/execute` 수락은 물리 완료가 아닙니다. worker는 raw step trace, screenshot, locator, file metadata, request identity를 반환합니다. Linux Equipment Runtime이 Profile completion policy로 한 번 판정합니다.
+Acceptance by `/execute` is not physical completion. The worker returns raw
+step traces, screenshots, locators, file metadata, and request identity.
+Linux Equipment Runtime assesses completion once using the Profile's completion
+policy. A deterministic Skill segment ending means `execution_complete`;
+it is not promoted to `ready_for_analysis` before the policy verifies evidence.
 
-invoke 이후 timeout은 effect unknown입니다. 같은 작업을 반복하기 전에 desktop, request log, 장비, 결과 파일을 확인해야 합니다.
+A timeout after dispatch leaves the effect unknown. Inspect the desktop, request
+log, actual instrument, and result files before repeating the operation.
 
-Skill의 결정론적 segment 실행 완료는 `execution_complete`입니다. Profile completion
-policy의 증거 검증 전에는 `ready_for_analysis`로 승격하지 않습니다.
+<a id="순차-skill-편집과-배포"></a>
 
-### 순차 Skill 편집과 배포
+### Edit and deploy a sequential Skill
 
-Skill 목록에서 정확한 버전을 선택하고 Workflow Editor 아이콘을 누르면 별도 창이
-열립니다. 편집기는 `workflow.json`의 순서와 action field만 수정하며 Windows의
-`programs/*.json`을 직접 쓰지 않습니다. 단계 이동, 복제, 삭제, locator PNG 교체,
-고정 대기, image/text/file 조건 대기를 지원합니다. 조건 대기는 timeout과 polling
-주기를 반드시 가지므로 무한 대기하지 않습니다.
+Select the exact Skill version and open its Workflow Editor in a separate
+window. The editor changes the order and action fields in `workflow.json`,
+not Windows `programs/*.json` directly. It supports moving, duplicating, and
+deleting steps; replacing locator PNGs; fixed waits; and image/text/file
+condition waits. Condition waits require a timeout and polling interval.
 
-이미지 action에는 `Edit Crop`과 `Replace Locator`가 구분되어 있습니다. `Edit Crop`은
-Linux가 보존한 hash-verified pre-action 전체 프레임을 읽어 Target ROI만 수정하고,
-Context ROI 및 보조 candidate를 그대로 유지합니다. crop 결과는 PNG longest side
-512px 이하로 저장됩니다. `Reset to AI`는 최초 annotation ROI로 되돌립니다.
-`Replace Locator`는 사용자가 고른 PNG로 locator를 직접 교체합니다. 어느 방식이든
-편집기 `Save` 전에는 Windows worker에 배포되지 않습니다.
+For an image action, **Edit Crop** reads the hash-verified pre-action full frame
+retained by Linux and changes only Target ROI. Context ROI and auxiliary
+candidates remain intact. The crop is saved as a PNG with a longest side of at
+most **512 pixels**. **Reset to AI** restores the initial annotation ROI.
+**Replace Locator** instead uses a user-selected PNG. Neither action deploys
+changes before the editor's **Save**.
 
-`Save`는 optimistic workflow hash를 사용합니다. 다른 창에서 같은 버전이 먼저
-바뀌면 로컬 편집을 보존한 채 충돌을 표시합니다. 정상 저장은 이전 compile/validation
-산출물을 폐기합니다. `Deploy` 한 번으로 Linux가 compile, validate, package,
-register, verify를 순서대로 수행합니다. Deploy는 실행 요청이 아니며 `/execute`를
-호출하지 않습니다. GUI에는 Compile/Validate 버튼을 따로 노출하지 않지만 해당 API는
-자동화와 CLI 호환을 위해 유지합니다.
+Save uses an optimistic workflow hash. If another window changed the same
+version, the editor retains local edits and reports a conflict. A successful
+save invalidates the previous compile/validation outputs. One **Deploy** runs
+compile → validate → package → register → verify on Linux. Deployment does
+**not** call `/execute`. Separate Compile/Validate GUI buttons are hidden, but
+their APIs remain for automation and CLI compatibility.
 
 ## Runtime Modes and Fallbacks
 
@@ -269,12 +345,12 @@ UTM readiness; current run identity and selected worker remain authoritative.
 
 ## Safety, Approval, and Effect Boundary
 
-- PyAutoGUI failsafe 유지
-- 허용 action/hotkey/step/time 제한
-- 임의 Python/shell payload 금지
-- credential을 program/recording에 포함하지 않음
-- Windows에서 자동 provider 전환 금지
-- 물리 장비 검증은 Profile별 현장 절차로 별도 수행
+- Keep the PyAutoGUI failsafe enabled.
+- Enforce allowed actions, hotkeys, step counts, and time bounds.
+- Do not accept arbitrary Python or shell payloads.
+- Exclude credentials from programs and recordings.
+- Do not switch providers automatically on Windows.
+- Validate physical equipment separately through the Profile's on-site procedure.
 
 ## Errors, Timeouts, and Recovery
 
@@ -304,47 +380,46 @@ See the [GUI structure guide](../gui/visual_structure.md) for navigation and cap
 
 ### Windows Console
 
-기본 화면은 다음 네 영역만 표시합니다.
-
-1. Bridge Status
-2. Program Manager
-3. Recording
-4. Latest Local Result
-
-원시 Health와 request log는 접힌 Diagnostics에서 요청할 때만 로드합니다. UTM proof, Skill compile/deploy, Analysis handoff, LLM/model, closed-loop 제어는 Windows Console에 표시하지 않습니다.
+The default Console has four areas: **Bridge Status**, **Program Manager**,
+**Recording**, and **Latest Local Result**. Collapsed Diagnostics loads raw
+Health and request logs only when requested. The Console does not expose UTM
+proof assessment, Skill compile/deploy, Analysis handoff, model controls, or
+closed-loop control.
 
 ### Linux Lab Equipment Workspace
 
-`/equipment/windows`는 Windows Console의 복제 화면이 아니라 Linux가 소유하는
-Lab Equipment Device Bridge 작업면입니다. 기본 화면은 다음 순서로 구성됩니다.
+`/equipment/windows` is the Linux-owned equipment workspace, not a copy of the
+Windows Console. Its sections follow the setup-to-evidence workflow:
 
-1. `Profile & Worker`: 정확한 Equipment Profile과 saved worker 선택
-2. `Connection & Profile`: scan/pair/select와 Local Bridge 개발 대상 관리
-3. `Agentic Progress`: Record, Transfer, Annotate, Build Skill, Preflight, Execute,
-   Verify, Handoff를 canonical execution snapshot으로 표시
-4. `Skill Recording`: Windows recording package를 Linux로 가져와 2 FPS timeline 분석과 Skill draft 생성. 완료/중단된 청크 스토리보드는 페이지 단위로 확인
-5. `Skill Management`: 정확한 Skill version을 순차 Workflow Editor로 검토/저장하고 단일 Deploy로 build/check/transfer
-6. `Main Progress`: 선택된 Profile과 Skill/program으로 bounded macro 실행
-7. `Vision Link`: Profile별 선택적 Middle-Level 검증 요청
-8. `Error Recovery`: 정상 실행이 아니라 예외가 발생했을 때만 선택 모델 사용
-9. `Evidence & Data Transfer`: screen/data/Vision/request evidence와 Analysis handoff 감사
+1. **Profile & Worker** selects the exact Equipment Profile and saved worker.
+2. **Connection & Profile** handles scan/pair/select and Local Bridge development targets.
+3. **Agentic Progress** shows Record, Transfer, Annotate, Build Skill, Preflight,
+   Execute, Verify, and Handoff from the canonical execution snapshot.
+4. **Skill Recording** imports the Windows package, analyzes its 2 FPS timeline,
+   and produces a Skill draft. Completed or interrupted chunk storyboards are paginated.
+5. **Skill Management** reviews and saves the exact version in Workflow Editor,
+   then uses one Deploy for build/check/transfer.
+6. **Main Progress** executes the bounded macro for the selected Profile and Skill/program.
+7. **Vision Link** requests optional, Profile-specific Middle-Level verification.
+8. **Error Recovery** uses the selected model only for exceptions, not normal execution.
+9. **Evidence & Data Transfer** exposes screen/data/Vision/request evidence and the Analysis handoff audit.
 
-프론트엔드는 `/api/equipment/runtime/current`와 `/api/equipment/skills`를 읽고,
-Profile action은 `/api/equipment/profiles/{profile_id}/preflight|test`로 보냅니다.
-Vision 체크박스는 `vision_link_enabled` 요청으로 전달되며, 백엔드는
-`requested`, `profile_enabled`, `required`, `effective`를 반환합니다. Profile에서
-해당 mode의 Vision을 필수로 선언한 경우 사용자가 체크를 해제해도 필수 gate를
-약화시키지 않습니다.
+The frontend reads `/api/equipment/runtime/current` and
+`/api/equipment/skills`; Profile actions use
+`/api/equipment/profiles/{profile_id}/preflight|test`. The Vision checkbox sends
+`vision_link_enabled`, and the response distinguishes `requested`,
+`profile_enabled`, `required`, and `effective`. Clearing the checkbox cannot
+weaken Vision required by the Profile for that mode.
 
-체크 또는 해제 즉시 Profile별 선택값을
-`memory/equipment_workspace_settings.json`에 자동 저장합니다. 따라서 페이지를
-닫거나 새로고침해도, ATR 서버를 재시작해도 마지막 선택이 복원됩니다. 저장값이
-없는 새 Profile만 Profile의 기본값을 사용합니다. 반면 화면 캡처와 물리 장비 안전
-확인 체크는 작업별 승인값이므로 의도적으로 영속 저장하지 않습니다.
+Each toggle immediately saves the Profile-specific preference in
+`memory/equipment_workspace_settings.json`. It survives page closure, refresh,
+and server restart. Only a new Profile without a saved preference uses its
+default. Screenshot and physical-equipment safety confirmations are deliberately
+not persisted: they approve an individual operation.
 
-UTM locator, export, 물리 validation 같은 장비별 상세값은 기본 공통 화면과
-분리된 `Selected Profile settings and diagnostics`에 유지합니다. 장비별 설정은
-Profile/Skill에 있고 Lab Equipment Agent나 Windows worker에 하드코딩하지 않습니다.
+Device-specific locators, exports, and physical-validation settings remain in
+**Selected Profile settings and diagnostics**, separate from the common
+workflow. They belong to the Profile/Skill, not hard-coded agent or worker logic.
 
 ## Current Verification
 

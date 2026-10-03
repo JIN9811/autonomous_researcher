@@ -1,5 +1,26 @@
 # Live report read-path optimization
 
+This support reference explains why report/plot refresh and experiment execution
+can progress at different rates. Opening another window or refreshing a report
+reads the shared server's current run; it does not create a new experiment or
+refit a model.
+
+## When a report or plot appears behind
+
+Check the run, cycle, selected agent and report context first. Then compare the
+compact state/Timeline with the report: report hydration occurs separately, so
+one may update before the other. Allow the report request to finish; it has a
+10-second deadline. If the report stays missing or stale, retain the identities,
+visible error and artifact links for support instead of requesting another BO or
+device execution to force a plot refresh. Missing data must remain missing.
+
+An explicit refresh or new window discovers manifests immediately; routine
+manifest reconciliation is bounded to once per 30 seconds. Following a frontend
+deployment, reload the browser. Backend changes require a controlled restart at
+an approved boundary, never an automatic restart of the active experiment.
+
+## Maintainer read-path contract
+
 The report endpoint selects owner-declared metadata and state fields **before**
 JSON serialization. It reads the existing transcript page without also building
 an unused full planning projection. Inputs remain detached from live state;
