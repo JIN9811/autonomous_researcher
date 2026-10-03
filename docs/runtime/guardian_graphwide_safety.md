@@ -135,7 +135,17 @@ The runtime emits:
 - `guardian.tool_shield` planning/tool events when a synchronous pre-tool/post-tool shield warns, blocks, or requests approval.
 - Existing `hardware.alert` events from workspace APIs remain supported.
 
-The Live GUI event stream refreshes on `guardian` and `incident` event types. Warning/error Guardian events are included in Operator Attention, not just the timeline, so the operator sees cross-agent alarms even when the emitting agent is not currently selected. The Guardian Agent report also fetches `/api/runs/{run_id}/guardian/status` and shows the graph-wide risk map, safety budget, live device heartbeat, safe-stop verification, evidence completeness, blocked actions, approval queue with approve/revise/reject controls, incident/near-miss ledger with note attachment, policy/version panel, device/data integrity, and corrective actions.
+The Live GUI refreshes on `guardian` and `incident` events. Guardian warnings
+and errors appear in Operator Attention as well as the timeline, even when a
+different agent is selected.
+
+The Guardian report reads `/api/runs/{run_id}/guardian/status` and shows:
+
+- graph-wide risk, safety budget, live device heartbeat, safe-stop verification,
+  and evidence completeness;
+- blocked actions and the approval queue with approve/revise/reject controls;
+- the incident/near-miss ledger with notes, policy/version panel, device/data
+  integrity, and corrective actions.
 
 Operator notes are attached through `POST /api/runs/{run_id}/guardian/incidents/{incident_id}/notes` or the active-run alias `POST /api/guardian/incidents/{incident_id}/notes`. Notes are mirrored into `run_metadata.guardian_incident_notes`, appended to the matching `incident_record.operator_notes` when present, and written to the Guardian append-only event log as `guardian_incident_note.v1`.
 
@@ -209,4 +219,12 @@ Manipulation reviews. A pending or generic post-allow gate is insufficient.
 Other equipment/motion hazards remain blocking; original failure records remain
 available with their resolving gate reference.
 
-Guardian reads cross-agent alarm fields such as `failure_code`, `blocking_reasons`, `warnings`, `failure_tags`, `confidence`, `hardware_alert.v1`, and `incident_record.v1` across Design, Specimen, Vision, Manipulation, Equipment, Analysis, Knowledge, BO, and Guardian outputs. TEST/virtual/dry-run printer `START_PRINT_DISABLED` markers are treated as expected non-actuating evidence, while live physical print/ejection requests still block on the same marker. TEST mode loop caps override recoverable graph-gate pressure so deterministic test runs do not retry indefinitely.
+Guardian reads `failure_code`, `blocking_reasons`, `warnings`, `failure_tags`,
+`confidence`, `hardware_alert.v1`, and `incident_record.v1` across Design,
+Specimen, Vision, Manipulation, Equipment, Analysis, Knowledge, BO, and Guardian
+outputs.
+
+Printer `START_PRINT_DISABLED` is expected non-actuating evidence in
+TEST/virtual/dry-run paths, but blocks live physical print/ejection requests.
+TEST loop caps override recoverable graph-gate pressure to prevent indefinite
+retries in deterministic test runs.

@@ -65,8 +65,8 @@ system inventory. See the [file-by-file audit](../maintenance/documentation_revi
 
 ## Knowledge Graph Runtime (retained 2026-08-09 subsystem record)
 
-The following bullets are historical subsystem evidence, not a current page/API
-inventory. The current Knowledge Workspace exposes Wiki, Memory, Source Library,
+The bullets below retain historical subsystem evidence, not a current page/API
+inventory. The Knowledge Workspace now exposes Wiki, Memory, Source Library,
 Agent Delivery and Ontology; graph-relation review/edit is retired. See
 [Wiki and Memory](../knowledge/wiki_memory.md) and [the current template](../../web/templates/knowledge.html).
 
@@ -75,8 +75,8 @@ typed memory and explicit publication contracts. Neo4j/reconciliation is an
 optional subsystem, not a prerequisite for each closed-loop Knowledge call.
 Use [Wiki and memory](../knowledge/wiki_memory.md) and
 [Knowledge Agent](../agents/knowledge_agent.md) for the current owner contract.
-The following dated subsystem observations do not claim a graph service is
-currently running or that every cycle uses it.
+The dated observations below do not establish current graph-service availability
+or use in every cycle.
 
 - ATR Core Ontology `atr-core-1.0.0` is defined under `knowledge/ontology/` with class, relation domain/range, event-family, and lifecycle validation.
 - `knowledge_event.v1` records use deterministic event/idempotency identifiers.
@@ -133,11 +133,10 @@ implementation source of truth:
 
 ## 0. Snapshot Verification Summary
 
-This snapshot was refreshed from the local code tree, not from an older design
-package. The authoritative count below comes from importing `app.main.app` and
-inspecting FastAPI `APIRoute` objects. A raw decorator grep can report a smaller
-number because a few routes use multiline decorators or are registered by
-FastAPI outside the simple `@app.<method>("...")` pattern.
+The counts below come from the local code tree: importing `app.main.app` and
+inspecting FastAPI `APIRoute` objects. A raw decorator search can undercount
+multiline decorators and routes registered outside the simple
+`@app.<method>("...")` pattern.
 
 The 2026-09-28 FastAPI `APIRoute` scan finds (controller construction stubbed;
 no ASGI startup, model, device or live controller invocation):
@@ -348,7 +347,7 @@ The FastAPI app currently serves these operator pages:
 | `/planning` | `web/templates/planning.html` | `web/static/planning.js` | Legacy alias for Live GUI |
 | `/ide` | `web/templates/runtime_ide.html` | `web/static/runtime_ide.js` | Runtime IDE graph/module editor |
 | `/module-management` | `web/templates/module_management.html` | `web/static/module_management.js` | Module validation, dry-run, versioning, draft module templates |
-| `/printer` | `web/templates/printer.html` | `web/static/printer.js` | 3D printer workspace, Bambu/Prusa fleet, slicing/start/autoejection gates |
+| `/printer` | `web/templates/printer.html` | `web/static/printer.js` | 3D Printer workspace, Bambu/Prusa fleet, slicing/start/autoejection gates |
 | `/lerobot` | `web/templates/lerobot.html` | `web/static/lerobot.js` | ROBOTIS/LeRobot port, teleop, record, train, rollout, manipulation bridge |
 | `/bo` | `web/templates/bo.html` | `web/static/bo.js` | BO/MBO strategy, benchmark, candidate ranking |
 | `/equipment/windows` | `web/templates/windows_equipment.html` | `web/static/windows_equipment.js` | Windows/local PyAutoGUI target management and UTM bridge workspace |
@@ -1378,12 +1377,15 @@ research dialogue; suggested defaults are not user consent. The same bounds
 feed Experimental Setup, the Orchestrator contract, DSN, LHS and BO.
 
 The test-mode objective is **specific energy absorption (SEA, J/g)**,
-`specific_energy_absorption_J_per_g`: canonical force–displacement energy
-integrated from zero to **50% of the current specimen's initial height**, converted to
-joules and divided by specimen mass in grams. The integration boundary follows
-the current specimen height, never a fixed travel distance, regardless of extra measured travel. A curve
-that does not reach this boundary, or has no positive specimen mass, has no
-SEA score. Full-curve energy remains a separate diagnostic metric, not SEA.
+`specific_energy_absorption_J_per_g`. It integrates the canonical
+force–displacement energy from zero to **50% of the current specimen's initial
+height**, converts it to joules, and divides by specimen mass in grams.
+
+The boundary follows specimen height, never a fixed travel distance, even if
+measurements extend farther. A curve that does not reach the boundary, or has
+no positive specimen mass, has no SEA score. Full-curve energy is a separate
+diagnostic metric.
+
 For physical specimens, the denominator is the **selected plate's slicer-reported
 mass**, carried from the sliced artifact through SPC into Analysis with its
 source path. It is an estimate, not a balance measurement. Design heuristics and
@@ -1392,8 +1394,9 @@ rather than silently using a design estimate. Explicitly resolved all-virtual
 execution may use synthetic specimen mass, labeled `synthetic_specimen`.
 Previously saved full-range SEA scores require reanalysis from their raw CSVs
 before comparison with this definition; historical artifacts are not rewritten.
-It is not volumetric energy density. Explicit compiled objectives retain precedence. Virtual UTM results
-are synthetic workflow evidence, not measured performance validation.
+SEA is not volumetric energy density. Explicit compiled objectives retain
+precedence. Virtual UTM results are synthetic workflow evidence, not measured
+performance validation.
 
 `wall_cell_v1` identifies the new geometry parameterization. Wall thickness is
 a physical normal-width target used to calibrate the implicit Gyroid level,

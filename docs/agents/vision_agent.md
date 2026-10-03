@@ -386,14 +386,18 @@ returns unknown instead of a placeholder success. The labeled synthetic raster
 passes through the same detector and raw/annotated image-review path; it is not a
 physical observation. Clearance remains dependent on the matching virtual replay.
 
-The decision timeout does not extend camera, motion, rollout, replay, or task
-deadlines. Pickup/ActiveCam review and downstream handoff evidence use the same
-180,000-ms TTL in LIVE and TEST, measured from the original observation timestamp.
-Inference never renews this timestamp, and there is no TEST-only additional grace.
-Expiry at or after 180 seconds yields `VISION_EVIDENCE_EXPIRED`/review and requires
-a new observation through existing ownership. `VisionAgent.HANDOFF_SIGNALS`
-explicitly identifies the long-lived evidence; all other signals, including
-workspace clearance, anomaly, fixture alignment and UTM motion, retain 5,000 ms.
+Decision timeouts do not extend camera, motion, rollout, replay or task deadlines.
+Evidence expiry is separate:
+
+- Pickup/ActiveCam review and downstream handoff use a 180,000-ms TTL in both
+  LIVE and TEST, measured from the original observation timestamp.
+  - Inference never renews it; TEST has no additional grace period.
+  - At or after 180 seconds, `VISION_EVIDENCE_EXPIRED`/review requires a new
+    observation through existing ownership.
+- `VisionAgent.HANDOFF_SIGNALS` identifies this long-lived evidence.
+- All other signals retain 5,000 ms, including workspace clearance, anomaly,
+  fixture alignment and UTM motion.
+
 The 180-second handoff budget does not replace current safety interlocks.
 
 ## Safety, Recovery, and Idempotency

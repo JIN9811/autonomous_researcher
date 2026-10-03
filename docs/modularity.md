@@ -66,11 +66,9 @@ can cross its declared provider or equipment effect boundary.
 
 ## Scope and Source of Truth
 
-This Reference was rechecked against the committed implementation on
-2026-09-29 by static source inspection. The dated controlled-runtime tests below
-are separate evidence, not newly repeated hardware checks. Executable code,
-checked-in graph/module configuration, registered handlers and tools, and
-persisted run evidence remain authoritative. The
+Executable code, checked-in graph/module configuration, registered handlers
+and tools, and persisted run evidence are authoritative. Source inspection
+and the controlled-runtime checks below do not certify hardware behavior. The
 [archived architecture Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
 records the preceding development decisions; it does not override the current
 implementation described here.
@@ -186,13 +184,10 @@ it. The package reference itself would never call the instrument.
 
 ## Verification
 
-On 2026-09-14, focused owner/module/package/API regressions passed 158 tests
-with 10 existing deprecation/schema warnings; the Package Manager/editor suite
-passed 48 Node tests. A guarded five-route suite passed 5 cases, and isolated
-browser/API checks covered invalid input, validation without writes, explicit
-Knowledge-only application, Default restore, export, and detached import at
-1920 and 900 px. Those checks used controlled model and equipment I/O and made
-no physical calls. Exact commands and boundaries remain in the
+Owner/module/package/API and browser checks cover invalid input, validation
+without writes, explicit Knowledge-only application, default restore, export
+and detached import. They use controlled model/equipment I/O and make no
+physical calls. Recorded results, commands and boundaries are in the
 [implementation and verification record](oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 ## Related Documents

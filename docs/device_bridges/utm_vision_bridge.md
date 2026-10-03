@@ -151,9 +151,13 @@ equipment motion. Evidence status is inspection-backed.
 
 ## API Surface
 
-`/api/equipment/utm-runtime/*` includes status/start/stop/probe/graph/frame/
-frame-stream, camera config/devices/probe/cleanup/apply, and calibration start/
-stop/status. Specimen-pose status/snapshot/release and LeRobot camera routes
+`/api/equipment/utm-runtime/*` groups three API families:
+
+- Runtime: status/start/stop/probe/graph/frame/frame-stream.
+- Camera: config/devices/probe/cleanup/apply.
+- Calibration: start/stop/status.
+
+Specimen-pose status/snapshot/release and LeRobot camera routes
 connect related visual consumers. The graph workspace projects this boundary
 as `camera_utm_bridge`.
 

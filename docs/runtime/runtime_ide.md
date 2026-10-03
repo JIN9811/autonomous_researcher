@@ -72,11 +72,11 @@ supersedes: []
 | Workspace | `/ide` |
 | Coverage | Editing, validation, versioning, Package/core-owner configuration, run control and evidence inspection |
 | Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
-| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator/Equipment/Analysis graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
+| Verification | Source inspection and bounded software tests; not equipment certification · [Verification scope](#verification) |
 
 ## Applied Module Membership
 
-Manipulation now exposes its installed owner through `/api/modules/manipulation`.
+Manipulation exposes its installed owner through `/api/modules/manipulation`.
 The graph has two Middle composite operations: task execution and result delivery.
 Seventeen CODE details point to actual LLM, software, bridge, validation and evidence
 symbols. High is agent-local LLM reasoning; Middle is API/internal software and
@@ -88,11 +88,10 @@ uses the same source-bound graph with the light document theme.
 
 Package Manager links `manipulation@1.0.0` to `lerobot@1.0.0`; Vision references that
 same bridge alongside `camera_vision@1.0.0`. Device Bridges shows one LeRobot with
-ten internal capability groups. The original canvas background, ports, legend and
-Inspector remain shared. Manipulation's owner frontend supplies its eight existing
-cards through the module host, while shared telemetry, polling and 3D viewer
-lifecycle remain unchanged. Absent or deactivated owner modules supply no current
-Manipulation card. The original `/lerobot` workspace stays available through its
+ten internal capability groups. The canvas, ports, legend and Inspector are shared.
+Manipulation's owner frontend supplies eight cards through the module host;
+telemetry, polling and the 3D viewer are host-owned. Absent or deactivated owner
+modules supply no current Manipulation card. The `/lerobot` workspace is available through its
 declared bridge references.
 
 The Live GUI Resource header polls the existing read-only `/api/devices/state`
@@ -112,7 +111,7 @@ the dock retains its summary and selected tab. Run, GPU and LLM status cards are
 duplicated in this dock. Bridge rows retain their expanded content height and scroll
 vertically within the dock instead of overlapping subsequent rows. Tab selection
 and disclosure do not execute bridge actions.
-The registry is read from the existing device snapshot; execution routes are unchanged.
+The registry is read from the device snapshot.
 
 Live chat opens each newly visible agent bubble automatically and closes the
 previous automatically opened bubble when the next agent or operator bubble
@@ -135,10 +134,10 @@ icon and the menu, when focus moves outside, or when the surrounding page scroll
 or loses window focus. Escape and existing menu actions remain available; moving
 between the source icon and menu does not dismiss it.
 
-Vision now uses the same installed module contract as Design and Specimen.
+Vision uses the same installed module contract as Design and Specimen.
 `/api/modules/vision` exposes its executable graph and source-bound implementation
-catalog; edited valid graphs drive the registered Vision owner. The original graph
-canvas, ports, curves, labels, legend, Inspector and five control areas are reused.
+catalog; edited valid graphs drive the registered Vision owner. The graph canvas,
+ports, legend, Inspector and five control areas are shared.
 Composite observation/review internals appear as CODE relationships, not fabricated
 extra execution or model-call steps. The [Vision document figure](../agents/assets/figures/vision_control_areas.svg)
 is generated from this catalog in the shared light document theme.
@@ -146,20 +145,19 @@ is generated from this catalog in the shared light document theme.
 Package Manager and Device Bridges remain separate: `vision@1.0.0` owns the
 `camera_vision@1.0.0` observation bridge dependency. Opening that bridge shows its
 actual observation components and preserves draft membership. LeRobot retains the
-existing motion/capture/return and stop lifecycle. The live frontend module reuses
-all six Vision cards and UTM verification tabs without introducing polling.
+motion/capture/return and stop lifecycle. The live frontend supplies six Vision
+cards and UTM verification tabs; polling is host-owned.
 
-Equipment now exposes its installed owner at `/api/modules/equipment`. Its two
-Middle operations retain the existing composite task and result-delivery
+Equipment exposes its installed owner at `/api/modules/equipment`. Its two
+Middle operations cover composite task execution and result delivery
 boundaries. Source-bound CODE relationships show the actual suitability and
 terminal-review LLM decisions in High, software supervision and validation in
 Middle, Windows/local worker execution in Low, and Guardian/Evidence as
-cross-cutting responsibilities. `equipment@1.0.0` composes the existing
-`windows_pyautogui@1.0.0` bridge; no second transport or management layout was
-introduced. The [Equipment document figure](../agents/assets/figures/equipment_control_areas.svg)
+cross-cutting responsibilities. `equipment@1.0.0` uses the
+`windows_pyautogui@1.0.0` bridge. The [Equipment document figure](../agents/assets/figures/equipment_control_areas.svg)
 uses the same installed catalog and shared light document renderer.
 
-The module-owned frontend supplies the existing Equipment report and nine card
+The module-owned frontend supplies the Equipment report and nine card
 IDs while the Live host retains polling, run/process synchronization and action
 delegation. An inactive owner supplies no current cards or frontend asset. The
 generic module canvas renders the executable Equipment graph and source catalog;
@@ -178,7 +176,7 @@ The module-owned frontend supplies measured response, metrics, quality,
 provenance and BO handoff cards. An inactive owner supplies no current Analysis
 cards or frontend asset.
 
-BO now exposes its installed owner at `/api/modules/bo`. The executable view is
+BO exposes its installed owner at `/api/modules/bo`. The executable view is
 the composite `bo.task` → `bo.deliver` path, while CODE relationships expand
 the actual policy/review, parameter-space, BoTorch/benchmark, validation and
 evidence sources. Its source catalog intentionally has no Low node: numerical
@@ -189,13 +187,13 @@ same catalog and the shared light document renderer.
 The module-owned Live frontend retains the initial-LHS, posterior/acquisition,
 decision, ranking, recommendation and Design-request composition. It uses the
 existing selected-owner report hydration and the common host; an inactive BO
-owner supplies no current cards or frontend asset. Existing BO Workspace
-settings and routes remain separate and unchanged.
+owner supplies no current cards or frontend asset. BO Workspace settings and
+routes are separate from the module-owned Live report.
 
 Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
 owner lists before a graph is applied. The preview uses the same graph-linked
 owner catalog as ORC; it neither queries equipment nor activates the draft.
-Save Version continues to use the existing validated graph activation path.
+Save Version uses the validated graph activation path.
 
 | State/action | Result |
 |---|---|
@@ -218,12 +216,15 @@ See [Design lifecycle implementation](../oldversion/superpowers/plans/2026-09-13
 
 ## Summary
 
-ATR Runtime IDE is the operator-facing configuration, execution, and
-observation surface at `/ide`. It presents the graph and module contracts used
-by the backend, lets an operator build a draft, validate and compile it, inspect
-dry-run evidence, create an immutable version, activate a validated graph or
-module, start an allowed run mode, resolve approvals, and inspect events and
-artifacts.
+ATR Runtime IDE at `/ide` lets operators configure graphs and modules, control
+runs, and inspect evidence. It uses the backend's graph and module contracts.
+
+Operators can:
+
+- build, validate, and compile a draft;
+- inspect dry-run evidence, save an immutable version, and activate a validated
+  graph or module;
+- start an allowed run mode, resolve approvals, and inspect events and artifacts.
 
 The IDE controls existing components through bounded interfaces; it is not an
 independent workflow engine. `app/main.py` owns its APIs, `graphs/*` owns validation and persistence, and
@@ -279,11 +280,10 @@ of truth.
 
 ## System Position and Authority Boundary
 
-The browser reads and submits structured graph/module payloads. FastAPI
-validates them against the same schemas, handler registry, and compiler used by
-the execution path. Version stores write immutable snapshots and may atomically
-replace active YAML only after validation. The run API then compiles the active
-graph again and invokes the shared `LangGraphRunLoop`.
+The browser submits graph/module payloads to FastAPI for validation against the
+execution schemas, handler registry, and compiler. Version stores write immutable
+snapshots; active YAML can be replaced atomically only after validation. The run
+API recompiles the active graph and invokes the shared `LangGraphRunLoop`.
 
 ![Runtime IDE system boundaries](assets/figures/runtime_ide_01_system_boundaries.svg)
 
@@ -577,18 +577,17 @@ when an executable graph node references it, graph validation succeeds, and the
 graph itself passes the save/dry-run/run gates. The IDE does not edit arbitrary
 Python source or bypass generated-handler registration.
 
-The current main graph's Orchestrator registration is the executable source for
-the bounded `orchestrator_plan` decision and its graph-linked Setup-owner
-descriptors. Confirmed Setup values are applied/read back only through the
-existing controller/runtime new-run admission path; they do not add an IDE
-activation control, change a running snapshot, or make every module visible in
-Module Management an active Setup owner. The IDE remains a configuration and
-inspection surface, not the canonical planning-session store or a device bridge
-write path.
+The main graph's Orchestrator registration defines the bounded
+`orchestrator_plan` decision and its graph-linked Setup-owner descriptors.
+Confirmed Setup values are applied and read back through the existing
+controller/runtime new-run admission path only.
+
+This does not add an IDE activation control, change a running snapshot, or make
+every listed module an active Setup owner. The IDE configures and inspects the
+runtime; it does not own the canonical planning session or device bridge writes.
 
 The [Orchestrator verification evidence](evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
-covers bounded working-tree checks and aggregate provider cases; it does not
-turn this IDE surface into a provider, service, or hardware validation record.
+covers bounded software and provider checks, not hardware certification.
 
 Optional `ui.yaml` is a presentation descriptor. It may change labels, cards,
 charts, report sections, and allowlisted navigation/read-only API actions; it
@@ -724,7 +723,7 @@ the CSV consumed by Analysis. Synthetic evidence is labeled as such and cannot
 authorize physical work. Model failure does not become virtual success.
 
 Standalone `preflight_only` remains a separate no-execution request. Mixed device
-profiles retain operator handoff, while installed-printer and physical-print
+profiles retain operator handoff, while Installed Printer and Physical Print
 selections retain their existing explicit device authority. Saved connection
 settings cannot upgrade an all-virtual selection to physical I/O. Verification
 status is recorded in the [implementation plan](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md).
@@ -908,61 +907,38 @@ effect by assuming a missing event means “nothing happened.”
 
 ## Verification
 
-Documentation-only source inspection on 2026-09-29 at `dd0d772` reconciled the
-installed-owner list and Live artifact history scope. No browser, model, device,
-or historical test run was repeated by this review; the results below retain
-their original dates and scope.
+Verification covers source consistency, software contracts and selected browser
+interactions. The documentation review did not rerun models or devices; dated
+results remain in the linked records.
 
-The executable Design/Orchestrator addition uses
+Executable Design/Orchestrator graph checks use
 `tests/unit/test_agent_execution_graph.py` and
 `tests/integration/test_agent_execution_graph_api.py` for routing, branch
 contracts, active-byte preservation and snapshots across controller loop
-boundaries. Existing owner-result, mode-path and loop/archive suites are rerun
-with denied external effects. Frontend and SVG acceptance is recorded in the
+boundaries. Owner-result, mode-path and loop/archive checks deny external
+effects. Frontend and SVG evidence is recorded in the
 [implementation plan](../oldversion/superpowers/plans/2026-09-13-executable-agent-ide.md).
 
-The 2026-09-13 lifecycle addition is covered by
+Module lifecycle checks use
 `tests/integration/test_design_module_lifecycle.py` (real IDE APIs with isolated
 graph roots and external effects denied), `tests/unit/test_ide_module_lifecycle_js.py`
-(preview rendering/escaping), and the common browser module host tests.
-These checks do not certify physical equipment or the entire IDE interface.
+(preview rendering/escaping), and browser module-host tests. Equipment checks
+cover owner assets, report APIs, source catalogs, Skill Flow, Live cards and
+catalog preservation. Analysis checks cover owner lifecycle, source resolution,
+reports, measured-response cards and objective handoff. These are software
+checks, not certification of physical equipment or every IDE interaction.
 
-The 2026-09-13 Equipment migration is covered by owner-asset/report API tests,
-module-catalog/SVG tests, the existing Equipment progress/task/Flow/selection
-suites, Runtime IDE catalog-preservation regressions, and host-level Live helper
-checks. Focused results were 38 Node frontend/runtime tests, 69 API/control-view
-tests, 19 Runtime IDE editor tests, and 16 Live Equipment/host layout tests. A
-controller browser inspection at 1920×1080 confirmed the generic Equipment
-source map, its separate eight-block Skill Flow workspace, the Package-to-
-Windows/PyAutoGUI bridge graph, the original Live cards, and Design → Equipment
-owner lifecycle after cache-busted reload. The corrected Live check reported no
-console warning or error and made no physical call.
+The recorded API-model virtual-cycle check reached the next Design through all
+ten required owners with 34 provider calls and no physical calls. Its first
+attempt stopped at Knowledge before BO; the successful retry does not erase
+that failure or establish hardware reliability.
 
-The measurement-only Analysis revision is checked by owner lifecycle, source
-resolution, report API, frontend and objective-handoff tests without device
-actuation. Historical validation artifacts remain separate from current runtime
-capabilities.
-
-A guarded registered API-model retry completed the virtual cycle through the
-next Design with 34 actual saved-provider calls, all ten required owners, zero
-physical calls and no denied effects (`1 passed` in 470.15 seconds; cycle
-469.367 seconds). The unchanged first attempt stopped at Knowledge because its
-model response wrote evidence without first returning a search identity;
-Guardian blocked before BO. Both attempts remain part of the reliability record.
-No physical-equipment result is claimed.
-
-The 2026-09-14 core-owner plan checks passed 150 focused Python tests with 10
-existing warnings and 37 Package Manager/module-editor Node tests. A guarded
-five-route suite passed 5 cases. Isolated browser/API checks at 1920 and 900 px
-covered invalid JSON, validation without writes, explicit Knowledge-only apply,
-Default restore, export, and detached import with zero physical calls. These
-used controlled model and equipment I/O; they are not live-provider, hardware,
-or scientific evidence. Exact commands are recorded in the
+Core-owner plan checks cover invalid JSON, validation without writes, explicit
+Knowledge-only apply, default restore, export and detached import. They use
+controlled model/equipment I/O. Commands and results are retained in the
 [core-plan implementation plan](../oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
-This Reference was checked on 2026-08-09 against commit `541c93a` by repository
-inspection of the declared source files. The following evidence types are
-appropriate:
+Use the following checks for a documentation or IDE change:
 
 - documentation validator: required sections, figures, captions, navigation,
   and selected high-consequence API/UI source tokens;

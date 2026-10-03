@@ -48,15 +48,15 @@ supersedes: []
 
 ## Summary
 
-ATR transforms existing laboratories by adding structured AI layers above
-their equipment. High/Middle/Low control separates decisions, procedures, and
+ATR adds structured AI layers to existing laboratory equipment.
+High/Middle/Low control separates decisions, procedures, and
 execution; Guardian/Safety and Knowledge/Evidence support the loop across those
 levels. A VLA-enabled robot arm connects physical stages, complementing API
 and desktop-controlled instruments.
 
-The novelty is the system-level combination: simple, reusable hardware with
-advanced software coordination. Reducing the need for equipment replacement and
-bespoke fixtures is a design advantage, not the sole contribution. Compression testing is one
+The proposed contribution is the system-level combination of reusable hardware
+and structured software coordination. Reducing equipment replacement and bespoke
+fixtures is a design aim, not the sole contribution. Compression testing is one
 application, not a platform constraint.
 
 ## Scope

@@ -38,7 +38,7 @@ If initial ORC admission is deferred, automatic continuation resumes that same r
 Bare `테스트 모드` does not authorize an arbitrary physical profile. The existing printer-choice prompt remains until the operator selects a mode.
 
 The ORC classifier recognizes these workflow commands, including `설치 프린터`
-as an installed-printer alias. A standalone test command starts automatic
+as an Installed Printer alias. A standalone test command starts automatic
 conversation, not a saved-Setup edit. Ordinary experiments use the same dialogue
 with human replies. The greeting is bilingual; later replies follow the user's
 language. Intervening system questions preserve agreed values and the pending
@@ -64,7 +64,7 @@ See the [GUI structure guide](../gui/visual_structure.md) for navigation and cap
 | `installed_printer` | Slice normally, derive/send the ejection-only project; omit print body and cooling wait | Real by default, subject to saved per-agent profiles |
 | `physical_print` | Upload/start the complete project; preserve cooling and autoejection | Real by default, subject to saved per-agent profiles |
 
-The old print-start/cancel/standalone-ejection sequence is not the installed-printer workflow. Placement, ejection geometry and completion evidence stay with the existing printer owner. See [Specimen Agent](../agents/specimen_agent.md) and [Bambu bridge](../device_bridges/bambu_x2d_bridge.md).
+The old print-start/cancel/standalone-ejection sequence is not the Installed Printer workflow. Placement, ejection geometry and completion evidence stay with the existing printer owner. See [Specimen Agent](../agents/specimen_agent.md) and [Bambu bridge](../device_bridges/bambu_x2d_bridge.md).
 
 Saved profiles may mix virtual and real devices. A virtual manipulation/real equipment boundary still requires the existing operator teleoperation and confirmation path; automatic scenario input never asserts that a specimen was transferred.
 

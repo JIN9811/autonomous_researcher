@@ -151,10 +151,9 @@ The physical-to-Isaac conversion is centralized in:
 utils/isaac_omx_mirror_mapping.py
 ```
 
-Both the standalone bridge loop and the in-process LeRobot wrapper use this same
-module. Do not keep separate joint sign/offset/range logic in the wrapper or the
-bridge; otherwise the GUI probe, teleoperation mirror, and recording sidecar can
-show different poses for the same physical arm state.
+The standalone bridge loop and in-process LeRobot wrapper share this module.
+Keep joint sign/offset/range logic here so the GUI probe, teleoperation mirror,
+and recording sidecar show the same pose for the same physical arm state.
 
 Optional calibration file:
 
@@ -263,7 +262,9 @@ POST /api/lerobot/mirror/loop/stop
 - It also checks that the receiver `sample_count` increased compared with the pre-check.
 - If the receiver state is stale or does not match the just-posted sample, the bridge returns `LEROBOT_ISAAC_MIRROR_VERIFY_STALE_STATE`.
 
-Use `receiver_verify` before relying on mirror evidence for a live teleop/record run. It proves the bridge-to-receiver HTTP path is working; it still does not prove physical robot motion until the live teleop/record session is actually run.
+Use `receiver_verify` before relying on mirror evidence for live teleop/record.
+It verifies the bridge-to-receiver HTTP path, not physical robot motion. Motion
+evidence still requires an actual live teleop/record session.
 
 `receiver_process_start`, `receiver_process_status`, and
 `receiver_process_stop` are managed receiver-process controls for the LeRobot
@@ -417,7 +418,10 @@ list responses expose `isaac_mirror` directly. The bridge updates
 so the GUI can show mirror progress without waiting for `record.control
 action=stop`.
 
-When `record.control action=stop` stops a recording session, the bridge also stops its attached mirror loop and updates `meta/atr_pipeline.json` with the final mirror `status`, `sample_count`, and, when available, `receiver_state_at_stop` from the receiver `/state` endpoint. The metadata therefore remains usable after recording finishes.
+`record.control action=stop` stops the recording and its attached mirror loop.
+The bridge saves the final mirror `status` and `sample_count` in
+`meta/atr_pipeline.json`, plus `receiver_state_at_stop` from `/state` when
+available. This metadata remains usable after recording ends.
 
 Each mirror JSONL row records the sampled follower joint state, exact payload sent to
 Isaac, receiver POST result, and `sync_metrics`. The session response and

@@ -32,7 +32,9 @@ Rules:
 
 Reason:
 
-The installed LeRobot runtime uses `lerobot-record` for policy-controlled evaluation when a policy is provided. Its safety check requires the dataset name to begin with `eval_` to prevent policy-generated evaluation data from being confused with human demonstration training data.
+The installed LeRobot runtime uses `lerobot-record` for evaluation when a policy
+is provided. Its safety check requires the `eval_` prefix to distinguish
+policy-generated evaluation data from human demonstration training data.
 
 ## Local Path Rule
 
@@ -149,7 +151,9 @@ Rules:
   do not also pass `--policy.type=<type>`. The installed LeRobot parser treats
   those options as mutually exclusive and aborts before robot control starts.
 
-This is a pragmatic workaround because the installed LeRobot `lerobot-record --policy.path=...` path is episode-duration based and does not expose a native infinite policy-control mode.
+The installed `lerobot-record --policy.path=...` path requires an episode
+duration and has no native infinite policy-control mode; the long episode
+provides manual-stop behavior.
 
 ## Safe Rollout Action Clamp
 

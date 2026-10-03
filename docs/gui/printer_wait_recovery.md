@@ -1,11 +1,13 @@
 # Resuming an existing printer job
 
-Printer completion deadlines use the selected sliced artifact's duration (Bambu
-`Metadata/slice_info.config` prediction in seconds, or a supported G-code header),
-plus 25% or at least 15 minutes. A longer printer-reported remaining time takes
-precedence. Geometry/design proxy estimates are not treated as slicer timings.
-Explicit timeout overrides remain supported; an unknown duration uses a bounded
-six-hour fallback.
+Printer completion deadlines use the selected sliced artifact's duration:
+
+- Source: Bambu `Metadata/slice_info.config` prediction in seconds, or a supported G-code header.
+- Allowance: 25% of that duration, with a minimum of 15 minutes.
+- A longer printer-reported remaining time takes precedence.
+- Explicit timeout overrides are supported; unknown duration uses a six-hour fallback.
+
+Geometry/design estimates do not count as slicer timings.
 
 After a completion timeout with a verified started task, the current run keeps a
 `printer_wait_recovery` record and pauses. The existing **Resume** control checks

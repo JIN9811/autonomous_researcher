@@ -20,8 +20,8 @@ supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 -->
 
 검증 범위: `dd0d772` 기준 문서 전체 검토와 소스 정적 분석.
-과거 제공자·테스트 결과의 검증 범위는 그대로 유지한다. 이번 검토에서는
-모델을 호출하거나 Knowledge 저장소를 변경하거나 장비를 작동하지 않았다.
+과거 제공자·테스트 결과의 검증 범위는 유지한다. 이번 검토에서는
+모델 호출, Knowledge 저장소 변경, 장비 작동을 수행하지 않았다.
 
 # Markdown Knowledge 운영 가이드
 
@@ -36,13 +36,13 @@ supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 
 ## 무엇이 바뀌었는가
 
-지식 그래프와 Neo4j 운영 의존성은 제거했다. 온톨로지 정의, 원본 아티팩트,
+지식 그래프와 Neo4j 운영 의존성은 제거했다. 온톨로지 정의, 원본 산출물(artifact),
 기존 JSONL 기억·패턴·성능 기록은 보존한다. Evolution 생성 기능은 종료했으며
 과거 기록만 유지한다. 매뉴얼 전용 RAG는 Source Library로 대체됐고,
 기존 `/api/knowledge/manuals/*` 경로는 HTTP 410을 반환한다.
 실행 순서를 표현하는 폐루프 그래프는 지식 그래프가 아니며 변경하지 않는다.
 
-Knowledge의 LLM은 근거를 읽고, 재사용 가치와 분류를 판단하고, 범위 내 지식을
+Knowledge의 LLM은 근거를 읽고 재사용 가치와 분류를 판단하며, 범위 내 지식을
 검색·상세 조회·기록하는 툴을 호출한다. 파일 저장과 조건 검증은 코드가 수행한다.
 단순 기록을 위해 매 에이전트 종료마다 LLM을 호출하지 않는다.
 
@@ -90,8 +90,10 @@ POST `/api/knowledge/markdown/query` 예시:
 ## 기록의 상태 변경
 
 POST `/api/knowledge/markdown/<record_id>/status`에 `status`, `reason`을 전달한다.
-대체 시에는 `superseded_by`도 지정한다. 대체 기록은 존재하는 유효 기록이어야 하고
-온톨로지 타입과 적용 조건이 동일해야 한다. 이전 리비전은 삭제하지 않는다.
+
+- 대체 시에는 `superseded_by`도 지정한다.
+- 대체 기록은 존재하는 유효 기록이어야 하며 온톨로지 타입과 적용 조건이 같아야 한다.
+- 이전 리비전은 삭제하지 않는다.
 
 생산자 재시도는 운영자가 지정한 검토 보류·대체 상태를 풀지 않는다. 최신 파일이
 손상되면 과거의 유효 상태로 되돌아가지 않고 해당 기록을 검색에서 격리한다.
@@ -103,11 +105,12 @@ POST `/api/knowledge/markdown/<record_id>/status`에 `status`, `reason`을 전�
 취소는 operator/runtime cancellation으로 구별하며 장비 고장의 증거로 바꾸지 않는다.
 동일 실행의 재처리는 중복되지 않지만 다른 루프·시도는 별개의 관측으로 보존한다.
 
-기존 아카이브를 가져오려면 POST `/api/knowledge/markdown/intake`를 사용한다.
-`run_id`(선택), `limit`(1–500), `cursor`(이전 응답의 next_cursor)를 전달한다.
-반환된 job_id를 GET `/api/knowledge/markdown/intake/<job_id>`로 조회한다.
-`has_more`가 참이면 다음 cursor로 새 작업을 요청한다. 파일별 실패를 확인하고
-원본 상태를 검토한 뒤 재시도한다. 장비 재실행이나 LLM 호출은 하지 않는다.
+기존 아카이브는 다음 순서로 가져온다. 이 작업은 장비를 재실행하거나 LLM을 호출하지 않는다.
+
+1. POST `/api/knowledge/markdown/intake`에 `run_id`(선택), `limit`(1–500), `cursor`(이전 응답의 next_cursor)를 전달한다.
+2. 반환된 job_id를 GET `/api/knowledge/markdown/intake/<job_id>`로 조회한다.
+3. `has_more`가 참이면 다음 cursor로 새 작업을 요청한다.
+4. 파일별 실패와 원본 상태를 확인한 뒤 재시도한다.
 
 작업 상태는 파일에 남지만 웹 프로세스가 중단된 작업을 자동 재시작하지 않는다.
 그 경우 같은 범위로 다시 요청할 수 있다. MD 인덱스는 파일로부터 재구성되며,

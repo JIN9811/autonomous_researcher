@@ -422,7 +422,7 @@ Frequently written by run loop merge:
   - `layer_height_mm=0.2`
   - `storage=internal`
 - In normal Live GUI mode, `실험 수행` builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds through the active printer bridge. The default bridge is Bambu Lab X2D; PrusaLink upload/start is used only when Prusa MK4S is explicitly selected.
-- In Live GUI `테스트 모드` and Main GUI `test`, the 3D GUI's saved `test_unit_cell_size_mm` supplies a compatibility fallback (`cell_size_mm=10.0` when missing), not a fixed generated candidate. Explicit experimental inputs take precedence; LHS/BO candidates use the experimental contract's cell-size and wall-thickness bounds (test defaults: 5–10 mm and 0.6–1.2 mm).
+- In Live GUI `테스트 모드` and Main GUI `test`, the 3D Printer workspace's saved `test_unit_cell_size_mm` supplies a compatibility fallback (`cell_size_mm=10.0` when missing), not a fixed generated candidate. Explicit experimental inputs take precedence; LHS/BO candidates use the experimental contract's cell-size and wall-thickness bounds (test defaults: 5–10 mm and 0.6–1.2 mm).
 - In Live GUI `테스트 모드` and Main GUI `test`, `print.start_immediately` remains false until Specimen Making Agent asks for a printer path. Choosing `설치 프린터` promotes the printer step to the selected-printer ejection-only project-file path derived from the actual sliced artifact. Choosing `실제 출력` promotes the printer step to the full physical upload/start/print path.
 - Live GUI one-shot commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, `테스트 모드, 실제 프린터`, and `테스트 모드, 실제 출력` inject the selected `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without the separate printer-path prompt.
 - If any required value is missing, the Live GUI must append an Orchestrator message that includes:
@@ -434,7 +434,7 @@ Frequently written by run loop merge:
 
 ## Test Mode Baseline
 
-- An all-virtual device profile supports a full loop without physical equipment I/O. `mode=test` alone is not that guarantee: installed-printer or physical-print selections retain their explicit device authority.
+- An all-virtual device profile supports a full loop without physical equipment I/O. `mode=test` alone is not that guarantee: Installed Printer or Physical Print selections retain their explicit device authority.
 - The application uses real model decisions in TEST by default. Explicit offline fixtures may substitute model responses, but required owner decisions fail closed when valid model evidence is unavailable; deterministic success must not replace a failed decision.
 - Synthetic device/analysis evidence remains labeled and cannot establish live physical success. See [Test Mode](test_mode.md) and the [Runtime IDE virtual-device contract](runtime_ide.md#virtual-device-execution-contract).
 
@@ -495,7 +495,18 @@ This separates recovery evidence from Analysis data while keeping blocked runs d
 
 ### 2026-05-30 Analysis Live Equipment Handoff Gate
 
-In live mode, Analysis does not treat a readable UTM CSV as sufficient by itself when the run carries Windows/UTM Equipment handoff metadata. If `equipment_report.live_evidence_audit.required_for_handoff=true`, `equipment_handoff`, or `utm_data_ready` is present, `AnalysisAgent` rechecks that the handoff is `ready_for_analysis`, the UTM packet is `ready`, and the required screen/physical/save/file/parse/Linux-pull/Vision/request-audit cross-checks are true. Otherwise the analysis result is blocked with `EQUIPMENT_HANDOFF_NOT_READY` or the specific Equipment failure code.
+Live Analysis requires more than a readable UTM CSV when Windows/UTM Equipment
+handoff metadata is present. If
+`equipment_report.live_evidence_audit.required_for_handoff=true`,
+`equipment_handoff`, or `utm_data_ready` is present, `AnalysisAgent` rechecks:
+
+- handoff status is `ready_for_analysis`;
+- UTM packet status is `ready`;
+- required screen/physical/save/file/parse/Linux-pull/Vision/request-audit
+  cross-checks are true.
+
+Otherwise it blocks the result with `EQUIPMENT_HANDOFF_NOT_READY` or the specific
+Equipment failure code.
 
 ### Lab Equipment Vision Freshness Requirement
 

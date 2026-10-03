@@ -189,11 +189,15 @@ the same parser and objective contracts.
 
 ## Safety and Recovery
 
-Invalid geometry, missing or malformed measurements, failed Equipment handoff,
-LLM holds, invalid decision responses and objective-binding failures produce
-explicit blocked results. A fresh valid acquisition can be evaluated through the
-existing route. The agent does not reacquire data or change experiment conditions
-on its own.
+Analysis returns an explicit blocked result for:
+
+- invalid geometry or missing/malformed measurements;
+- failed Equipment handoff;
+- LLM holds or invalid decision responses;
+- objective-binding failures.
+
+A fresh valid acquisition can be evaluated through the existing route. The agent
+does not reacquire data or change experiment conditions on its own.
 
 ## Artifacts and Verification
 

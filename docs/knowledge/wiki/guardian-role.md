@@ -1,5 +1,5 @@
 ---
-{"topic_id":"guardian-role","owner":"guardian_agent","source_refs":["docs/agents/guardian_agent.md","docs/device_bridges/plc_safety_bridge.md"],"source_revision":{"docs/agents/guardian_agent.md":"2892f284bed592d0d1c3cfe097fb0fb38ea2cc1266df3986a4f6e23cfae39e6b","docs/device_bridges/plc_safety_bridge.md":"b1d27bf8f94e18d31c8e67a323cb6ee0aecc74ebdc55289ebb3378d8a47fefbf"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: guardian-role","status":"reviewed"}
+{"topic_id":"guardian-role","owner":"guardian_agent","source_refs":["docs/agents/guardian_agent.md","docs/device_bridges/plc_safety_bridge.md"],"source_revision":{"docs/agents/guardian_agent.md":"b3031606ce117620989434f4930e71e69d57955f7a771e80f244fb08da7d3851","docs/device_bridges/plc_safety_bridge.md":"c39f85b9bbfe2bddb0415619b47760254a710da81df7203868a2958a4d25e5ff"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: guardian-role","status":"reviewed"}
 ---
 
 # Guardian Agent — Progression and Safety Boundaries

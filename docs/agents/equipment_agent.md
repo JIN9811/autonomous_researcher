@@ -490,9 +490,14 @@ cancelled or changed-scope claim blocks rather than starting again. This is not 
 crash-resume queue or permission to create a fresh invocation for failed work.
 
 Only the current invocation owner can resume. The checkpoint retains prior blocks,
-transitions, results and runtime context. Retry eligibility requires an execution
-record, exactly one failed worker run, explicit integer `executed_action_count=0`,
-no completed segments in the failed block, and the existing safe-retry predicate.
+transitions, results and runtime context. Retry requires all of the following:
+
+- an execution record;
+- exactly one failed worker run;
+- explicit integer `executed_action_count=0`;
+- no completed segments in the failed block;
+- the existing safe-retry predicate.
+
 Unknown effects, running/cancelled results, missing counters, partial work or a
 completed Flow never permit automatic replay. A checkpoint is not authority to
 repeat already completed segments within a failed block.
@@ -602,11 +607,16 @@ Connected `/api/equipment/*` and `/api/bridges*` expose existing worker, Skill,
 Profile and runtime services. Agent-local decision names are not new public APIs.
 `utm.run_protocol` remains an explicit compatibility path, never automatic fallback.
 
-Installed ownership adds read-only composition surfaces, not another execution
-path: `GET /api/modules/equipment`, `GET /api/agents/equipment/report`,
-`GET /api/runtime/agent-manifests`, `GET /module-assets/equipment/live_report.js`
-and `GET /api/packages`. The asset is admitted only while `equipment_agent` is
-active. Existing `/equipment/windows` and `/api/equipment/*` routes remain the
+Installed ownership adds these read-only composition surfaces, not another execution path:
+
+- `GET /api/modules/equipment`
+- `GET /api/agents/equipment/report`
+- `GET /api/runtime/agent-manifests`
+- `GET /module-assets/equipment/live_report.js`
+- `GET /api/packages`
+
+The asset is admitted only while `equipment_agent` is active.
+Existing `/equipment/windows` and `/api/equipment/*` routes remain the
 configuration, runtime and worker surfaces.
 
 ## Safety and Failure Boundaries

@@ -10,13 +10,17 @@ in their existing top-level packages. Core implementations use their canonical
 `agents.core.*` paths; obsolete flat wrapper modules have been removed.
 
 Knowledge and Guardian retain read-only plan queries and detached proposal
-validation. They also accept an optional strict `module.owner_plan` declaration
-through the existing module validator and explicit save/apply path. A new run
-pins that module snapshot; the matching owner derives only its supported inputs
-and records configured-plan evidence. This is separate from core module
-registration/removability: `implementation.configuration.activation_supported`
-remains false, and no declaration schedules a run, changes Guardian's mandatory
-gates, or adds a core owner to specialist discovery.
+validation. Their optional strict `module.owner_plan` declaration follows the
+existing lifecycle:
+
+- The module validator checks it; explicit save/apply persists it.
+- A new run pins the module snapshot.
+- The matching owner derives only supported inputs and records configured-plan evidence.
+
+This does not change core registration or removability:
+`implementation.configuration.activation_supported` remains false. No declaration
+schedules a run, changes Guardian's mandatory gates or adds a core owner to
+specialist discovery.
 
 Their executable catalogs retain one composite task and one delivery operation,
 while source-backed structure describes the real responsibilities inside that

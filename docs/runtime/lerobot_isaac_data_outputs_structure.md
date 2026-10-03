@@ -269,7 +269,17 @@ sidecar/isaac_lab_synthetic/
 
 This branch is separate from the normal recording sidecars. It is the handoff structure for Isaac Lab / Mimic / robomimic training.
 
-For the Robotis OMX joint-replay backend, `generated_dataset_joint_plan.hdf5` is an intermediate planning/debug artifact. It stitches randomized source segments and preserves the leader joint target tensors, but it is not considered trainable by itself. The trainable mimic artifact is `mimic/generated_dataset.hdf5`, produced by replaying that plan through the Isaac Lab environment and recording the actual Lab-stepped observations, actions, object poses, RGB-D camera tensors when enabled, and success metadata. A mimic success row is allowed into `training_import/manifest.jsonl` only when `metrics.lab_step_replay=true`; `metrics.joint_replay=true` without `lab_step_replay` is excluded from training import.
+The Robotis OMX joint-replay backend separates planning and trainable artifacts:
+
+- `generated_dataset_joint_plan.hdf5` stitches randomized source segments and
+  preserves leader joint target tensors. It is for planning/debugging, not training.
+- `mimic/generated_dataset.hdf5` is trainable. Isaac Lab replays the plan and
+  records Lab-stepped observations, actions, object poses, RGB-D camera tensors
+  when enabled, and success metadata.
+
+A mimic success row enters `training_import/manifest.jsonl` only when
+`metrics.lab_step_replay=true`. A row with `metrics.joint_replay=true` but no
+`lab_step_replay` is excluded from training import.
 
 ## Viewer and Debug Captures
 

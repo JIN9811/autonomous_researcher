@@ -618,17 +618,9 @@ Teleoperation GUI requirements:
   - `wrist` RealSense: Intel RealSense D405, SDK serial `352122273019`, USB 3.2. Use `serial_number_or_name=352122273019` in `intelrealsense` config.
   - BRIO auxiliary camera: Logitech BRIO by-id path `/dev/v4l/by-id/usb-046d_Logitech_BRIO_1CD057A6-video-index0` currently resolves to `/dev/video6`; use MJPEG `1280x720@15` for auxiliary monitoring, not for default LeRobot policy observations.
   - RealSense V4L nodes may appear under `/dev/v4l/by-id/*RealSense*` and `/dev/v4l/by-path/*`, but those paths are diagnostic only for this pipeline. Do not route D405/D455F policy observations through OpenCV/V4L because the LeRobot command shape must remain `type=intelrealsense`.
-- camera throughput validation on 2026-06-17:
-  - D455F + D405 at `640x480 RGB+depth @ 30 FPS` ran for 20 seconds with no timeout/error at SDK level.
-  - D455F + D405 at `640x480 RGB+depth @ 30 FPS` plus BRIO `MJPEG 1280x720 @ 15 FPS` ran concurrently for 20 seconds; BRIO reported `drop_frames=0` and `dup_frames=0`; no `/dev/video*` process remained afterward.
-  - Despite successful 30 FPS stress tests, the ROBOTIS OMX-AI operational default is `15 Hz/FPS` for both dataset/control loop and RealSense camera streams. Recording and policy inference should favor timestamp stability and USB headroom over maximum camera rate. Raise both saved camera FPS and dataset/control FPS only for a deliberate 30 FPS recording campaign.
-- system-wide RealSense validation on 2026-06-20:
-  - `/usr/local/bin/rs-enumerate-devices` saw D455F `341522300873` and D405 `352122273019`.
-  - `/usr/local/bin/rs-fw-update -l` saw both devices.
-  - system Python imported `pyrealsense2` from `/usr/local/lib/python3.12/dist-packages/pyrealsense2`.
-  - D455F and D405 both reported SDK USB `3.2` and sysfs `5000M` after replug/recheck.
-  - a short system-Python smoke test opened `640x480 RGB+depth @15 FPS` for each camera and wrote `runs/camera_tests/realsense_global_stream_probe_latest.json`.
-  - if D455F/D405 is visible but a non-root stream probe reports `RS2_USB_STATUS_BUSY`, `failed to set power state`, or frame timeout, check for camera owners with `fuser -v /dev/video*`, then replug/power-cycle the hub or run one root smoke test before retrying as the normal user. Do not rewrite camera role mappings for this transient state.
+- The ROBOTIS OMX-AI operational default is `15 Hz/FPS` for both dataset/control loop and RealSense camera streams, favoring timestamp stability and USB headroom. Raise both saved camera FPS and dataset/control FPS only for a deliberate 30 FPS recording campaign.
+- Camera validation scope: the 2026-06-17 SDK tests ran D455F + D405 at `640x480 RGB+depth @ 30 FPS` for 20 seconds, alone and with BRIO `MJPEG 1280x720 @ 15 FPS`, without timeout/error (BRIO `drop_frames=0`, `dup_frames=0`, no remaining `/dev/video*` process); the 2026-06-20 system-Python `640x480 RGB+depth @15 FPS` smoke evidence is `runs/camera_tests/realsense_global_stream_probe_latest.json`.
+- If D455F/D405 is visible but a non-root stream probe reports `RS2_USB_STATUS_BUSY`, `failed to set power state`, or frame timeout, check for camera owners with `fuser -v /dev/video*`, then replug/power-cycle the hub or run one root smoke test before retrying as the normal user. Do not rewrite camera role mappings for this transient state.
 - keep camera capture independent from LeRobot display visualization; display toggles `--display_data`, not whether saved cameras are recorded into the dataset
 - run live LeRobot subprocesses with `conda run --no-capture-output -n lerobot ...` and unbuffered Python output so command logs stream into the GUI while the process is active
 - start fake teleoperation in test mode

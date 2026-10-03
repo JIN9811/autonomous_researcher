@@ -113,10 +113,12 @@ search space. State corrections in chat if the proposed plan differs from your i
 ![Orchestrator: experiment contract and decisions](../gui/assets/screenshots/2026-09-29/live-orchestrator.png)
 
 **Expected:** a reviewed contract and a run-specific admission/handoff.
-Planning consent is distinct from execution consent; the test scenario can supply
-the normal review replies, but missing connection facts and physical confirmations
-remain the operator's responsibility. Do not answer a physical confirmation with fictional evidence.
-If it is requested in this virtual exercise, check the selected profile.
+Planning consent is distinct from execution consent. The test scenario can supply
+normal review replies, but missing connection facts and physical confirmations
+remain the operator's responsibility.
+
+- Do not confirm a physical action that did not occur.
+- If this virtual exercise requests physical confirmation, check the selected profile.
 
 ## Step 5 — Check design and specimen preparation
 

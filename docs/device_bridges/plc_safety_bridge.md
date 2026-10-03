@@ -273,15 +273,17 @@ attribution until a fresh D101=0 sample. A subsequent D101=1 sample is therefore
 not mislabeled `plc_pb2`. The Controller start path also checks the service latch
 so loss of Controller-local state cannot open a new run.
 
-If connection is lost from a fresh NORMAL snapshot, PLC status becomes OFFLINE
-and the pre-existing GUI/Controller controls remain available. The service does
-not switch to virtual transport. If D101 was observed first, status becomes
-OFFLINE while the local PLC source and Controller E-STOP remain latched; GUI
-recovery remains blocked until reconnect and valid physical recovery.
-While the monitor remains active but cannot reconnect, status is RECONNECTING,
-not stopped/offline. A connected sample older than `stale_after_s` becomes
-STALE with `PLC_STATE_STALE`; one valid fresh sample clears stale/protocol
-failure details. Reconnect closes the prior transport before opening another.
+Connection and freshness rules are:
+
+- Loss from a fresh NORMAL snapshot: status becomes OFFLINE; existing
+  GUI/Controller controls remain available. The service never switches to virtual transport.
+- Loss after D101 was observed: status becomes OFFLINE; the local PLC source and
+  Controller E-STOP stay latched. GUI recovery remains blocked until reconnect
+  and valid physical recovery.
+- An active monitor that cannot reconnect reports RECONNECTING, not stopped/offline.
+- A connected sample older than `stale_after_s` becomes STALE with `PLC_STATE_STALE`.
+  One valid fresh sample clears stale/protocol failure details.
+- Reconnect closes the prior transport before opening another.
 
 ## Terminal Errors
 

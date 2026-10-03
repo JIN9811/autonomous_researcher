@@ -19,11 +19,19 @@ The previous X2D patch inserted bed cooling and ejection before the native AMS u
 
 The 140 C command is present in the [official X2D start profile](https://github.com/bambulab/BambuStudio/blob/master/resources/profiles/BBL/machine/Bambu%20Lab%20X2D%200.4%20nozzle%20template%20machine_start_gcode.json). The operator validated its use in this sequence; it is not a guarantee of no residue, a safe-to-touch temperature, or proof that every firmware version waits identically. Revalidate on a firmware or machine change. The temperature wait is followed by heater OFF; it is not an off-only cooldown.
 
-Only the recognized native X2D end structure is reordered. Changed/missing unload or heater-off blocks, conditional unloading, premature motor disable, or already-patched old X2D eject-before-unload files fail validation. Other machine profiles and no-print standalone routines retain their existing behavior. There is no additional extrusion, forced tool selection, or large custom retraction.
+Only the recognized native X2D end structure is reordered. Validation rejects:
+
+- changed or missing unload or heater-off blocks;
+- conditional unloading;
+- premature motor disable;
+- already-patched old X2D eject-before-unload files.
+
+Other machine profiles and no-print standalone routines retain their behavior.
+There is no additional extrusion, forced tool selection or large custom retraction.
 
 ## Installed-printer test and transfer failures
 
-The installed-printer test removes the print body and native end block. It keeps
+The Installed Printer test removes the print body and native end block. It keeps
 the existing ejection-only path, without adding AMS unloading or nozzle heating.
 An escaped `machine_end_gcode` template inside a slicer configuration comment is
 not an executable X2D end block; only the standalone marker selects that path.

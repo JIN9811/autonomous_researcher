@@ -40,8 +40,7 @@ supersedes: []
 
 The [2026-09-28 retained-campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
 checks fifteen completed observation sets and all 485 invocation statuses.
-This is later artifact-retention evidence, separate from the original no-device
-implementation tests. It does not certify every physical action or erase failed attempts.
+This verifies artifact retention, not every physical action, and does not erase failed attempts.
 
 ATR stores execution evidence beneath the existing run directory, partitioned
 by loop, agent, and invocation. A later loop or retry does not overwrite the
@@ -63,7 +62,7 @@ that field retains the prior behavior. Arbitrary standalone bridge commands
 outside an agent invocation do not acquire a synthetic loop identity.
 
 Existing producer directories, run files, download URLs, and legacy LeRobot
-sessions are retained. This change does not migrate, delete, or relabel old
+sessions are retained. Archiving does not migrate, delete, or relabel old
 results whose loop ownership is unknown.
 
 ## Source of Truth
@@ -244,7 +243,7 @@ returns an empty list, never the current loop as a fallback. Unknown legacy
 ownership is labelled `legacy` with empty identity fields.
 
 - Runtime IDE: Artifact Lineage provides a loop filter and groups files by
-  loop/agent/attempt; the former 80-file truncation is removed. Changing runs
+  loop/agent/attempt without an 80-file limit. Changing runs
   clears the previous filter and artifact set.
 - Live GUI: a completed loop's **Loop Artifacts** button fetches that loop's
   disk-backed inventory and offers saved-file/image access. Refresh fetches
@@ -278,10 +277,9 @@ ownership is labelled `legacy` with empty identity fields.
 
 ## Verification
 
-The original verification covered the **working tree on 2026-09-06**, which
-was uncommitted at the time. It consisted of offline tests and did not restart
-the running application. Those historical test results are distinct from the
-later retained-campaign audit linked above.
+The [offline test report](evidence/2026-09-06-loop-artifact-archiving-tests.md)
+records implementation-test results and their scope. The campaign audit above
+separately checks retained run data; neither substitutes for physical verification.
 
 ```bash
 .venv/bin/pytest tests/unit/test_agent_artifact_archive.py tests/integration/test_all_agent_loop_archives.py tests/integration/test_loop_artifact_api.py -q
@@ -296,10 +294,6 @@ real entrypoints with a dependency boundary that prevents providers/devices
 from being invoked; it does not claim ten successful scientific stages.
 JavaScript tests execute extracted rendering functions, not a full browser
 end-to-end hardware run.
-
-Recorded counts, broader regression failures, and documentation-validator
-baseline issues are separated in the
-[offline test report](evidence/2026-09-06-loop-artifact-archiving-tests.md).
 
 ## Related Documents
 

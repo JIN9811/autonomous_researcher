@@ -27,9 +27,9 @@ related_docs:
 supersedes: []
 -->
 
-Verification scope: full-document read and static source/configuration inspection
-at `dd0d772`; no hardware, model-provider or service execution. Dated test and
-physical-evidence entries below retain their original scope and are not rerun claims.
+Verification scope: static documentation/source inspection, without hardware,
+model-provider or service execution. Linked evidence retains its recorded scope;
+this reference does not claim a rerun.
 
 # Agent Reference Index
 
@@ -39,11 +39,10 @@ This index covers the ten executable ATR agents used by AX4LAB. Each reference
 describes an agent's responsibilities, handoffs, interfaces, execution,
 evidence, recovery, and verification scope.
 
-Verification is dated per reference. The
-[2026-09-28 audit](../maintenance/code_documentation_audit_20260928.md) adds
-main-code checks and the retained fifteen-iteration campaign; earlier
-"no hardware run" notes apply to those tests, not the whole project. RPT remains
-in a separate development worktree, outside this main-loop inventory.
+Verification is scoped per reference. The
+[2026-09-28 audit](../maintenance/code_documentation_audit_20260928.md) records
+main-code checks and the fifteen-iteration campaign. Non-actuating tests and
+physical campaign evidence have separate scopes. RPT is outside this main-loop inventory.
 [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md) covers
 run/loop/agent/invocation storage, including failed and cancelled calls, file
 snapshots, and saved-loop access. [Modularity](../modularity.md) covers module
@@ -55,11 +54,11 @@ responsibilities, packages, bridges, and configuration lifecycle.
 |---|---|
 | Inventory | Ten executable agents on the existing registered graph/module path |
 | Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis and BO reuse numerical services without a device bridge |
-| Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
+| Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup |
 | Configuration ownership | Orchestrator/BO keep existing Setup fields; Knowledge/Guardian declarations use owner validation and explicit future-run module apply |
 | Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
-| Figures | Ten Sunburst role overviews plus editable agent figures; Orchestrator now includes Flow, Execution, and Connections views |
-| Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
+| Figures | Ten Sunburst role overviews plus editable agent figures; Orchestrator includes Flow, Execution, and Connections views |
+| Verification | [Recorded non-actuating verification](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) distinguishes model capture from postprocessing |
 
 ## Reading the References
 
@@ -111,7 +110,7 @@ Excluded:
 ## Visual Contract
 
 The [Design Reference](design_agent.md) establishes the role/workflow reading
-order used by the restructured References. High, Middle, Low, Guardian/Safety,
+order used by the References. High, Middle, Low, Guardian/Safety,
 and Knowledge/Evidence describe responsibility areas, not five sequential
 model calls. Orchestrator and Guardian retain their control-plane layouts;
 each owning Reference defines where its LLM decisions actually occur.
@@ -312,7 +311,7 @@ agent contract:
 
 - Agent and step inventory: `graphs/modules/*/module.yaml`
 - Executable classes: specialist `agents/<owner>/agent.py` and core
-  `agents/core/<owner>/agent.py`; retired flat agent wrappers are not current sources
+  `agents/core/<owner>/agent.py`
 - Graph position and transitions: `graphs/configs/atr_closed_loop.yaml`
 - API paths and methods: route declarations and registration/retirement hooks
   in `app/main.py`, Analysis route modules, and Knowledge API installers;
@@ -346,11 +345,10 @@ documents identify ownership boundaries without refactoring the implementation.
 
 ## Index Verification
 
-Updated on 2026-09-11 against `5a190e8`: agent implementations and local
-decision modules, ten manifests, graph handoffs, Analysis report routes,
-Knowledge Markdown/source route installers, and owning References were inspected.
-Documentation checks validate links and publication structure; no device,
-model-inference, or new physical-cycle test was performed for this update.
+Inspection covers agent implementations, decision modules, manifests, graph
+handoffs, report/source routes, and owning References. Documentation checks
+cover links and publication structure, not device execution, model inference,
+or physical-cycle performance.
 
 ## Related Documents
 

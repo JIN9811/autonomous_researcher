@@ -262,7 +262,18 @@ The same LLM-driven conversation serves human experiments and automatic tests:
 | `review` | Agreed conditions and execution question | Pending run review, no execution |
 | `execute` | Brief acknowledgement of explicit approval | Existing controller admission and Design handoff |
 
-`app/planning_dialogue.py` validates the private model response; only its natural-language answer appears in Chat. Each accepted research input is stored as a `conversation.input.*` block in the existing canonical `experimental_setup.json`. Subsequent edits revise that block and emit `planning_setup_changed`. Its Edit action opens Chat with the current block revision. These are planning inputs, not owner configuration receipts: Confirm/Discard owner actions are disabled, and saving a value never starts equipment. Execution review passes the agreed inputs into the existing pipeline. Owner-backed configuration blocks below keep their separate validation and next-run application contracts.
+`app/planning_dialogue.py` validates the private model response; Chat shows only
+its natural-language answer. Research inputs follow this lifecycle:
+
+- Each accepted input is stored as a `conversation.input.*` block in canonical
+  `experimental_setup.json`.
+- Edits revise that block and emit `planning_setup_changed`.
+- Edit opens Chat with the current block revision.
+- Execution review passes the agreed inputs into the existing pipeline.
+
+These are planning inputs, not owner configuration receipts. Confirm/Discard
+owner actions are disabled, and saving never starts equipment. Owner-backed
+blocks below retain separate validation and next-run application contracts.
 
 System questions preserve the plan. Automatic test replies use the same conversation and reveal only requested scenario facts; selected test execution policy remains server-owned. State-specific allowed actions and missing-input context prevent planning consent from becoming execution approval. An invalid model action may be reconsidered once before any message or input mutation; an invalid second response produces no execution. Stops, session changes, stale scopes and runtime approvals retain their existing boundaries.
 

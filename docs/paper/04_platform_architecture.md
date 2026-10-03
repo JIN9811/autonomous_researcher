@@ -68,8 +68,7 @@ original baseline.
 
 ## Platform Role in the System
 
-The platform is not a separate product narrative attached to the paper. Its
-role is to answer RQ4: how can a new capability participate in RQ1–RQ3 without
+The platform addresses RQ4: how can a new capability participate in RQ1–RQ3 without
 weakening stage, safety, and evidence contracts?
 
 An extension is system-compatible only when it:

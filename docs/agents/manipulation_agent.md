@@ -31,9 +31,9 @@ related_docs:
 supersedes: []
 -->
 
-Verification scope: full-document read and static source/configuration inspection
-at `dd0d772`; no hardware, model-provider or service execution. Dated test and
-physical-evidence entries below retain their original scope and are not rerun claims.
+Verification scope: static documentation/source inspection, without hardware,
+model-provider or service execution. Linked evidence retains its recorded scope;
+this reference does not claim a rerun.
 
 # Manipulation Agent Reference
 
@@ -48,21 +48,25 @@ Physical test profiles use the same policy-reference and execution-confirmation 
 | At a glance | Details |
 |---|---|
 | Runtime status | Implemented on the existing transfer and post-test clearance paths |
-| LLM decision layer | Implemented; registered API and local vLLM each matched 4/4 non-actuating development cases |
+| LLM decision layer | Bounded skill selection and post-Vision result review; non-actuating evidence below |
 | Physical effect | Possible only through existing rollout, fixed-skill and managed-replay executors |
 | Primary handoff | `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis |
-| Live hardware validation | The [later campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains transfer/clearance attempts; invocation completion is not a measured grasp-success rate; earlier reconstruction tests remain non-actuating |
+| Live hardware validation | The [campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains transfer/clearance attempts; invocation completion is not a measured grasp-success rate |
 | Known gap | No new pose-to-policy routing; failures after motion still require explicit recovery review |
 
 ### Asynchronous startup failure and Vision admission
 
 Process acceptance (`POLICY_ACTIVE`) is not evidence that inference or robot motion
 started. Vision forwards a terminated rollout to the existing Manipulation owner
-instead of waiting indefinitely for its post-place/home gate. A bounded retry is
-eligible only with positive pre-policy failure evidence (a nonzero process exit
-and a synchronous `robot.connect()` traceback), no observed policy actions, and
-the same run, cycle, specimen, and accepted Vision evidence. A missing action
-counter alone is **not** proof of zero motion.
+instead of waiting indefinitely for its post-place/home gate. A bounded retry
+requires all of the following:
+
+- positive pre-policy failure evidence: a nonzero process exit and a synchronous
+  `robot.connect()` traceback;
+- no observed policy actions;
+- the same run, cycle, specimen and accepted Vision evidence.
+
+A missing action counter alone is **not** proof of zero motion.
 
 Manipulation rechecks process status before and after its normal bounded skill
 decision, then uses its existing rollout-start path and configuration. The existing
@@ -115,9 +119,8 @@ The installed [Manipulation Agent Package](../../packages/agents/manipulation/RE
 is a composition contract: `manipulation@1.0.0` binds the owner module and
 `lerobot@1.0.0`. Agent code, bounded LLM decisions, execution definitions, report
 projection and frontend composition live under `agents/manipulation/`.
-Maintained imports and monkeypatch targets use that package directly; the former
-root wrappers were retired only after caller migration. LeRobot's canonical bridge
-and tool registration live under `device_bridges/lerobot/`; Vision shares that
+Imports and monkeypatch targets use that package directly. LeRobot's canonical
+bridge and tool registration live under `device_bridges/lerobot/`; Vision shares that
 same installed bridge and runtime identity.
 
 ![Manipulation source-bound control areas](assets/figures/manipulation_control_areas.svg)
@@ -154,12 +157,11 @@ Shared polling, joint/gripper samples, stream buffers,
 3D viewer lifecycle and event-status decisions stay in the host. Missing or
 deactivated owner modules contribute no current Manipulation card.
 
-Settings and archive locations are unchanged: the existing Manipulation profile,
-run snapshots and `runs/<run_id>/runtime/loops/loop-N/manipulation_agent/attempt-N/`
-remain authoritative. The package introduces no additional settings store or
-robot workspace. [Implementation and validation](../oldversion/superpowers/plans/2026-09-13-manipulation-agent-package.md)
-records virtual-device software evidence; prior physical evidence below retains
-its original provenance and scope.
+The Manipulation profile, run snapshots and
+`runs/<run_id>/runtime/loops/loop-N/manipulation_agent/attempt-N/` are authoritative;
+the package has no separate settings store or robot workspace.
+[Implementation and validation](../oldversion/superpowers/plans/2026-09-13-manipulation-agent-package.md)
+records virtual-device software evidence, distinct from physical evidence below.
 
 ## Actual Role
 
@@ -198,9 +200,13 @@ result review. No new graph stage is introduced.
 
 The JSON response has exactly `tool`, `arguments`, `reason`, and `evidence_refs`.
 For either choice, arguments contain only the exact `proposal_id`; the model never
-supplies bridge parameters. Selection cites `task:configured`; result review also
-cites `execution:ended` and `vision:verified` on acceptance; rejection may cite the
-the supplied `execution:ended` and/or `vision:verified` IDs with `task:configured`.
+supplies bridge parameters. Evidence citations follow these rules:
+
+- Selection cites `task:configured`.
+- Accepted result review also cites `execution:ended` and `vision:verified`.
+- Rejection may cite the supplied `execution:ended` and/or `vision:verified` IDs
+  with `task:configured`.
+
 Field paths and observed values belong in `reason`, never in `evidence_refs`.
 Selection also supplies `skill_binding`: the offered executor, execution kind,
 frozen configured parameters and delegated task contract. Tool names describe
@@ -218,8 +224,8 @@ separate from robot polling/stop deadlines. Existing freshness is rechecked afte
 selection, not extended to accommodate model latency.
 
 Vision handoff evidence carries one `expires_at`, 180 seconds after its original
-observation, for both LIVE and TEST. Manipulation consumes this exact expiry;
-the previous TEST-only 120-second grace is removed. At the expiry boundary the
+observation, for both LIVE and TEST. Manipulation consumes this exact expiry
+without a TEST-only grace period. At the expiry boundary the
 evidence is stale and cannot authorize a new action. Workspace safety signals
 retain their separate 5-second expiry; handoff validity does not renew them.
 
@@ -229,7 +235,7 @@ zero-action snapshots do not override newer action logs or measured/target telem
 `action_count_source=joint_telemetry_sequence` denotes a stream sequence, not an
 independently measured count of discrete motions. Missing counters in bounded log
 tails are marked `action_count_observed=false`, not treated as proof of zero motion.
-This contract is shared across live experiments and installed-printer, physical-print
+This contract is shared across live experiments and Installed Printer, Physical Print
 and virtual-bridge test paths; simulated evidence remains simulated.
 
 ### Current prompt strategy
@@ -263,8 +269,8 @@ substitute for the automatic agent completion contract.
 ![Manipulation closed-loop position and handoffs](assets/figures/manipulation_01_closed_loop_handoffs.svg)
 
 **Figure Manipulation-1.** Initial transfer and Verification 1 precede Equipment;
-the post-test sweep and Verification 2 precede Analysis. This working-tree
-`inspection` projection distinguishes control from retained evidence; it is
+the post-test sweep and Verification 2 precede Analysis. This `inspection`
+projection distinguishes control from retained evidence; it is
 not evidence of motion accuracy or live transfer reliability.
 
 | Direction | Component | Contract/state | Purpose | Gate |
@@ -379,9 +385,8 @@ figure, not measured robot performance.
 | operator | POST | `/api/lerobot/mirror/*` | read_only/local_state/external_service | Isaac mirror process/loop |
 | operator | POST/GET | `/api/lerobot/visualize/*` | local_state/read_only | visualization process/files |
 
-The 87-route count is historical (`0b7627b`); current OpenAPI is exhaustive. Categories above cover
-configuration, execution, stop/status, validation, data, simulation, and
-evidence responsibilities.
+Current OpenAPI provides the exhaustive route list. The categories above cover
+configuration, execution, stop/status, validation, data, simulation, and evidence.
 
 ## Tools and Connections
 
@@ -534,8 +539,8 @@ Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
 See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
 capture conditions and the distinction between report selection and execution.
 
-The 2026-09-06 working-tree lifecycle update separates an agent call returning
-from its asynchronous transfer finishing. `run_metadata.manipulation_execution`
+An agent call returning is distinct from its asynchronous transfer finishing.
+`run_metadata.manipulation_execution`
 is scoped by run, loop, specimen, and rollout session. Launching a policy leaves
 the Live GUI running; verification/stop still pending is waiting. Done requires
 matching UTM completion, post-place readiness, and confirmed `STOPPED` evidence.
@@ -569,17 +574,16 @@ reusing the earlier transfer's Done state.
 
 ## Current Verification
 
-The 2026-09-09 reconstruction is validated without devices: strict tool dispatch,
-unchanged payloads, rejection/malformed/mock responses, scope changes, cancellation,
-duplicate-start prevention, owner model binding, simulated mode, placement and
-clearance handoff gating. See the [implementation and validation ledger](../oldversion/superpowers/plans/2026-09-09-manipulation-decision-layer.md).
-Historical evidence below predates the new decision layer and is not commissioning
-proof for it.
+Recorded non-actuating checks cover strict tool dispatch, unchanged payloads,
+invalid responses, scope changes, cancellation, duplicate-start prevention, owner
+model binding, simulated mode, and placement/clearance handoff gates. See the
+[implementation and validation ledger](../oldversion/superpowers/plans/2026-09-09-manipulation-decision-layer.md).
+These records are not new test runs or physical commissioning of the decision layer.
 
 | Validation | Result | Interpretation |
 |---|---|---|
-| Current focused Python regression | 304 passed; graph/runtime 70 passed | Agent boundaries, completion, mode matrix, teleop, archive, lease and routing contracts |
-| Report/API and GUI regression | Python 50 passed; JavaScript 21 passed | Current report fields, task stages, lifecycle and verification records |
+| Focused Python regression | Recorded non-actuating passes | Agent boundaries, completion, mode matrix, teleop, archive, lease and routing contracts |
+| Report/API and GUI regression | Recorded Python and JavaScript passes | Report fields, task stages, lifecycle and verification records |
 | Virtual closed loop | 2 consecutive full cycles; integration passed | Disposal, both Vision verifications, Analysis/BO and loop-scoped archives; deterministic simulation |
 | Preflight-only redesign series | 20 cycles passed | Non-actuating downstream chain and 19 BO-to-design updates; design/fabrication fixtures |
 | Registered API (`gpt-5.5`) | 4/4 case expectations; 2.378–4.284 s | Correct tool selection, historical acceptance and contradictory-evidence rejection |
@@ -600,17 +604,13 @@ Vision clearance, and Analysis entry. The disposal invocation and final
 clearance remain separate archived results; this is one supervised observation,
 not an unattended-success or generalized safety claim.
 
-Verified against two supported tasks, all 11 internal steps, four tools, and the
-87-route LeRobot family at baseline `0b7627b`. This is interface/architecture
-verification, not a live transfer result.
-
-The post-test clearance update was verified against the uncommitted working
-tree on 2026-09-06 using non-actuating tests in
+Interface checks cover the supported tasks, internal steps, tools, and LeRobot
+routes. Recorded non-actuating clearance checks use
 `tests/unit/test_lerobot_replay.py`, `tests/unit/test_utm_clear_cycle.py`,
 `tests/unit/test_utm_clear_presence.py`, and
-`tests/js/utm_verification_tabs.test.cjs`. Tests cover scoped handoffs,
-the actual controller/graph route with fake devices, stop/timeout handling,
-image separation and UI lifecycle. They do not commission physical clearing.
+`tests/js/utm_verification_tabs.test.cjs`: scoped handoffs, controller/graph routing
+with fake devices, stop/timeouts, image separation and UI lifecycle. They do not
+commission physical clearing.
 
 ## Limitations and Known Gaps
 

@@ -151,7 +151,7 @@ jointly determine the effect. Workspace actions also have their own contracts.
 |---|---|---|---|
 | Printer Fleet | selected virtual provider or explicitly configured real-printer promotion | routes to selected configured profile | automatic provider fallback is disabled by default |
 | Bambu X2D | file/simulated paths or real transport under explicit test-promotion settings | connection and execution gates govern network/publish actions | skipped deposition is not proof that no ejection or other motion occurs |
-| Prusa MK4S | virtual PrusaLink/dry-run or configured test promotion | real network governed by mode/transport and live flags | legacy promotion can fall back to virtual after failed connectivity; explicit installed-printer path returns a communication failure |
+| Prusa MK4S | virtual PrusaLink/dry-run or configured test promotion | real network governed by mode/transport and live flags | legacy promotion can fall back to virtual after failed connectivity; explicit Installed Printer path returns a communication failure |
 | LeRobot | fake profiles/sessions/artifacts | profile safety limits and operator confirmation gate processes | profile substitution is explicit, not automatic |
 | Windows PyAutoGUI | simulator by ordinary test path; configured real test promotion or explicit worker requests may reach a real host | selected worker, token, execute gate, payload validation and applicable preflight | worker selection is explicit; TEST does not remove desktop effects |
 | UTM Vision | virtual bridge/pose allowed where configured | ROS workspace, process, topic, camera readiness required | virtual evidence must remain labeled test |

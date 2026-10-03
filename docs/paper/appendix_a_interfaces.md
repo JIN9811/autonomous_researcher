@@ -54,12 +54,11 @@ supersedes: []
 
 This appendix maps paper components to repository interface families; it is not
 a generated API specification. Exact payload fields remain in code schemas,
-manifests, and endpoint responses. The canonical per-agent role,
-API, connection, effect, and recovery contracts are maintained in the
+manifests, and endpoint responses. Per-agent role, API, connection, effect,
+and recovery contracts are maintained in the
 [Agent Reference Index](../agents/README.md) and compared in the
 [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md);
-this appendix summarizes those boundaries for the paper instead of duplicating
-them. The Agent Reference Index also provides the complete visual inventory of
+this appendix summarizes those boundaries. The Agent Reference Index also lists
 closed-loop, execution/effect, and connection figures.
 
 ## Scope

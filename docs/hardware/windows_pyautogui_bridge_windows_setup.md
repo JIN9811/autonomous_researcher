@@ -13,9 +13,18 @@
 4. 브라우저 Console 확인
 5. Linux ATR에서 4자리 코드로 Pair & Save
 
-표준 설치에서는 전체 패키지를 계속 사용할 폴더에 복사한 뒤 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 현재 설치 프로그램은 해당 패키지 폴더에 `.venv`를 만들고 같은 폴더의 supervisor를 로그인 작업·바로가기에 등록합니다. 별도 `%LOCALAPPDATA%\Programs` 설치본으로 복사하지 않습니다. 기본 데이터 경로는 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`입니다. PyAutoGUI는 사용자와 상호작용할 수 있는 데스크톱이 필요하므로 Windows 서비스가 아니라 로그인한 사용자 세션에서 실행합니다.
+표준 설치는 전체 패키지를 계속 사용할 폴더에 복사한 뒤
+`INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 설치 프로그램은 그 폴더에 `.venv`를
+만들고 supervisor를 로그인 작업·바로가기에 등록합니다.
 
-구버전에서 전환할 때만 최신 패키지를 한 번 복사해 `INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 이후 버전부터는 Linux `Lab Equipment Workspace > Saved Worker`의 `Check Update`와 `Update`로 서버, 런처, 업데이터, Python 의존성을 같은 설치 폴더에 원격 반영합니다.
+별도 `%LOCALAPPDATA%\Programs` 설치본은 만들지 않습니다. 기본 데이터 경로는
+`%LOCALAPPDATA%\ATR\PyAutoGUIBridge`입니다. PyAutoGUI는 데스크톱 조작이 필요하므로
+Windows 서비스가 아닌 로그인한 사용자 세션에서 실행합니다.
+
+구버전에서 전환할 때는 최신 패키지를 한 번 복사하고
+`INSTALL_WINDOWS_BRIDGE.cmd`를 실행합니다. 이후에는 Linux
+`Lab Equipment Workspace > Saved Worker`의 `Check Update`와 `Update`를 사용합니다.
+서버, 런처, 업데이터, Python 의존성이 같은 설치 폴더에 원격 반영됩니다.
 
 ## Console 구성
 
@@ -29,7 +38,14 @@ Windows Console에서 UTM proof, Skill compile/deploy, Analysis handoff, ATR Con
 
 ## 4자리 페어링
 
-Bridge Status에 표시된 4자리 일회성 코드를 Linux ATR Equipment Workspace에 최초 한 번 입력합니다. 성공 후 내부 인증키가 양쪽 보호 파일에 저장되어 서버·GUI 재시작 뒤에도 자동 사용되며, 사용자는 코드를 다시 입력하지 않습니다. 기존에 저장된 worker secret도 연결 인증으로 계속 유효합니다. 코드 유효 시간은 5분, 입력 한도는 5회, lockout은 30초입니다.
+Bridge Status의 4자리 일회성 코드를 Linux ATR Equipment Workspace에 최초 한 번
+입력합니다. 페어링에 성공하면 내부 인증키가 양쪽 보호 파일에 저장됩니다.
+서버·GUI 재시작 후에도 자동 사용하므로 코드를 다시 입력하지 않습니다.
+기존 worker secret도 계속 유효합니다.
+
+- 코드 유효 시간: 5분
+- 입력 한도: 5회
+- lockout: 30초
 
 ## 방화벽
 

@@ -320,11 +320,12 @@ PNGs with a longest side of at most 512 pixels. `Reset to AI` restores the initi
 annotation ROI. `Replace Locator` instead uses a selected PNG. Neither edit is
 deployed to Windows before the editor's `Save`.
 
-`Save` checks an optimistic workflow hash: if another window changed the version,
-local edits are retained and a conflict is shown. Successful saving invalidates
-previous compile/validation outputs. One `Deploy` runs compile, validate, package,
-register, and verify on Linux; it does not call `/execute`. Separate
-Compile/Validate buttons are hidden, but their APIs remain for automation and CLI use.
+- `Save` checks an optimistic workflow hash.
+  - If another window changed the version, local edits are retained and a conflict is shown.
+  - A successful save invalidates previous compile/validation outputs.
+- `Deploy` runs compile, validate, package, register and verify on Linux; it does
+  not call `/execute`.
+- Separate Compile/Validate buttons are hidden; their APIs remain for automation and CLI use.
 
 ## Runtime Modes and Fallbacks
 

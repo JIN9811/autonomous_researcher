@@ -28,11 +28,10 @@ supersedes: []
 
 ## Summary
 
-AX4LAB has several views of the same experimental system, not several independent
-experiment engines. The Main GUI selects the runtime context; Live GUI presents
-agent reports and conversation; device workspaces expose specialized settings;
-Runtime IDE exposes executable composition; Knowledge exposes retained context;
-Replay reads recorded sessions.
+AX4LAB's pages share one experimental runtime. Main GUI selects its context;
+Live GUI shows agent reports and conversation. Device workspaces handle setup,
+Runtime IDE defines execution structure, Knowledge stores context, and Replay
+shows recorded sessions.
 
 All screenshots below are **1920 × 1080 browser-content captures at 100% scale**,
 taken on 29 September 2026. Open an image to inspect its original resolution.
@@ -42,12 +41,11 @@ addresses, credentials and local paths are redacted where present.
 
 ## Scope
 
-This document locates information and controls, explains how views relate,
-and points to specialist references. It is not a
-new operating procedure, a hardware test, or proof that every visible status is
-fresh. The photographed session had completed its fifteenth cycle; some reports
-still expose missing or historical information. No experiment was started for
-these figures.
+This document explains where to find controls, how views relate and which
+reference to read next. The screenshots show a session after its fifteenth cycle;
+some reports contain missing or historical information. They are not new
+operating procedures, hardware tests or proof of fresh status. No experiment
+was started for these figures.
 
 ## Source of Truth
 
@@ -102,7 +100,7 @@ to infer whether hardware will be used; inspect the per-agent routes.
 
 **Figure GUI-3.** Test-mode configuration, photographed without changing or saving
 any values. See [Test Mode](../runtime/test_mode.md) for the distinction between
-virtual bridges, installed-printer validation and physical printing.
+virtual bridges, Installed Printer validation and Physical Print.
 
 ## 3. Live GUI: Persistent Shell and Selected Agent
 
@@ -176,7 +174,7 @@ entry is evidence to inspect, not authorization to repeat a device command.
 
 ### Printer
 
-![Printer workspace with telemetry and preparation controls](assets/screenshots/2026-09-29/printer.png)
+![3D Printer workspace with telemetry and preparation controls](assets/screenshots/2026-09-29/printer.png)
 
 **Figure GUI-9.** The top of `/printer` combines selected-printer identity,
 telemetry, camera and guarded preparation/start controls. The camera was not
@@ -188,7 +186,7 @@ started for this capture; unavailable telemetry is left visible.
 XYZ speed scale, start-point prime, independent early-layer/Z caps, bed leveling
 and calibration. These are saved installation values, not universal defaults.
 Changing a profile requires saving and re-slicing; it does not rewrite an
-already-generated file. See the [3DP guide](../tutorials/device_workspace_3dp_usage.ko.md)
+already-generated file. See the [3D Printer guide](../tutorials/device_workspace_3dp_usage.ko.md)
 and [Bambu bridge](../device_bridges/bambu_x2d_bridge.md).
 
 ### Manipulation

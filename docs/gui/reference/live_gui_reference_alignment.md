@@ -37,10 +37,9 @@ New run/session identifiers use [date, KST time, and the known purpose](../../ru
 An already-created planning session or run keeps its identity when the operator
 later selects a mode; this naming change does not replace the canonical Setup store.
 
-The existing Live GUI Setup allocation now renders the server-canonical
-Experimental Setup blocks for the current planning session. It remains in the
-existing Setup dock; it does not add a panel or move the Chat allocation. When
-content exceeds that allocation, the Setup region scrolls vertically internally.
+The Setup dock renders the current planning session's server-canonical
+Experimental Setup blocks. Long content scrolls within the dock; it does not
+move or resize Chat.
 
 `Edit in Chat` opens the existing Orchestrator Chat with the selected
 `block_id` and revision as context. The click does not send a message, propose
@@ -50,16 +49,16 @@ report. Draft, confirmed, effective, validation, application, and availability
 are separate displayed facts. An unknown owner availability must remain
 `unknown`; a descriptor or an editable field is not a readiness badge.
 
-The current public writable topics are `research.goal`, `bo.parameter_space`,
-and `bo.acquisition`. Actual owner validation occurs before a draft is stored.
-Explicit confirmation schedules settings for the next new run; the current run
-snapshot is not changed. At that new run's admission, all captured confirmed
-settings are validated together from one snapshot, same-owner values are
-combined before any owner effect, and owner readback completes before the
-affected runtime path. Other owners appear according to graph-linked descriptors
-but are read-only or unsupported when they lack the complete owner adapter
-contract. A Confirm or Discard action is an explicit scoped request and never
-starts a run.
+Public writable topics are `research.goal`, `bo.parameter_space` and
+`bo.acquisition`. They follow the same update sequence:
+
+1. The owner validates a draft before storage.
+2. Explicit confirmation schedules it for the next new run, without changing the current run.
+3. New-run admission validates all confirmed settings from one snapshot.
+4. Same-owner values are combined before owner effects; readback completes before the affected runtime path.
+
+Other graph-linked owners are read-only or unsupported unless they implement the
+complete owner adapter contract. Confirm and Discard never start a run.
 
 Rejected, failed, unknown, or partial receipts remain visible holds. An ordinary
 retry preserves the original failed-run inputs and does not repeat a successful

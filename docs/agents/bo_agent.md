@@ -290,13 +290,17 @@ fallback. An objective becomes eligible only after deterministic validation,
 historical-observation preview, explicit operator approval, and activation for
 one `run_id`.
 
-For a compiled objective, BO accepts observations only when all of the
-following are present and valid: matching `objective_hash`, finite score,
-`feasible=true`, fidelity, parameter vector, provenance references, and
-`ok_for_bo=true`. Records duplicated through `bo_handoff` and
-`bo_observation` are deduplicated by `observation_id`. Live mode additionally
-requires measured fidelity and rejects synthetic proxy observations. Test mode
-may accept explicitly labelled synthetic or simulation evidence.
+For a compiled objective, BO accepts observations only with all of these valid fields:
+
+- matching `objective_hash`;
+- finite score and `feasible=true`;
+- fidelity, parameter vector and provenance references;
+- `ok_for_bo=true`.
+
+Records duplicated through `bo_handoff` and `bo_observation` are deduplicated by
+`observation_id`. Live mode additionally requires measured fidelity and rejects
+synthetic proxy observations. Test mode may accept explicitly labelled synthetic
+or simulation evidence.
 
 `next_design_request.v1` carries `objective_id`, `objective_version`, and
 `objective_hash`; it never recompiles or changes the active expression.

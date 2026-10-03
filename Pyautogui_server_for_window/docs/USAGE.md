@@ -12,7 +12,7 @@
 INSTALL_WINDOWS_BRIDGE.cmd
 ```
 
-설치 스크립트는 현재 패키지 폴더 안에 `.venv`를 만들고 바로가기를 생성합니다. 다른 프로그램 폴더로 복사하지 않습니다. 이후 START 버튼, supervisor와 원격 updater는 모두 현재 패키지 폴더를 사용하며, 로그·녹화·아티팩트만 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 저장합니다.
+설치 스크립트는 현재 패키지 폴더 안에 `.venv`를 만들고 바로가기를 생성합니다. 다른 프로그램 폴더로 복사하지 않습니다. 이후 START 버튼, supervisor와 원격 updater는 모두 현재 패키지 폴더를 사용하며, 로그·녹화·산출물(artifact)만 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 저장합니다.
 
 START 버튼과 로그온 예약 작업은 릴리스 번호가 없는 현재 폴더의 `scripts\start_supervisor.ps1`을 실행합니다. supervisor는 같은 폴더의 Worker 상태를 5초마다 경량 평문 `/ping`으로 확인하며 이 요청은 화면 및 감사 로그에 누적하지 않습니다. 버전은 소스나 시작 명령이 아니라 `release_manifest.json`에서 읽습니다. 실제 후보 검색용 `/discovery`는 supervisor가 반복 호출하지 않습니다. 이전 인자로 이미 실행 중인 supervisor의 localhost `/discovery` 요청도 버전 확인용 최소 JSON만 반환하고 감사 로그에 남기지 않습니다. 업데이트 중에는 data root의 `updates\update_in_progress.json` 잠금으로 중복 시작을 막습니다.
 
@@ -116,7 +116,11 @@ Template 버튼은 현재 지원되는 프로그램 형식의 JSON 예제를 저
 - `keyframes/`, `timeline/event_keyframes/`: event/checkpoint 시점의 PNG 증거
 - locator/checkpoint metadata
 
-전체 periodic frame은 녹화 시작부터 종료까지 고정 2 FPS로 디스크에 즉시 저장됩니다. 메모리는 행동 직전 프레임 판정을 위한 작은 최근 프레임 캐시만 유지합니다. 정상 녹화 길이나 frame 수에 임의 상한을 두지 않으며, 디스크 임계 상태에서는 이미 저장한 자료를 삭제하지 않고 `evidence_complete=false`인 부분 패키지로 종료합니다.
+periodic frame은 녹화 시작부터 종료까지 고정 2 FPS로 디스크에 즉시 저장합니다.
+
+- 메모리에는 행동 직전 프레임 판정을 위한 최근 프레임 캐시만 유지합니다.
+- 정상 녹화 길이나 frame 수에 임의 상한을 두지 않습니다.
+- 디스크 임계 상태에서는 이미 저장한 자료를 보존하고 `evidence_complete=false`인 부분 패키지로 종료합니다.
 
 ### 녹화 이후
 
@@ -131,7 +135,11 @@ SHA-256을 검증합니다. 검증된 파일만 Linux artifact root에 저장됩
 
 선택된 Local/API LLM은 Linux에서만 사용됩니다. Windows에는 LLM과 API key가 필요하지 않습니다.
 
-녹화 종료 시 오버레이를 먼저 숨기고 최종 화면을 시계열 evidence에 추가합니다. Linux는 16개 frame씩 4x4 스토리보드를 만들고 선택된 multimodal backend로 모든 청크를 순서대로 분석한 후, 청크 결과와 session overview를 한 번 최종 합성합니다. 완료된 청크 분석은 디스크에 보존되며 Stop 요청은 청크 경계에서 처리됩니다. Windows worker는 이 해석을 수행하거나 저장된 Skill 의미를 임의로 변경하지 않습니다.
+녹화 종료 시 오버레이를 숨기고 최종 화면을 시계열 evidence에 추가합니다. Linux는 16개 frame씩 4x4 스토리보드를 만들어 선택한 multimodal backend로 모든 청크를 순서대로 분석한 뒤, 청크 결과와 session overview를 한 번 합성합니다.
+
+- 완료된 청크 분석은 디스크에 보존합니다.
+- Stop 요청은 청크 경계에서 처리합니다.
+- Windows worker는 이 해석을 수행하거나 저장된 Skill 의미를 임의로 변경하지 않습니다.
 
 ## 6. Linux Equipment Runtime 연동
 

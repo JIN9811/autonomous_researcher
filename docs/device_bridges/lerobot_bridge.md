@@ -203,10 +203,14 @@ and the OMX follower profile used by the approved `jin/utm_clear`, episode `0`.
 | `/api/lerobot/replay/status` | `lerobot.replay.status` | Read process state, duration bound, logs and validated measured-return evidence |
 | `/api/lerobot/replay/stop` | `lerobot.replay.stop` | Stop the matching managed process, including a concurrent pending start |
 
-Requests carry profile, dataset repository/path, `replay_episode`, mode,
-confirmation and run/loop/specimen/session identity. Responses retain session,
-status, log/evidence paths and `replay_max_duration_s`; completion requires
-validated evidence identity and `replay_home_verified`, not exit code alone.
+The replay contract separates request, response and completion:
+
+- Requests carry profile, dataset repository/path, `replay_episode`, mode,
+  confirmation and run/loop/specimen/session identity.
+- Responses retain session, status, log/evidence paths and `replay_max_duration_s`.
+- Completion requires validated evidence identity and `replay_home_verified`,
+  not exit code alone.
+
 The runner uses the existing saved calibration and native robot action path
 without rewriting the dataset, calibration or motor limits. Return is checked
 against the final recorded `observation.state`, not the commanded action.

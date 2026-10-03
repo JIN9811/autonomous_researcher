@@ -242,10 +242,14 @@ handoff. The non-LLM test branch is explicitly separate.
 
 ## Decision and Evaluation
 
-The Live report separates **Design Space** (recorded variables and ranges),
-**Candidate Comparison** (candidate validity, estimated mass and sourced performance),
-and **Constraint Check** (actual values, limits and margins). Historical heuristic
-scores do not substitute for missing evaluation evidence in these cards. Unassessed
+The Live report separates three views:
+
+- **Design Space:** recorded variables and ranges.
+- **Candidate Comparison:** candidate validity, estimated mass and sourced performance.
+- **Constraint Check:** actual values, limits and margins.
+
+Historical heuristic scores do not substitute for missing evaluation evidence in
+these cards. Unassessed
 performance remains unassessed; manufacturing verification belongs to Specimen.
 
 Design Space plots recorded cell size against wall thickness, with an

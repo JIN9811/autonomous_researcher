@@ -78,10 +78,10 @@ workspace operation. Opening a page is not a stage-completion action.
 **Checkpoint:** the admitted contract and selected profile agree.
 Installed Printer is not a dry-run: it can eject and operate downstream real devices.
 If supplying a specimen yourself, follow the current operator request; do not mark
-a sample present or removed before actually observing it. Physical Print uses the
+a specimen present or removed before actually observing it. Physical Print uses the
 full print path.
 
-Passing the installed-printer exercise does not validate first-layer adhesion,
+Passing the Installed Printer exercise does not validate first-layer adhesion,
 full print duration or nozzle-cleaning performance. Validate physical printing
 separately under supervision. Profile edits affect the next admitted run, not an
 already running one. See [Test Mode](../runtime/test_mode.md).
@@ -96,7 +96,7 @@ training and experiment execution.
 3. If setup is needed, use **Baseline** then **ID Detect & Save** for the intended
    device, following the displayed detection guidance. Alternatively expand
    **Manual Port Override**, select the role/camera key and **Save Manual Port**.
-   These are configuration actions, not harmless inspection buttons.
+   These controls save configuration and detect devices.
 4. Check calibration and camera ownership using the
    [LeRobot bridge guide](../device_bridges/lerobot_bridge.md) before motion.
 

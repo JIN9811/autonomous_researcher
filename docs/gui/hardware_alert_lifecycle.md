@@ -7,17 +7,22 @@ timestamp, run/cycle/job attribution, or incident record. A resolution includes
 the newer observation that justified it. Replaying the same alert ID cannot
 reactivate it; a new incident ID can block again.
 
-Automatic resolution is deliberately narrow: a non-latching Bambu
-`printer.status` / `BAMBU_DEVICE_ERROR` observation, explicitly marked
-`fresh_matching_device_report`, requires a physical MQTT report no more than
-five seconds old, from the same printer profile and connection identity, with
-an observed zero error code and a known job state. Terminal job states (`FAILED`,
-`FAIL`, `CANCELLED`, `CANCELED`, `ABORTED`) and paused jobs may remain in telemetry
-after the device fault clears; they do not prevent resolution. Resolution never
-changes the job state, issues a command, or resumes a paused run. The independent
-printer-start and safety gates still apply. Successful upload,
-cached/unknown telemetry, a simulated bridge, a different printer, or elapsed
-time alone cannot resolve it. Changes to a profile's connection invalidate that identity.
+Automatic resolution applies only to non-latching Bambu
+`printer.status` / `BAMBU_DEVICE_ERROR` observations. It requires all of the following:
+
+- The report is marked `fresh_matching_device_report`.
+- Physical MQTT telemetry is no more than five seconds old.
+- Printer profile and connection identity match the alert.
+- The observed error code is zero and the job state is known.
+
+Terminal job states (`FAILED`, `FAIL`, `CANCELLED`, `CANCELED`, `ABORTED`) and
+paused jobs do not prevent fault resolution. Resolving the fault does not change
+the job state, issue a command or resume a run; printer-start and safety gates
+still apply.
+
+A successful upload, cached/unknown telemetry, simulated bridge, different
+printer or elapsed time alone cannot resolve an alert. Changing a profile's
+connection invalidates its identity.
 
 Both successful GUI monitor updates and a bounded read-only refresh before a
 runtime stage's Guardian gate can resolve eligible alerts. The latter does not

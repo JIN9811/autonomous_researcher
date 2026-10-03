@@ -25,7 +25,9 @@ UTM은 `utm_windows_v1` Profile의 첫 적용 사례입니다. Agent 본체에 �
 
 ## 상태 투영
 
-Agent, Workspace, Live GUI, CUI, Runtime IDE는 동일한 실행 기록을 읽습니다. 상태 목록은 Profile/Skill/provider별로 다를 수 있습니다. 대표 상태 예시를 모든 실행의 공통 수명주기로 강제하지 않습니다.
+Agent, Workspace, Live GUI, CUI, Runtime IDE는 같은 실행 기록을 읽습니다.
+상태 목록은 Profile/Skill/provider마다 다를 수 있으므로, 대표 상태 예시를
+모든 실행에 강제하지 않습니다.
 
 ## Program과 Skill
 
@@ -56,7 +58,10 @@ Windows에는 모델과 API key를 두지 않습니다.
 
 ## Vision Link
 
-Profile에서 선택적으로 활성화합니다. 기존 증거 중 최신성 조건을 충족하고 대상 식별 정보가 연결된 증거를 사용하거나 Vision Agent tool을 호출합니다. 증거와 도구가 모두 없으면 실행 전에 차단합니다. Vision은 관측만 제공하며 worker에 직접 명령하지 않습니다.
+Vision Link는 Profile에서 선택적으로 활성화합니다. 최신성 조건과 대상 식별
+정보를 충족하는 기존 증거를 사용하거나 Vision Agent tool을 호출합니다.
+둘 다 없으면 실행 전에 차단합니다. Vision은 관측만 제공하며 worker에
+직접 명령하지 않습니다.
 
 ## 완료 증거
 
@@ -69,7 +74,8 @@ Profile이 요구하는 증거 예:
 - Vision cross-check
 - worker raw status/step trace
 
-HTTP 요청의 성공만으로 완료 처리하지 않습니다. 불완전한 파일과 시간 초과 결과는 증거로 보존하되 handoff를 허용하지 않습니다.
+HTTP 요청 성공만으로 완료 처리하지 않습니다. 불완전한 파일과 시간 초과
+결과는 증거로 보존하지만 handoff는 허용하지 않습니다.
 
 ## Windows Console 범위
 

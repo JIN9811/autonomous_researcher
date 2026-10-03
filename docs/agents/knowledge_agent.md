@@ -323,10 +323,13 @@ or clear active hardware alerts, stop requests or pending approvals.
 | tags / applicability | Search classification and exact experimental conditions |
 | status / revision / content_hash | Lifecycle and immutable content lineage |
 
-Search filters are conjunctive. Scalar/list fields allow exact run, cycle,
-agent, ontology type, fidelity and status selection; tags require every listed
-tag and applicability requires every specified key/value. Explicit empty lists
-match nothing. Unknown filters are rejected. Default status is `valid`.
+Search filters are conjunctive:
+
+- Scalar/list fields select exact run, cycle, agent, ontology type, fidelity and status.
+- Tags require every listed tag; applicability requires every specified key/value.
+- Explicit empty lists match nothing.
+- Unknown filters are rejected.
+- Default status is `valid`.
 
 Lifecycle supports `valid`, `needs_review`, and `superseded`. Status changes
 require a reason and create a new revision. Supersession requires a distinct

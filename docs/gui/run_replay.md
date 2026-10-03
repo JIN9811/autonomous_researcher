@@ -19,11 +19,13 @@ The dropdown moves between recorded events. Changing the point preserves
 the selected agent. The page does not poll live state or connect to SSE, cameras,
 telemetry WebSockets, printers, or robots.
 
-Keyboard navigation (when not editing an input or dropdown): **Left / Right**
-selects the previous / next recorded event within the selected session; **Up / Down** selects the
-previous / next recorded cycle and opens its first event. Missing cycles are
-skipped and navigation stops at the ends, without wrapping. Run Control opens the
-viewer as a screen-sized popup window, not another dashboard tab or fullscreen.
+Keyboard navigation works when focus is outside an input or dropdown:
+
+- **Left / Right:** previous / next recorded event in the selected session.
+- **Up / Down:** previous / next recorded cycle, starting at its first event.
+- Missing cycles are skipped; navigation stops at either end without wrapping.
+
+Run Control opens a screen-sized popup, not a dashboard tab or fullscreen view.
 
 ## Read-only artifacts
 
@@ -98,9 +100,13 @@ runs/<run_id>/review/
   assets/<sha256>.png     # Copied image, reused when content is identical
 ```
 
-Per-run limits: 5,000 points, approximately 128 MB of point JSON, 512 MB of copied
-images, 8 MB per image, and 12 images per event/report. Reaching a limit stops
-additional archival data, not the experiment. Queue loss and write failures are
+Per-run storage limits are:
+
+- 5,000 points and approximately 128 MB of point JSON.
+- 512 MB of copied images, with at most 8 MB per image.
+- 12 images per event/report.
+
+Reaching a limit stops additional archival data, not the experiment. Queue loss and write failures are
 reported in subsequent successful archive writes. Abrupt process termination can
 lose pending records; this archive is a viewer, not an experiment recovery log.
 Original run logs and artifacts remain the experiment's source of truth.

@@ -42,7 +42,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | At a glance | Details |
 |---|---|
 | Purpose | Slicing, artifact transfer, telemetry and guarded autoejection |
-| Connects | Specimen / 3D workspace ↔ Bambu provider |
+| Connects | Specimen / 3D Printer workspace ↔ Bambu provider |
 | Effect | Upload, heating and motion are possible through gated commands |
 | Implementation | [Bambu implementation](../../device_bridges/printer_fleet/bridge.py) · [Requirements](../../device_bridges/printer_fleet/providers/bambu-requirements.txt) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
@@ -69,11 +69,14 @@ independent copies with `received_at` and `cache_age_sec`. Only the read-only
 `pushall` request is published by this monitor; print/start/ejection commands and
 their post-publish verification retain the original transport path.
 
-Disconnected telemetry or reports older than 15 seconds are unavailable, not
-healthy. Reconnection clears prior report fields; access-code/topic changes
-replace the subscription. A periodic 10-second snapshot request refreshes quiet
-printers. Unused subscriptions close after 120 seconds, and registry size is
-bounded to four connections. Test mode never starts these subscriptions.
+The monitor enforces these bounds:
+
+- Disconnected telemetry or reports older than 15 seconds are unavailable, not healthy.
+- Reconnection clears prior report fields; access-code/topic changes replace the subscription.
+- A snapshot request every 10 seconds refreshes quiet printers.
+- Unused subscriptions close after 120 seconds.
+- The registry holds at most four connections.
+- Test mode never starts these subscriptions.
 
 Camera snapshots and MJPEG viewers share one decoder per source (960-pixel width,
 30 fps target). A single latest-JPEG slot replaces per-viewer queues: slow viewers skip
@@ -107,7 +110,7 @@ General layer height and bed temperature remain in the general defaults area.
 
 #### Adjustable XYZ speed scale (2026-09-23)
 
-The 3DP workspace's **Start-Point Prime & Speed Controls** section includes
+The 3D Printer workspace's **Start-Point Prime & Speed Controls** section includes
 **XYZ speed scale (%)** (the existing storage/API key remains `xy_speed_scale_percent`
 for compatibility). One input controls both XY and Z. Save any finite value from
 **1 through 100**, inclusive; fractional percentages are supported. **100%**
@@ -173,11 +176,14 @@ upload, or new physical-print validation of the tuned profile was performed.
 
 ### Control semantics
 
-Start-point prime accepts a finite, nonnegative filament length with no software
-upper cap; zero disables extra extrusion. It is not Z height or deposited line
-length. The accepted ranges for the optional speed caps are 0.1–1000 mm/s for
-layers 2–5 extrusion and 0.1–20 mm/s for layers 1–5 Z motion. Both caps are
-currently disabled, as recorded above.
+The controls accept these values:
+
+- Start-point prime: finite, nonnegative filament length with no software upper
+  cap. Zero disables extra extrusion. This is not Z height or deposited line length.
+- Layers 2–5 extrusion cap: 0.1–1000 mm/s.
+- Layers 1–5 Z-motion cap: 0.1–20 mm/s.
+
+Both speed caps are currently disabled, as recorded above.
 
 The speed-cap upper limits match the current X2D machine profile (`machine_max_speed_x/y=1000`,
 `machine_max_speed_z=20`, in mm/s), not a promise of achieved physical speed. The first layer
@@ -361,9 +367,9 @@ has no device effect.
 
 ### GUI Screen Reference
 
-![Printer workspace: provider selection, telemetry and preparation](../gui/assets/screenshots/2026-09-29/printer.png)
+![3D Printer workspace: provider selection, telemetry and preparation](../gui/assets/screenshots/2026-09-29/printer.png)
 
-*Printer workspace: provider selection, telemetry and preparation.*
+*3D Printer workspace: provider selection, telemetry and preparation.*
 
 ![Saved Print Start & Early Layers controls](../gui/assets/screenshots/2026-09-29/printer-print-options.png)
 
@@ -416,7 +422,7 @@ multiplier. Existing no-skirt/brim/raft policy remains in place.
 | Execution mode | Print body | Temperature-gated ejection wait | Device execution |
 |---|---|---|---|
 | Experiment / LIVE | Retained | Retained | Existing approved physical route |
-| TEST / `physical_print` | Retained | Retained | Existing physical-print route |
+| TEST / `physical_print` | Retained | Retained | Existing Physical Print route |
 | TEST / `installed_printer` | Omitted | Omitted | Existing ejection-only test route |
 | TEST / `virtual_bridge` | Local preparation/preflight only | No physical wait | No upload or actuation |
 
@@ -454,7 +460,7 @@ The actual local sliced plate must identify exactly one used filament and its
 matching `filament_type`. Mapping has one entry per filament preset and selects
 the actual used index—not a hardcoded five-entry vector. Multiple used materials,
 missing evidence, or an artifact/material mismatch block publication. An E-free
-motion program is exempt; genuine installed-printer ejection-only conversion
+motion program is exempt; genuine Installed Printer ejection-only conversion
 retains its existing flow. Virtual readiness does not read hardware, and start
 selection differing between GUI draft and preparation blocks publication.
 
@@ -471,7 +477,7 @@ artifact binding, shared GUI/agent mapping, and non-actuating behavior.
 
 ### Operator-adjustable specimen placement (2026-09-06)
 
-The 3D workspace Print Defaults exposes `specimen_placement`, shared with
+The 3D Printer workspace Print Defaults exposes `specimen_placement`, shared with
 controller initialization, Design/BO redesign handoffs, and Specimen Making.
 Save defaults for subsequent requests; manual Slice/Prestart uses the current
 form values. Existing run snapshots and already sliced files are not relocated.
@@ -497,7 +503,7 @@ preparation/prestart; it never silently reverts to automatic arrangement. Explic
 placement is X2D-only; other providers retain their existing `auto` behavior.
 Normal print-cycle autoejection still follows the actual sliced specimen bounds.
 
-The 3D GUI no longer exposes `Validate Left/Center/Right` or the three Physical
+The 3D Printer workspace no longer exposes `Validate Left/Center/Right` or the three Physical
 Proof Package `Run Standalone Eject` controls, including their click handlers.
 The remaining ejection-test artifact handler fixes `mode=test` and
 `start_immediately=false`. Preview validation, artifact generation, proof

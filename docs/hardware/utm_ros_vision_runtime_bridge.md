@@ -2,11 +2,14 @@
 
 ## Purpose
 
-Paths containing `/home/<user>/` are documentation placeholders. Replace `<user>`
-with the account running the bridge before running commands or editing YAML;
-YAML values must contain the resolved absolute path.
+This bridge supplies ROS camera, marker-state, and RQT-like node-flow evidence
+from the cloned UTM ROS program to ATR. Vision Agent and Lab Equipment Agent
+use that live/test evidence before handing UTM data to Analysis Agent.
+Windows PyAutoGUI still controls the UTM.
 
-This bridge connects the cloned UTM ROS program to ATR as a live/test evidence provider without replacing Windows PyAutoGUI UTM control. It supplies ROS camera, marker-state, and RQT-like node-flow evidence to Vision Agent and Lab Equipment Agent before UTM data is handed to Analysis Agent.
+Paths containing `/home/<user>/` are placeholders. Before running commands or
+editing YAML, replace `<user>` with the bridge account. YAML values must contain
+the resolved absolute path.
 
 External source-of-truth repository:
 
@@ -452,44 +455,18 @@ it completed with `workflow_complete=true`, `stage=complete`, `loop_count=5`, an
 messages from Design through Guardian. Five loops is that fixture's count, not
 a universal completion requirement for current configured runs.
 
-Short runtime preflight performed on 2026-06-22:
+The BRIO profile uses `mjpeg2rgb`, `640x480`, requested `60 fps`, and
+`exposure_dynamic_framerate=0` before start. Image endpoints use `RELIABLE`,
+`KEEP_LAST`, depth `1`; green-dot caps `/image_utm` at `30 fps`, without a second
+MJPEG-worker frame filter. The transport uses custom UDPv4 discovery with a
+`16 MiB` SHM segment and `1 MiB` maximum SHM message. Requested camera FPS is not
+a guarantee of end-to-end delivery.
 
-```text
-start: UTM script entered camera_rect
-stop: process group stopped cleanly
-graph: ROS2 ready, UTM/yolo source files found, cloned expected graph rendered
-frame: ROS subscriber path executed; no image topics produced a frame in the current no-camera/no-UTM-motion environment, so frame_available=false with ROS_IMAGE_TIMEOUT attempts
-observed issue: no active UTM image frame was available during this audit; physical camera/frame verification requires the UTM camera pipeline to be producing /image_utm or a fallback image topic
-```
-
-2026-06-22 live-camera stability update:
-
-```text
-symptom: /camera/image_raw fell from requested 15 fps to 1-4 fps; /image_utm fell to 1-3 fps
-ROS log: /camera/image_raw and /camera/camera_info not synchronized; green_dot input_gap_ms often 2000-3000 ms
-root cause: active saved profile used mjpeg2rgb while the cloned UTM BRIO path expects yuyv2rgb
-accepted profile: 640x480, 15 fps, yuyv2rgb, exposure_dynamic_framerate=0 before start
-verified route: /api/equipment/utm-runtime/frame-stream.mjpeg?topic=/image_utm&fps=15
-result: 457 frames / 30.1 s
-```
-
-2026-09-02 BRIO raw-input benchmark update (supersedes the active profile above):
-
-```text
-device link: USB 3, 5000M; V4L2 sustains YUYV 30 fps and MJPEG 60 fps directly
-usb_cam version: ROS Jazzy 0.8.1
-old full stack: yuyv2rgb 640x480 requested 15 fps -> raw 2.2 fps, image_utm 1.6 fps
-accepted full stack: mjpeg2rgb 640x480 requested 60 fps -> raw 9.1 fps, image_utm 8.4 fps
-60-second image_utm bins: 7.1, 9.3, 6.7, 8.7, 10.4, 8.3 fps; no monotonic slowdown
-rejected: userptr produced no frames; raw yuyv aborted; raw_mjpeg republish changed the topic/encoding contract
-required control: exposure_dynamic_framerate=0 before start
-follow-up root cause: BEST_EFFORT loses fragmented RGB samples, while uncapped all-RELIABLE fan-out eventually propagates slow-consumer backpressure
-accepted QoS: RELIABLE, KEEP_LAST, depth 1 for all image endpoints; `/image_utm` annotated output capped at 30 fps
-isolated rates: V4L2 60.0 fps; usb_cam BEST_EFFORT 4.69 fps vs RELIABLE 59.03 fps; RELIABLE green-dot output 50.78 fps; correctly typed YOLO detections about 29.8 fps
-root cause correction: the default FastDDS SHM segment was 512 KiB, smaller than one 640x480 BGR frame (921,600 bytes), while UDP socket receive buffers were only 212,992 bytes; the all-RELIABLE path therefore collapsed to about 4 fps after roughly two minutes
-accepted transport: custom UDPv4 discovery plus 16 MiB SHM segment and 1 MiB maximum SHM message; 180-second full-fanout test held JPEG and YOLO delivery at 26.5-29.1 fps without collapse
-GUI pacing: `/image_utm` is capped once in green-dot; the MJPEG worker does not apply a second frame filter, which keeps jittered input from being reduced to 18-22 fps
-```
+Validation scope: the 2026-09-02 BRIO benchmark's 180-second full-fanout test
+observed JPEG and YOLO delivery at `26.5–29.1 fps`; the earlier no-camera runtime
+preflight established start/stop and graph behavior only, returning
+`frame_available=false` with `ROS_IMAGE_TIMEOUT`. Physical frame verification
+requires `/image_utm` or a fallback image topic to produce frames.
 
 ## D455F Specimen Pose Tracker Separation
 
@@ -525,24 +502,25 @@ VLA route owns D455F by default
 
 The post-manipulation placement check still uses the BRIO/UTM runtime path and its RQT-like graph evidence.
 
-Observed hardware boundary on 2026-06-25: D455F initially enumerated on USB2,
-then moved to USB3 during re-enumeration, but later `NVDA8000:00` reported
-`xHCI host controller not responding, assume dead` and the camera disappeared
-from `lsusb`. In that state, ROS can create publishers but no frames arrive.
+If the USB host controller reports `xHCI host controller not responding, assume dead`
+and D455F disappears from `lsusb`, ROS publishers alone do not prove frame availability.
 Recover the USB controller by replug/power-cycle/reboot before live D455F
 validation; test mode continues through the deterministic virtual pose path.
 
 ### Quasi-static motion evidence (2026-09-18)
 
 Compression, motion confirmation, and return/completion observations use a
-10-second window. Compare the median of the first three finite valid marker spans
-with the median of the final three. Final minus initial span at or below -0.25 px
-means `DOWN`; at or above +0.25 px means `UP`; the open interval between them means
-`STABLE`. No trend fitting or rate normalization is used. At least eight valid
-spans are required. This is a pixel threshold, not millimetres: endpoint medians
-reject isolated frame outliers, but sustained camera movement can still affect
-the measurement. Ordered samples are used because ROS echo timestamps are assigned
-during stream parsing, not at camera acquisition.
+10-second window with at least eight valid spans. Subtract the median of the
+first three finite valid marker spans from the median of the final three:
+
+- at or below -0.25 px: `DOWN`;
+- at or above +0.25 px: `UP`;
+- the open interval between them: `STABLE`.
+
+This is a pixel threshold, not millimetres; it uses no trend fitting or rate
+normalization. Endpoint medians reject isolated frame outliers, but sustained
+camera movement can still affect the result. Samples use their recorded order
+because ROS echo timestamps are assigned during parsing, not camera acquisition.
 
 Return verification still runs after the skill and requires `NOT_WORKING` marker
 geometry. Upward movement alone cannot authorize robot entry. The existing target

@@ -12,12 +12,15 @@ Equipment terminal review still uses its completed-execution evidence.
 
 ## SPC retry before device execution
 
-An inactive failed SPC stage can resume the same specimen without repeating
-Design. All attempts for that cycle must have complete failed archives and only
-geometry/validation/handoff-file calls. Unknown tools, in-flight calls, printer
-operations, missing archives, successful attempts or downstream execution block
-this path. Even an ambiguous printer request requires job-bound recovery rather
-than a blind reprint.
+An inactive failed SPC stage can retry the same specimen without repeating
+Design only when:
+
+- Every attempt in the cycle has a complete failed archive.
+- Calls are limited to geometry, validation and handoff-file work.
+- No unknown tool, in-flight call, printer operation, missing archive,
+  successful attempt or downstream execution is present.
+
+An ambiguous printer request requires job-bound recovery, not a blind reprint.
 
 The standard SPC stage runs again, including all manufacturing checks. On success,
 the existing cycle series continues from that cycle. A second failure retains the

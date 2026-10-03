@@ -5,12 +5,12 @@
 The Autonomous Experiment Runtime is the standard execution layer above the
 existing agents and MCP tools.
 
-It improves the current system without replacing the established structure:
+It preserves the established execution path:
 
 `Orchestrator/Live GUI -> Agent -> experiment.evaluate -> MCP Tool/Bridge -> Job Queue -> Result`
 
-Existing tool names such as `printer.prepare`, `lerobot.record.start`, and
-`equipment.pyautogui.run` remain valid. The new runtime adds a common
+Existing tools such as `printer.prepare`, `lerobot.record.start`, and
+`equipment.pyautogui.run` remain valid. The runtime adds a common
 experiment contract, queue metadata, and benchmark entry points.
 
 ## Standard Interface
@@ -201,7 +201,15 @@ When adding a new hardware bridge:
 - `fabrication_report.v1`: fabrication intent, digital thread, process plan, quality gates, printer runtime evidence, monitoring handoff, outcome, and feedback to Design/Knowledge/BO.
 - `specimen_fabricated.v1`: handoff packet consumed by Vision, Manipulation, Knowledge, and BO. It references the full `fabrication_report` and includes only a compact fabrication summary plus evidence refs.
 
-The runtime merge layer stores these under `state.run_metadata.fabrication_report`, `state.run_metadata.specimen_fabricated`, `state.run_metadata.specimen_handoff_packet`, `state.run_metadata.specimen_decision_register`, and `state.run_metadata.specimen_metrics`. The generic `handoff_packets` registry also receives the specimen packet.
+The runtime merge layer stores these records under:
+
+- `state.run_metadata.fabrication_report`
+- `state.run_metadata.specimen_fabricated`
+- `state.run_metadata.specimen_handoff_packet`
+- `state.run_metadata.specimen_decision_register`
+- `state.run_metadata.specimen_metrics`
+
+The generic `handoff_packets` registry also receives the specimen packet.
 
 This keeps the printer bridge deterministic while making the manufacturing stage auditable as a digital-thread node.
 

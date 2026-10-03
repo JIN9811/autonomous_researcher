@@ -23,11 +23,15 @@ interpreters avoid importing a recovery launcher or server as a multiprocessing
 main module. No experiment decision, formula, printer option or motion route is
 changed by worker selection.
 
-`ATR_CPU_WORKERS=3` is the default at server startup. Values 1–3 limit the pool;
-0 keeps the previous in-process implementation. A restart is required to deploy the
-new server integration. `GET /api/runtime/compute` reports active/queued work and
-PIDs. A single experiment's dependent stages remain sequential; independent
-requests can use multiple workers concurrently.
+Configure the pool before server startup:
+
+- `ATR_CPU_WORKERS=3` is the default; values 1–3 set the worker limit.
+- `0` runs calculations in the main process.
+- Restart the server to apply the setting.
+- `GET /api/runtime/compute` reports active/queued jobs and process IDs.
+
+Dependent experiment stages remain sequential. Independent requests can use
+multiple workers concurrently.
 
 There are at most three active and three waiting jobs. Native BLAS/OpenMP thread
 limits are set to one per worker. Jobs have deadlines; cancellation terminates
@@ -68,10 +72,10 @@ cancellation and unchanged fabrication tool payloads.
 
 ## Robot display continuity
 
-A five-second delay in main-server context publication used to replace the robot
-worker's session with an empty object. That falsely emitted `idle`, discarded the
-display observer and replayed old history on recovery. The worker now retains its
-known session and follows the same saved log while reporting `publisher_stale` and
-`stale` display status. A fresh explicit reset or actual session change still
-clears the display. Parent-pipe EOF still shuts down the worker. This changes only
-display freshness, not robot home detection or any physical safety gate.
+If the main server has not published fresh context for five seconds, the robot
+worker keeps its known session and follows the same saved log. It reports
+`publisher_stale`; an active session is marked `stale`, not `idle`.
+
+- An explicit reset or a session change clears the display.
+- Parent-pipe EOF shuts down the worker.
+- Display freshness does not change robot home detection or physical safety gates.

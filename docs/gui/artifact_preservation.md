@@ -25,12 +25,15 @@ cycle or a BO iteration number.
 | BO | Saved LHS/GP visualization payload, PNG/SVG/CSV, observations, candidates and acquisition |
 | Guardian | Gate decisions, incidents, recovery advice and supporting evidence |
 
-`evidence_index.json` records source hashes, retained components, generated files
-and known gaps. `artifact_coverage.json` summarizes coverage for every owner.
-An interrupted/running invocation is not declared complete. Unknown or missing
-historical data is not synthesized. In particular, a current `/tmp/latest` image
-must never replace an old cycle's missing image. New live captures may snapshot
-the explicit camera evidence directories through the existing archive.
+Two files describe archive coverage:
+
+- `evidence_index.json`: source hashes, retained components, generated files and known gaps.
+- `artifact_coverage.json`: coverage by owner.
+
+Running or interrupted invocations remain incomplete. Missing historical data
+is not synthesized: a current `/tmp/latest` image cannot replace an old cycle's
+missing image. New captures may snapshot the designated camera evidence
+directories through the existing archive.
 
 Plot export uses saved numbers only: no agent invocation, model fitting, metric
 recalculation, verification retry or device action. It runs in one separate

@@ -96,7 +96,7 @@ Results MUST remain in their recorded environment. A test result cannot fill a
 live-evaluation row.
 
 These are evidence classes, not guarantees from the runtime's mode string.
-ATR's `test` mode can select installed-printer or physical-print profiles with
+ATR's `test` mode can select Installed Printer or Physical Print profiles with
 real effects; only a resolved all-virtual device profile supplies simulated I/O.
 Record the actual device/model boundary, as the September 7 mixed-mode records do.
 See [Test Mode](../runtime/test_mode.md).

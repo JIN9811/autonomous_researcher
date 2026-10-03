@@ -1,6 +1,6 @@
 # Windows PyAutoGUI Bridge
 
-Windows PyAutoGUI Bridge는 Linux ATR의 `LabEquipmentAgent`가 Windows GUI 기반 장비를 제어할 때 사용하는 경량 실행기입니다. Windows에서는 판단이나 실험 완료 판정을 하지 않고, 검증된 프로그램 실행, 화면 증거 수집, 입력 녹화, 로컬 프로그램 관리만 수행합니다.
+Windows PyAutoGUI Bridge는 Linux ATR의 `LabEquipmentAgent`가 Windows GUI 기반 장비를 제어하는 실행기입니다. Windows에서는 판단이나 실험 완료 판정 없이 검증된 프로그램 실행, 화면 증거 수집, 입력 녹화, 로컬 프로그램 관리만 수행합니다.
 
 ## 책임 경계
 
@@ -42,7 +42,12 @@ INSTALL_WINDOWS_BRIDGE.cmd
 
 설치 후 Desktop/Start Menu 바로가기로 실행할 수 있습니다.
 
-설치기는 다른 위치에 프로그램을 복사하지 않습니다. 패키지 폴더 안에 `.venv`를 구성하고 바로가기와 로그온 작업도 같은 폴더의 `scripts\start_supervisor.ps1`을 가리킵니다. 원격 updater는 현재 실행한 패키지 폴더에만 릴리스를 적용하고 같은 폴더에서 재시작합니다. 로그, 녹화, 프로그램과 아티팩트는 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 분리 저장합니다.
+설치와 업데이트는 현재 패키지 폴더를 사용합니다.
+
+- 설치기는 다른 위치에 프로그램을 복사하지 않고 패키지 폴더 안에 `.venv`를 구성합니다.
+- 바로가기와 로그온 작업은 같은 폴더의 `scripts\start_supervisor.ps1`을 가리킵니다.
+- 원격 updater는 현재 실행한 패키지 폴더에만 릴리스를 적용하고 재시작합니다.
+- 로그·녹화·프로그램·산출물(artifact)은 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 분리 저장합니다.
 
 일반 시작은 `scripts\start_supervisor.ps1`만 사용합니다. 시작 명령과 예약 작업에는 릴리스 번호를 넣지 않으며, supervisor가 현재 패키지 폴더의 Worker를 감시하고 비정상 종료 시 다시 실행합니다. 현재 버전과 원격 업데이트 파일 목록의 단일 원본은 `release_manifest.json`입니다. 설치 시 대화형 사용자 로그온 예약 작업이 기본 등록되며 Windows 서비스는 사용하지 않습니다.
 
@@ -73,7 +78,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -Lo
 - 코드와 내부키는 URL, 브라우저 저장소, request audit에 기록하지 않습니다.
 - 이후 재시작은 저장된 내부키를 사용하므로 별도 질문 없이 연결됩니다.
 
-4자리 코드는 최초 연결 키 교환에만 사용합니다. 연결이 저장된 뒤에는 사용자가 코드를 다시 입력하지 않으며, 저장된 worker secret 또는 교환된 내부키로 자동 인증합니다. 녹화 시작·상태·미리보기·중지·저장·삭제는 pairing 상태와 무관하게 사용할 수 있지만, 녹화 package 반출과 원격 실행·업데이트는 저장된 연결 인증이 필요합니다.
+4자리 코드는 최초 연결의 키 교환에만 사용합니다. 이후에는 저장된 worker secret 또는 교환된 내부키로 자동 인증합니다.
+
+- 녹화 시작·상태·미리보기·중지·저장·삭제는 pairing 상태와 무관하게 사용할 수 있습니다.
+- 녹화 package 반출과 원격 실행·업데이트에는 저장된 연결 인증이 필요합니다.
 
 ## Windows Console
 
@@ -104,7 +112,7 @@ ATR이 배포한 프로그램은 읽기 전용 캐시이며 Windows에서 직접
 - 녹화 시작부터 종료까지 전체 화면을 고정 2 FPS로 즉시 디스크에 저장합니다.
 - 주기 프레임은 `frames/periodic/frame-XXXXXXXX.jpg`, 이벤트·경계 프레임은 PNG로 저장하고 `timeline.jsonl`에서 시간순으로 연결합니다.
 - RAM에는 행동 직전 증거를 찾기 위한 최근 프레임만 제한적으로 유지하며, 전체 세션 증거는 RAM 순환 버퍼가 아니라 디스크가 소유합니다.
-- 디스크 경고 임계값에서는 녹화를 유지하며 상태를 표시하고, 임계 임계값이나 쓰기 실패에서는 이미 기록한 증거를 보존한 불완전 패키지로 안전 종료합니다.
+- 디스크 경고 임계값에서는 녹화를 유지하며 상태를 표시합니다. 위험 임계값에 도달하거나 쓰기에 실패하면 이미 기록한 증거를 불완전 패키지로 보존하고 안전 종료합니다.
 - 오버레이 Stop과 Console의 Checkpoint, Preview, Export, Delete를 지원합니다. Preview는 저장된 프레임을 페이지 단위로 이전/다음 확인하며 Windows 절대경로를 브라우저에 노출하지 않습니다.
 
 Windows는 녹화 원본만 만듭니다. Linux ATR은 16개 프레임을 4x4 시간 스토리보드로 구성하고, 선택된 multimodal 모델로 모든 청크를 순서대로 분석한 뒤 전체 흐름을 합성합니다. LLM 어노테이션, Skill 컴파일·검증·버전·배포는 Linux ATR이 수행하며 컴파일된 Skill의 개별 재생 동작에는 LLM을 다시 호출하지 않습니다. 다만 Linux의 정상 Equipment Flow에는 실행 전 선택과 terminal evidence review를 위한 LLM 판단이 포함될 수 있으므로 전체 실험 경로가 LLM-free라는 의미는 아닙니다.
@@ -186,16 +194,16 @@ Linux에서는 ATR Device Workspace에서 다음 순서로 확인합니다.
 | POST | `/execute` | 검증된 프로그램 실행 |
 | POST | `/screenshot` | 화면 증거 캡처 |
 | POST | `/locators/capture` | locator 기준 이미지 저장 |
-| GET/POST/DELETE | `/recordings/...` | 녹화 수명과 아티팩트 관리 |
+| GET/POST/DELETE | `/recordings/...` | 녹화 수명과 산출물 관리 |
 | GET | `/recordings/{id}/package` | 인증된 녹화 증거 package 전송 |
-| GET | `/artifacts` | 원시 아티팩트 목록 |
+| GET | `/artifacts` | 원시 산출물 목록 |
 | GET | `/request-log` | 요청 감사 로그 |
 | GET | `/update/status` | 현재/staging/rollback 가능 버전 상태 |
 | POST | `/update/stage` | allowlist와 SHA-256 검증 후 release staging |
 | POST | `/update/apply` | 별도 updater로 교체·재시작·Health 검증 |
 | POST | `/update/rollback` | 최근 backup 복원·재시작 |
 
-원격 실행·화면·아티팩트 경로는 페어링 이후 내부키 인증이 필요합니다.
+원격 실행·화면·산출물 경로는 페어링 이후 내부키 인증이 필요합니다.
 
 ## 안전 경계
 

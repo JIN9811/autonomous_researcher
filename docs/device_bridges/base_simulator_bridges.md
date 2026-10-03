@@ -92,11 +92,14 @@ must not be interpreted as evaluated live paths.
 
 ## Inputs, Commands, and Outputs
 
-All bridges accept a string command and mapping payload. Printer simulator
-handles `prepare` and `health`; camera returns frame metadata; robot returns a
-task/grasp score; UTM returns a result-file path. Unknown printer commands
-return a structured failure. Compatibility stubs echo command/payload with a
-live-stub label and therefore provide no real device semantics.
+All bridges accept a string command and mapping payload:
+
+- Printer handles `prepare` and `health`; unknown commands return a structured failure.
+- Camera returns frame metadata.
+- Robot returns a task/grasp score.
+- UTM returns a result-file path.
+- Compatibility stubs echo command/payload with a live-stub label, without real
+  device semantics.
 
 ## Internal Execution
 

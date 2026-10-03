@@ -56,11 +56,22 @@ physical-evidence entries below retain their original scope and are not rerun cl
 
 ## Summary
 
+`GuardianAgent` is ATR's graph-wide safety review and continuation control
+plane. It evaluates gates, recent failures, device and queue health, and returns
+continue, review, stop or error state. It records risk, incident and approval
+evidence. Orchestrator translates the result into graph routing; Guardian does
+not coordinate the full workflow or execute devices.
+
 For physical Bambu printing, an unused FTPS probe failure does not block a
-verified HTTP artifact start. This exception requires a successful MQTT snapshot,
-HTTP upload route, published `project_file` command for the same artifact URL,
-and a post-publish `running` or `completed` observation within the same successful
-`PRINT_STARTED` bridge result. It applies only to that result's FTPS probe;
+verified HTTP artifact start. The same successful `PRINT_STARTED` bridge result
+must contain all of the following:
+
+- a successful MQTT snapshot;
+- an HTTP upload route;
+- a published `project_file` command for the same artifact URL;
+- a post-publish `running` or `completed` observation.
+
+The exception applies only to that result's FTPS probe;
 unrelated results, start failures, and other safety alarms remain gated. Raw
 transport diagnostics remain in the run evidence. This is not proof of print
 completion or permission to skip subsequent specimen checks. The same evidence
@@ -94,12 +105,6 @@ safety checks.
 The existing LLM decision boundary receives a bounded, reference-only
 [AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
 without changing this agent's tools, numerical authority or execution gates.
-
-`GuardianAgent` is ATR's graph-wide safety review and continuation control
-plane. It evaluates current gates and recent failures, incorporates device and
-queue health, records risk/incident/approval evidence, and returns continue,
-review, stop, or error state. Orchestrator translates that state into graph
-routing; Guardian does not coordinate the full workflow or execute devices.
 
 ## Scope
 
