@@ -25,7 +25,7 @@ supersedes: []
 
 # AX4LAB — Setup and Operation
 
-[Research overview](../../../README.md) · [Paper](../../../docs/paper/README.md) · [Modularity](../../../docs/modularity.md) · [Agents](../../../docs/agents/README.md) · [Device bridges](../../../docs/device_bridges/README.md)
+[Research overview](../../../README.md) · [Paper](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/README.md) · [Modularity](../../../docs/modularity.md) · [Agents](../../../docs/agents/README.md) · [Device bridges](../../../docs/device_bridges/README.md)
 
 AX4LAB applies multi-agent orchestration to existing laboratory equipment through
 the Autonomous Researcher (ATR) framework. This companion covers setup and
@@ -34,7 +34,7 @@ overview, with a [Korean version](../../../README.ko.md).
 
 ## 1. Quick Start
 
-Latest evidence: [one-cycle integration demonstration completed](../../../docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md)
+Latest evidence: [one-cycle integration demonstration completed](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md)
 with live compression data, Analysis-to-BO feedback, and next-design entry.
 Scope: supervised mixed mode; printer deposition skipped, not a full physical
 campaign or scientific-efficacy result.

@@ -1,8 +1,8 @@
-# Lab Equipment Agent / Windows Bridge 통합 운영 지침
+# Lab Equipment Agent / Windows Bridge Operations Guideline
 
-## 구조 원칙
+## Architectural principles
 
-Linux ATR이 판단과 실행 기록을 소유하고 Windows Bridge는 경량 PyAutoGUI worker로 동작합니다.
+Linux ATR owns decisions and execution records; the Windows Bridge is a lightweight PyAutoGUI Worker.
 
 ```text
 LabEquipmentAgent (High-Level)
@@ -10,37 +10,37 @@ LabEquipmentAgent (High-Level)
   -> Windows/Local Bridge (Low-Level)
 ```
 
-UTM은 `utm_windows_v1` Profile의 첫 적용 사례입니다. Agent 본체에 장비명, 프로그램명, 창 제목, 저장 경로를 고정하지 않습니다.
+UTM is the first use case of the `utm_windows_v1` Profile. Do not hard-code equipment names, program names, window titles, or save paths in the Agent itself.
 
-## 실행 원칙
+## Execution principles
 
-1. 사용할 Profile과 정확한 program/Skill 버전을 확정합니다.
-2. 하나의 `EquipmentExecutionRecord`를 생성합니다.
-3. 선택한 provider의 `equipment.pyautogui.run`만 호출합니다.
-4. worker의 원시 결과와 증거를 수집합니다.
-5. Linux에서 completion policy를 한 번 적용합니다.
-6. 완료된 증거 패키지를 보존하고, Manipulation의 시험 후 정리(post-test clear)와 새 Vision clearance 검증을 통과한 뒤 Analysis에 전달합니다.
+1. Resolve the Profile and exact program/Skill version.
+2. Create one `EquipmentExecutionRecord`.
+3. Invoke only the selected provider's `equipment.pyautogui.run`.
+4. Collect the Worker's raw results and evidence.
+5. Apply the completion policy once on Linux.
+6. Preserve the completed evidence package; hand it to Analysis only after the required Manipulation post-test clearance and fresh Vision clearance checks pass.
 
-`utm.run_protocol`은 tool 부재 시 자동 fallback으로 사용하지 않습니다. native/direct UTM은 별도 Profile로 명시 등록해야 합니다.
+Do not automatically fall back to `utm.run_protocol` when a tool is unavailable. Register native/direct UTM explicitly through a separate Profile.
 
-## 상태 투영
+## State projections
 
-Agent, Workspace, Live GUI, CUI, Runtime IDE는 같은 실행 기록을 읽습니다.
-상태 목록은 Profile/Skill/provider마다 다를 수 있으므로, 대표 상태 예시를
-모든 실행에 강제하지 않습니다.
+The Agent, Workspace, Live GUI, CUI, and Runtime IDE read the same execution record.
+States may differ by Profile, Skill, and provider; do not impose a representative example sequence
+on every execution.
 
-## Program과 Skill
+## Programs and Skills
 
-- builtin: Bridge 포함 읽기 전용
-- local draft: Windows 개발/테스트
-- validated/deployed: Linux 검증 후 배포
-- retired: 신규 실행 금지
+- builtin: included with the Bridge, read-only
+- local draft: Windows development/testing
+- validated/deployed: deployed after Linux validation
+- retired: unavailable for new execution
 
-Skill 원본은 Linux `memory/equipment_skills/`입니다. 정상 Skill block 실행은 결정론적입니다.
-Managed Flow의 정상 경로에도 시작 전 제한된 범위의 LLM 선택과 종료 후 결과 검토가 포함되며,
-block 사이마다 모델을 반복 호출하지 않습니다. 예외 복구도 별도의 제한된 권한과 증거를 따릅니다.
+The Skill source of truth is Linux `memory/equipment_skills/`. Normal Skill block execution is deterministic.
+The normal Managed Flow may also include bounded LLM selection before execution and result review afterward;
+it does not call the model repeatedly between blocks. Exception recovery has separate bounded authority and evidence requirements.
 
-## 녹화 기반 Skill 생성
+## Recording-based Skill creation
 
 ```text
 Windows Record
@@ -54,53 +54,52 @@ Windows Record
   -> Windows cache
 ```
 
-Windows에는 모델과 API key를 두지 않습니다.
+Keep models and API keys off Windows. Recording memory is bounded; full-session frames are persisted to disk rather than limited to an in-memory ring buffer.
 
 ## Vision Link
 
-Vision Link는 Profile에서 선택적으로 활성화합니다. 최신성 조건과 대상 식별
-정보를 충족하는 기존 증거를 사용하거나 Vision Agent tool을 호출합니다.
-둘 다 없으면 실행 전에 차단합니다. Vision은 관측만 제공하며 worker에
-직접 명령하지 않습니다.
+Vision Link is optional and enabled by the Profile. Reuse existing evidence that meets freshness
+and target-identity requirements, or call the Vision Agent tool. If neither is available, block
+before execution. Vision provides observations only and does not directly command the Worker.
 
-## 완료 증거
+## Completion evidence
 
-Profile이 요구하는 증거 예:
+Examples of evidence a Profile may require:
 
 - request/sequence/run/specimen identity
-- target window/checkpoint screenshot
+- target-window/checkpoint screenshots
 - locator state
-- output file와 hash/row probe
-- Vision cross-check
-- worker raw status/step trace
+- output files with hashes/row probes
+- Vision cross-checks
+- Worker raw status/step traces
 
-HTTP 요청 성공만으로 완료 처리하지 않습니다. 불완전한 파일과 시간 초과
-결과는 증거로 보존하지만 handoff는 허용하지 않습니다.
+HTTP success alone does not establish completion. Preserve incomplete files and timeout results
+as evidence, but do not allow handoff.
 
-## Windows Console 범위
+## Windows Console scope
 
-Windows 기본 화면은 Bridge Status, Program Manager, Recording, Latest Local Result만 제공합니다. UTM proof, Guardian, Analysis, Skill lifecycle, closed loop, ATR Controller 탐색은 Linux Workspace 기능입니다.
+The main Windows screen provides only Bridge Status, Program Manager, Recording, and Latest Local Result. UTM proof, Guardian, Analysis, Skill lifecycle, closed-loop operation, and ATR Controller discovery belong to the Linux Workspace.
 
-## 최초 연결
+## Initial connection
 
-4자리 일회성 페어링 코드를 사용합니다. 성공 후 내부 키는 보호 파일에 자동 저장되고 사용자 UI에는 표시하지 않습니다. 장기 토큰을 입력하거나 복사하는 절차는 사용하지 않습니다.
+Use a one-time four-digit pairing code. After success, the internal key is automatically stored in protected files and is not shown in the user UI. Users do not enter or copy long-lived tokens. The same exchange can be retried for 30 seconds to retrieve the same key; this does not create another pairing.
 
-## 안전 및 복구
+## Safety and recovery
 
-- unknown Profile/program: no effect block
-- worker unavailable: no automatic provider fallback
+- unknown Profile/program: block without effects
+- Worker unavailable: no automatic provider fallback
 - locator/checkpoint failure: compiled recovery only
-- invoke timeout: effect unknown, inspect before retry
+- invocation timeout: effects unknown; inspect before retry
 - LLM: allowlisted selection/reasoning only
-- physical equipment: Profile별 live 승인과 stop path 필요
+- physical equipment: Profile-specific live approval and a stop path required
 
-## 검증 기준
+## Verification criteria
 
-- generic profile이 UTM/Vision hidden dependency 없이 실행
-- UTM Profile이 required Vision evidence를 검증
-- source/install Windows server parity
-- 4자리 pairing TTL/attempt/lockout/persistence
-- recording frame buffer bounded memory
-- canonical runtime projection 일치
-- browser refresh가 실행을 중복 생성하지 않음
-- 자동 테스트는 물리 장비를 구동하지 않음
+- Generic Profiles run without hidden UTM/Vision dependencies.
+- The UTM Profile validates required Vision evidence.
+- Source and installed Windows servers remain in parity.
+- Four-digit pairing enforces TTL, attempt limits, lockout, and persistence.
+- Recording frame buffering uses bounded memory.
+- Canonical runtime projections agree.
+- Browser refresh does not create duplicate executions.
+- Automated tests do not operate physical equipment.

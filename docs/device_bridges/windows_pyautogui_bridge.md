@@ -153,17 +153,18 @@ inspection scope. Current detailed recording behavior is specified above.
 | `GET /health` | Local access before pairing; internal key for remote access |
 | `GET /pairing/status` | local setup |
 | `POST /pairing/new-code` | local setup |
+| `POST /pairing/reset` | Clear pairing and issue a new code through local setup or authenticated access |
 | `POST /pairing/complete` | One-time code exchange |
 | `GET /programs` | local setup/paired remote |
 | `POST /programs/validate` | local setup |
 | `POST /programs/register` | Local setup or paired deployment |
 | `DELETE /programs/{id}` | Deletable local drafts |
-| `POST /execute` | paired, bounded physical-possible action |
+| `POST /execute` | Local setup or authenticated remote access; bounded physical-possible action |
 | `POST /screenshot` | paired evidence capture |
 | `POST /locators/capture` | paired locator capture |
 | `/recordings/...` | pairing-optional recording management |
 | `GET /recordings/{id}/package` | paired recording evidence transfer |
-| `GET /artifacts`, `/request-log` | paired evidence/audit |
+| `GET /artifacts`, `/request-log` | Authenticated evidence/audit; local setup may read `/request-log` without a key |
 | `GET /update/status` | paired Worker version/update state |
 | `POST /update/stage` | paired, bounded release staging |
 | `POST /update/apply` | paired, recording-idle process replacement |
@@ -211,7 +212,7 @@ commands do not hard-code release numbers. Windows stages only files allowed by 
 - Windows `UPDATE_ALLOWED_PATHS`
 
 Per-file size/SHA-256 and the package digest must match.
-`ATR_WINDOWS_BRIDGE_INSTALL_ROOT` identifies the canonical package folder,
+`ATR_WINDOWS_BRIDGE_PACKAGE_ROOT` identifies the canonical package folder,
 avoiding separate source and installed copies. Startup and the logon task call
 `scripts/start_supervisor.ps1`. Updates create `updates/update_in_progress.json`
 to prevent duplicate startup and preserve files in `updates/backups/<backup-id>`.
@@ -220,8 +221,10 @@ dependencies, restarts it, and checks the target version through local `/ping`.
 It skips pip when `requirements-windows.txt` matches the backup. If graceful
 shutdown expires, it terminates only the old worker's process tree.
 An error at any stage after replacement restores the backup. If updater recovery also
-fails, the independent supervisor releases the lock and restarts the canonical
-worker. Results are recorded in `updates/status.json` and `supervisor/status.json`.
+fails, the independent supervisor can restart the canonical worker after the updater's
+final cleanup clears the lock. The supervisor does not clear an orphaned update lock itself.
+Update results are recorded under the data root at `updates/status.json`; supervisor state is
+stored at `%TEMP%\ATR\PyAutoGUIBridge\supervisor\status.json` (or the system temporary directory if `TEMP` is unset).
 Frozen EXEs are recorded as bundled runtimes.
 
 Active recording blocks apply/rollback with `PYAUTOGUI_UPDATE_RECORDING_ACTIVE`.
@@ -248,7 +251,7 @@ Initial pairing uses a four-digit, one-time code:
 
 - Valid for 300 seconds.
 - At most 5 attempts.
-- Discarded immediately on success.
+- Consumed on success; for 30 seconds, retrying the identical exchange returns the same key as `paired_retry`, not a new pairing. After that window the code cannot be reused.
 - A 30-second lockout after the failure limit.
 - A long-term internal key generated on success.
 - Key saved in protected Windows and Linux connection memory.
@@ -256,6 +259,8 @@ Initial pairing uses a four-digit, one-time code:
 The code is used only for initial key exchange. Later requests automatically
 use the saved worker secret or internal key; users need not copy it repeatedly.
 Codes and keys are excluded from URLs, browser storage, and request audits.
+If Linux did not save the connection before the retry window expired, use the
+Windows Console's `Reset Pairing` to invalidate the old paired key and issue a new code.
 
 Before pairing, the local Console permits:
 
@@ -394,7 +399,7 @@ Windows Console. Its sections appear in this order:
 5. `Skill Management`: review/save the exact version in Workflow Editor, then Deploy once to build/check/transfer.
 6. `Main Progress`: execute a bounded macro with the selected Profile and Skill/program.
 7. `Vision Link`: request optional, Profile-specific Middle-Level verification.
-8. `Error Recovery`: use the selected model only for exceptions, not normal execution.
+8. `Error Recovery`: selected-model exception recovery with bounded authority. Normal compiled actions remain deterministic, but the surrounding Equipment Flow can also call the model for pre-execution selection and terminal evidence review; the overall flow is not LLM-free.
 9. `Evidence & Data Transfer`: inspect screen/data/Vision/request evidence and the Analysis handoff audit.
 
 The frontend reads `/api/equipment/runtime/current` and `/api/equipment/skills`.
@@ -425,7 +430,7 @@ update, restart, desktop input or instrument action was performed. The earlier
 physical proof remains linked from the Equipment Reference and is not replaced
 or expanded by this migration.
 
-The [2026-09-28 campaign archive audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+The [2026-09-28 campaign archive audit](../runtime/evidence/2026-09-28-campaign-archive-audit.md)
 adds recorded multi-cycle Equipment/Analysis evidence. It is not a new worker
 pairing test, complete hardware certification or a change to the migration result.
 

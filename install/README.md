@@ -377,7 +377,9 @@ Live GUI chat API:
 
 ```bash
 atr chat bootstrap "Plan a PLA compression specimen experiment"
+# Supported Korean command alias: test mode
 atr chat "테스트 모드"
+# Supported Korean command alias: run experiment
 atr chat "실험 수행"
 ```
 

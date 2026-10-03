@@ -395,7 +395,7 @@ Live GUI planning messages are not stored only in browser memory. The controller
 persists compacted conversation entries to:
 
 ```text
-runs/<active_run_id>/live_planning_transcript.jsonl
+runs/<originating_run_id>/planning_sessions/<planning_session_id>/live_planning_transcript.jsonl
 ```
 
 Relevant endpoints:
@@ -405,6 +405,12 @@ Relevant endpoints:
   `before` and `limit`
 - `POST /api/planning/bootstrap`: optional pre-message orchestrator warmup
 - `POST /api/planning/message`: user message to the live-planning orchestrator
+
+The controller retains the canonical planning-session path across execution run
+allocation and keeps Experimental Setup alongside that transcript. Before a
+canonical session path is selected, the compatibility fallback is
+`runs/<active_run_id>/live_planning_transcript.jsonl`. An explicit fresh-session
+reset selects a new session directory without deleting prior evidence.
 
 The controller keeps only a recent in-memory window and uses the JSONL file as
 the source for refresh/reopen continuity. Large raw runtime payloads are
@@ -737,7 +743,7 @@ The historical 2026-05-26 smoke set against `http://127.0.0.1:7860` passed the f
 - CUI graph smoke: `atr graph validate atr_closed_loop`, `atr graph compile atr_closed_loop`, `atr graph dry-run atr_closed_loop`, and `atr graph gate atr_closed_loop`
 - CUI module smoke: `atr module validate design`, `atr module dry-run design`, `atr module load design`, and `atr module unload design`
 
-The historical 2026-06-17 12번 개선안 audit set against the local test server
+The historical 2026-06-17 Improvement 12 audit set against the local test server
 `http://127.0.0.1:7862` passed these checks:
 
 - Live GUI runtime audit:

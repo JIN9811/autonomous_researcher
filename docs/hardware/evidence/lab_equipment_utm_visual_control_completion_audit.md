@@ -6,7 +6,7 @@ Status: implementation and simulator/browser evidence strengthened; physical liv
 
 Historical scope: the status and "current" statements below describe the
 2026-05-30 audit only. They are not a claim that the project still has no
-physical evidence. Later [supervised-cycle evidence](../../paper/evidence/2026-09-07-supervised-closed-loop.md)
+physical evidence. Later [supervised-cycle evidence](../../runtime/evidence/2026-09-07-supervised-closed-loop.md)
 and the [Equipment Reference](../../agents/equipment_agent.md) retain their own
 bounded verification scope. Commands, source paths and missing-proof findings
 below are preserved as provenance, not a current operator runbook.

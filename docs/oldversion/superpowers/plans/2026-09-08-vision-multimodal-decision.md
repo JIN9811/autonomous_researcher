@@ -100,7 +100,7 @@ Multimodal review supersedes the earlier text-only proposal. Capture-derived pic
 - 검증 loader의 미지정 재질 기본값을 제거하고 기존 프롬프트부터 같은 조건으로 재측정했다. 기대 판단 일치는 API 10/13 → 12/13, 로컬 9/13 → 12/13이었다. 로컬 유효 응답 계약은 11/13 → 13/13이었다.
 - 프롬프트를 고정한 뒤 별도 3개 촬영에서 만든 6종을 확인했다. API 6/6, 로컬 5/6 일치. 로컬은 같은 배경에서 대상 상태만 바뀐 이미지 쌍을 계속 놓쳤다. API는 개발 세트의 detector-labelled clear 영상 하나를 반려해 전부 성공이라고 표현하지 않는다.
 - 총 64회 실제 모델 호출, timeout 없음, 원본 이미지 hash 불변. 후속 회귀 271 passed, 10 existing warnings, 14.18초. 프롬프트와 전달 맥락을 함께 개선한 결과이며 독립 정확도·타 실험 일반화·물리 폐루프 검증이 아니다.
-- [상세 비교와 근거](../../../paper/evidence/2026-09-08-vision-generic-prompt-verification.md). 기존 제어 경로·parser·safety gate·timeout은 변경하지 않았다.
+- [상세 비교와 근거](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-08-vision-generic-prompt-verification.md). 기존 제어 경로·parser·safety gate·timeout은 변경하지 않았다.
 
 ## Release Verification Exception
 

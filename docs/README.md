@@ -13,9 +13,7 @@ scope:
 summary: Audience-, type-, and domain-oriented index for ATR documentation.
 related_docs:
   - README.md
-  - docs/paper/README.md
   - docs/standards/documentation_standard.md
-  - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -31,14 +29,14 @@ supersedes: []
 
 # Documentation Index
 
-Use this index to find the research narrative, operating guides, and technical
+Use this index to find the system description, operating guides, and technical
 references. Each linked reference explains its own part of the system in detail.
 
 | Goal | Start here |
 |---|---|
 | Install and run the application | [Installation](../install/README.md) → [Tutorial selector](tutorials/first_autonomous_run.md) |
 | Understand the existing screens | [GUI structure and 1920 × 1080 screenshots](gui/visual_structure.md) |
-| Understand the research and retained results | [Paper overview](paper/README.md) → [Results](paper/06_evaluation_and_results.md) |
+| Understand the system and retained results | [Control model](runtime/three_level_control_model.md) → [Recorded results](runtime/evidence/2026-09-28-campaign-archive-audit.md) |
 | Change or extend a module | [Modularity](modularity.md) → [Runtime IDE](runtime/runtime_ide.md) → [Packages](../packages/README.md) |
 | Inspect an agent or device contract | [Agent references](agents/README.md) · [Bridge references](device_bridges/README.md) |
 | Find older decisions | [Historical archive](oldversion/README.md), not current operating instructions |
@@ -59,10 +57,10 @@ machine-enforced metadata; it is not the complete repository file inventory.
 
 ## Evidence Basis
 
-- [Campaign archive audit, 2026-09-28](paper/evidence/2026-09-28-campaign-archive-audit.md):
+- [Campaign archive audit, 2026-09-28](runtime/evidence/2026-09-28-campaign-archive-audit.md):
   15 retained experimental observations and their STL, curves, properties and BO
   records; not a new unattended hardware trial.
-- [Earlier supervised one-cycle report, 2026-09-07](paper/evidence/2026-09-07-supervised-closed-loop.md):
+- [Earlier supervised one-cycle report, 2026-09-07](runtime/evidence/2026-09-07-supervised-closed-loop.md):
   mixed-mode demonstration with explicit deposition and specimen-identity limits.
 - [Code/documentation audit, 2026-09-28](maintenance/code_documentation_audit_20260928.md):
   dated main-code, test, campaign and separate RPT-worktree distinctions.
@@ -73,11 +71,11 @@ machine-enforced metadata; it is not the complete repository file inventory.
 
 | Reader | Recommended sequence |
 |---|---|
-| New operator | [Install](../install/README.md), [first run EN](tutorials/first_autonomous_run.en.md) / [한국어](tutorials/first_autonomous_run.ko.md), [user manual EN](tutorials/user_manual.en.md) / [한국어](tutorials/user_manual.ko.md) |
+| New operator | [Install](../install/README.md), [first run EN](tutorials/first_autonomous_run.en.md) / [Korean](tutorials/first_autonomous_run.ko.md), [user manual EN](tutorials/user_manual.en.md) / [Korean](tutorials/user_manual.ko.md) |
 | Existing operator | [GUI reference](gui/visual_structure.md), [Live details](gui/gui.md), [Replay](gui/run_replay.md), relevant workspace guide below |
-| Researcher / reviewer | [Paper](paper/README.md), [claim–evidence map](paper/09_claim_evidence_traceability.md), [reproducibility](paper/07_reproducibility.md), [limitations](paper/08_safety_ethics_and_limitations.md) |
+| Researcher / reviewer | [System architecture](runtime/architecture.md), [recorded results](runtime/evidence/2026-09-28-campaign-archive-audit.md), [inspection protocol](runtime/evidence/2026-09-28-campaign-archive-audit.md#reproduction-protocol), [safety boundaries](runtime/guardian_graphwide_safety.md) |
 | Developer | [Code snapshot](runtime/current_code_snapshot.md), [control model](runtime/three_level_control_model.md), [runtime](runtime/langgraph_runtime.md), [module contracts](modularity.md) |
-| Documentation contributor | [Writing standard](standards/documentation_standard.md), [paper standard](standards/paper_documentation_standard.md), [templates](templates/document_types.md), [contributing](../CONTRIBUTING.md) |
+| Documentation contributor | [Writing standard](standards/documentation_standard.md), [templates](templates/document_types.md), [contributing](../CONTRIBUTING.md) |
 
 ## 1.1 Documents by Type
 
@@ -88,7 +86,7 @@ machine-enforced metadata; it is not the complete repository file inventory.
 | Reference | Current implemented behavior with source ownership | [Runtime snapshot](runtime/current_code_snapshot.md) |
 | Guide | Operator/developer procedure | [Tutorials](tutorials/first_autonomous_run.md) |
 | Design / Plan | Proposed decisions or implementation work; check lifecycle and branch | [Plans](superpowers/plans/) · [Designs](superpowers/specs/) |
-| Evidence | Dated observations and checks, with limits | [Evidence map](paper/09_claim_evidence_traceability.md) |
+| Evidence | Dated observations and checks, with limits | [Evidence map](runtime/evidence/2026-09-28-campaign-archive-audit.md) |
 | Archive | Historical intent; never a current execution instruction | [Archive index](oldversion/README.md) |
 
 ## 1.2 Authority and Conflict Resolution
@@ -134,8 +132,8 @@ The table below points to operating instructions, not archived design proposals.
 | Runtime IDE | `/ide` | [Runtime IDE](runtime/runtime_ide.md) |
 | Module Management | `/module-management` | [Module lifecycle](modularity.md) |
 | Knowledge | `/knowledge` | [Wiki and memory](knowledge/wiki_memory.md) |
-| 3DP | `/printer` | [English](tutorials/device_workspace_3dp_usage.en.md) / [한국어](tutorials/device_workspace_3dp_usage.ko.md), [Bambu runtime](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
-| Vision Camera Bridge | `/device-bridge/vision-utm` | [English](tutorials/device_workspace_vision_camera_bridge_usage.en.md) / [한국어](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [ROS runtime](hardware/utm_ros_vision_runtime_bridge.md) |
+| 3DP | `/printer` | [English](tutorials/device_workspace_3dp_usage.en.md) / [Korean](tutorials/device_workspace_3dp_usage.ko.md), [Bambu runtime](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
+| Vision Camera Bridge | `/device-bridge/vision-utm` | [English](tutorials/device_workspace_vision_camera_bridge_usage.en.md) / [Korean](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [ROS runtime](hardware/utm_ros_vision_runtime_bridge.md) |
 | LeRobot | `/lerobot` | [Robot workspace](hardware/lerobot_robotis_manipulation_runtime_guideline.md), [dataset naming](runtime/lerobot_dataset_policy_naming.md) |
 | BO | `/bo` | [BO reference](agents/bo_agent.md) |
 | Windows Equipment | `/equipment/windows` | [Windows equipment guide](hardware/windows_pyautogui_equipment_agent_guideline.md) |
@@ -191,7 +189,9 @@ the specific tested nozzle sequence. Neither document replaces a live readiness 
 
 Current owner documentation lives in `runtime/`, `gui/`, `agents/`,
 `device_bridges/`, `hardware/` and `knowledge/`. Start-to-finish procedures
-live in `tutorials/`; research narrative and dated evidence live in `paper/`.
+live in `tutorials/`; dated experiment records live in `runtime/evidence/` and
+device-specific records in `hardware/evidence/`. The manuscript is maintained
+separately from repository documentation.
 `standards/` and `templates/` define authoring contracts.
 `maintenance/` records audits; `repository/` and `process/` describe contributor workflows.
 `superpowers/` contains work plans/designs with explicit lifecycle;
@@ -251,7 +251,6 @@ not a hardware trial. Run the governed-document validator from repository root:
 ## Related Documents
 
 - [Documentation standard](standards/documentation_standard.md)
-- [Paper standard](standards/paper_documentation_standard.md)
 - [Document templates](templates/document_types.md)
 - [Current code snapshot](runtime/current_code_snapshot.md)
 - [Historical governance design](oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md)

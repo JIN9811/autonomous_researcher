@@ -53,7 +53,7 @@ this reference does not claim a rerun.
 | LLM decision layer | Implemented / API and local-model verified without actuation |
 | Physical effect | Possible through existing gated printer tools |
 | Primary handoff | `specimen_fabricated.v1` → Vision / Manipulation |
-| Live hardware validation | [Campaign artifacts](../paper/evidence/2026-09-28-campaign-archive-audit.md) cover fifteen completed specimen records, without independently certifying every print; decision-layer tests are non-actuating |
+| Live hardware validation | [Campaign artifacts](../runtime/evidence/2026-09-28-campaign-archive-audit.md) cover fifteen completed specimen records, without independently certifying every print; decision-layer tests are non-actuating |
 | Known gap | Suitability decisions do not establish physical print quality |
 
 ### Module Ownership and Layout

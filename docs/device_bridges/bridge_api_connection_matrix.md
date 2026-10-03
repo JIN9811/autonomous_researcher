@@ -31,7 +31,6 @@ verified_against: dd0d772
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/agent_api_connection_matrix.md
-  - docs/paper/appendix_a_interfaces.md
 supersedes: []
 -->
 
@@ -259,5 +258,5 @@ instance; source inspection is not a new end-to-end hardware validation.
 
 - [Device Bridge Reference Index](README.md)
 - [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md)
-- [Interfaces Appendix](../paper/appendix_a_interfaces.md)
+- [Agent API connection matrix](../agents/agent_api_connection_matrix.md)
 - [Current Code Snapshot](../runtime/current_code_snapshot.md)

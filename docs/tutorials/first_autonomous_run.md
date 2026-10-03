@@ -4,12 +4,12 @@ Start with the first-run walkthrough, then follow the device guide for the hardw
 you intend to use. Each tutorial pairs exact GUI actions with screenshots,
 expected evidence and a recovery checkpoint.
 
-| Task | English | 한국어 |
+| Task | English | Korean |
 |---|---|---|
-| Start a first virtual experiment and inspect its results | [First run](first_autonomous_run.en.md) | [첫 실행](first_autonomous_run.ko.md) |
-| Configure devices, record demonstrations and review a session | [Operator walkthroughs](user_manual.en.md) | [운영자 실습](user_manual.ko.md) |
-| Save print settings, slice and inspect before printing | [3D Printer](device_workspace_3dp_usage.en.md) | [3D 프린터](device_workspace_3dp_usage.ko.md) |
-| Configure the UTM camera and distinguish pose tests from run evidence | [Vision](device_workspace_vision_camera_bridge_usage.en.md) | [비전](device_workspace_vision_camera_bridge_usage.ko.md) |
+| Start a first virtual experiment and inspect its results | [First run](first_autonomous_run.en.md) | [First run](first_autonomous_run.ko.md) |
+| Configure devices, record demonstrations and review a session | [Operator walkthroughs](user_manual.en.md) | [Operator walkthroughs](user_manual.ko.md) |
+| Save print settings, slice and inspect before printing | [3D Printer](device_workspace_3dp_usage.en.md) | [3D Printer](device_workspace_3dp_usage.ko.md) |
+| Configure the UTM camera and distinguish pose tests from run evidence | [Vision](device_workspace_vision_camera_bridge_usage.en.md) | [Vision](device_workspace_vision_camera_bridge_usage.ko.md) |
 
 For a map of every page rather than a procedure, see
 [GUI Structure and Screen Reference](../gui/visual_structure.md).

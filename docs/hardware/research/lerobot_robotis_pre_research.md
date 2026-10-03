@@ -1,55 +1,60 @@
-# 사전 조사 요약: ROBOTIS OMX-AI + Hugging Face LeRobot + Autonomous Researcher GUI
+<a id="사전-조사-요약-robotis-omx-ai--hugging-face-lerobot--autonomous-researcher-gui"></a>
+# Preliminary Research Summary: ROBOTIS OMX-AI + Hugging Face LeRobot + Autonomous Researcher GUI
 
-이 문서는 도입 전 조사 기록이며 아래의 "현재"는 조사 당시 기준이다.
-현재 설치된 package/API 및 동작 권한은 [LeRobot Reference](../../device_bridges/lerobot_bridge.md),
-agent handoff와 post-test clearance는 [Manipulation Reference](../../agents/manipulation_agent.md)를 따른다.
-외부 프로젝트의 기능 설명은 ATR에서 모든 기능이 검증됐다는 증거가 아니다.
+This is a pre-integration research record; “current” below refers to the time of that research.
+For installed packages/APIs and execution authority, use the [LeRobot Reference](../../device_bridges/lerobot_bridge.md);
+for agent handoff and post-test clearance, use the [Manipulation Reference](../../agents/manipulation_agent.md).
+Descriptions of external project features do not establish that every feature has been verified in ATR.
 
-## 1. 현재 프로젝트 기준선
+<a id="1-현재-프로젝트-기준선"></a>
+## 1. Project Baseline at the Time of Research
 
-현재 제공된 프로젝트 문서 기준으로 런타임은 `FastAPI Controller -> LangGraphRunLoop -> Stage Agent -> MCP Tool -> State Update -> Event Stream -> Web GUI` 구조를 유지해야 한다. 단계 순서는 active `graphs/configs/*.yaml` 전이에 의해 결정되며, 기본 closed-loop는 `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`이다. 기본 guardian=continue는 다시 design으로, stop/error는 complete/error로 라우팅된다.
+The project documents supplied for the research required the runtime to preserve `FastAPI Controller -> LangGraphRunLoop -> Stage Agent -> MCP Tool -> State Update -> Event Stream -> Web GUI`. Stage order is determined by the active `graphs/configs/*.yaml` transitions. The baseline closed loop was described as `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`; default guardian=continue returns to design, while stop/error routes to complete/error. This historical linear summary is not the full current conditional graph: current Vision/Manipulation and equipment-clearance transitions must be read from the active configuration.
 
-기존 agent contract는 `BaseAgent.run(state, ctx) -> AgentResult`이고, tool access는 `ToolRegistry.call(name, payload)` 형태의 MCP-style contract를 따른다.
+The existing agent contract is `BaseAgent.run(state, ctx) -> AgentResult`, with MCP-style tool access through `ToolRegistry.call(name, payload)`.
 
-현재 GUI 기준선은 웹 대시보드, Live GUI chat/handoff, SSE `/api/events/stream`, run controls, model status, agent status, device health, structured log viewer를 포함한다. test/replay/fault-injection 모드는 모든 hardware-facing component에 적용되어야 한다.
+The GUI baseline includes the web dashboard, Live GUI chat/handoff, SSE `/api/events/stream`, run controls, model status, agent status, device health, and a structured log viewer. The proposal requires test/replay/fault-injection modes for every hardware-facing component.
 
-## 2. 외부 조사 핵심
+<a id="2-외부-조사-핵심"></a>
+## 2. External Research Findings
 
 ### Hugging Face LeRobot
 
-LeRobot은 PyTorch 기반 real-world robotics framework이며, hardware-agnostic Python interface, LeRobotDataset, policy training/deployment tooling을 제공한다.
+The reviewed sources describe LeRobot as a PyTorch-based real-world robotics framework with a hardware-agnostic Python interface, LeRobotDataset, and policy training/deployment tools.
 
-OMX 문서에는 `lerobot-find-port`, `robot.type=omx_follower`, `teleop.type=omx_leader`, camera-enabled teleoperation, `pip install -e ".[dynamixel]"`가 명시되어 있다. OMX는 preconfigured 상태로 LeRobot 사용 전 추가 motor setup/calibration이 필요 없다고 문서화되어 있다.
+The reviewed OMX documentation specifies `lerobot-find-port`, `robot.type=omx_follower`, `teleop.type=omx_leader`, camera-enabled teleoperation, and `pip install -e ".[dynamixel]"`. It describes OMX as preconfigured, without additional motor setup/calibration before LeRobot use; this external statement does not waive ATR's installed-profile preflight checks.
 
-일반 LeRobot real robot imitation workflow는 teleoperate -> record dataset -> train policy -> inference/evaluation이다. `lerobot-record`는 dataset recording과 policy checkpoint를 넣은 evaluation/inference recording에도 사용된다. 최신 main 문서에서는 policy deployment용 `lerobot-rollout` CLI도 제공되며, base/sentry/highlight/dagger strategy와 sync/RTC inference backend를 지원한다고 문서화되어 있다.
+The general LeRobot real-robot imitation workflow is teleoperate -> record dataset -> train policy -> inference/evaluation. `lerobot-record` is also used for evaluation/inference recording with a policy checkpoint. The main-branch documentation reviewed at the time also described a `lerobot-rollout` deployment CLI with base/sentry/highlight/dagger strategies and sync/RTC inference backends.
 
 
-SO-101/SO101 호환성 측면에서는 LeRobot 공식 문서가 SO101 teleoperation 예시를 `robot.type=so101_follower`, `teleop.type=so101_leader`로 제시한다. 또한 LeRobot은 hardware-agnostic Robot interface와 Bring Your Own Hardware 통합 경로를 제공하므로, OMX-AI를 하드코딩하지 말고 robot profile / adapter registry로 분리하는 것이 장기 호환성에 맞다.
+For SO-101/SO101 compatibility, the reviewed official LeRobot examples use `robot.type=so101_follower` and `teleop.type=so101_leader`. Its hardware-agnostic Robot interface and Bring Your Own Hardware integration path support separating robot profiles/adapters into a registry rather than hard-coding OMX-AI for long-term compatibility.
 
 ### ROBOTIS OMX-AI / Physical AI Tools
 
-ROBOTIS OMX-AI는 OMX-L leader와 OMX-F follower로 구성되는 complete teleoperation set이다. ROBOTIS hardware page에 따르면 OMX-L은 5 DOF + gripper, USB-C host interface, TTL internal communication, 1 Mbps baudrate를 사용한다. OMX-F도 5 DOF + gripper이며 payload는 full reach 100 g, normal reach 250 g로 문서화되어 있다.
+The reviewed ROBOTIS hardware page describes OMX-AI as a complete teleoperation set with an OMX-L leader and OMX-F follower. OMX-L has 5 DOF + gripper, a USB-C host interface, TTL internal communication, and a 1 Mbps baud rate. OMX-F also has 5 DOF + gripper, with documented payloads of 100 g at full reach and 250 g at normal reach.
 
-ROBOTIS software page는 OMX가 ROS 2 Jazzy, ros2_control, 100 Hz joint control, Dynamixel SDK, TTL Dynamixel Protocol 2.0 기반이라고 설명한다. Physical AI Tools Web UI는 recording page의 Start/Stop/Retry/Next/Finish controls, dataset path, rosbag2 recording option, model inference page의 policy path/FPS/start/finish 등을 제공한다.
+The reviewed ROBOTIS software page describes OMX as based on ROS 2 Jazzy, ros2_control, 100 Hz joint control, Dynamixel SDK, and TTL Dynamixel Protocol 2.0. Physical AI Tools Web UI provides recording-page Start/Stop/Retry/Next/Finish controls, dataset paths, a rosbag2 recording option, and inference-page policy path/FPS/start/finish controls.
 
-## 3. 권장 통합 방향
+<a id="3-권장-통합-방향"></a>
+## 3. Proposed Integration Direction
 
-1. LeRobot/ROBOTIS live integration은 먼저 test-mode bridge로 구현하고, live subprocess/ROS2 integration은 후순위로 둔다.
-2. ROBOTIS OMX-AI는 초기 live hardware profile로 두고, SO-101은 test-mode compatibility profile 및 disabled live placeholder로 둔다. 구현은 `RobotProfile`/`LeRobotRobotAdapter` 중심으로 만들어 robot.type/teleop.type 교체만으로 확장되게 한다.
-3. 기존 `robot.pick_place` tool을 바로 바꾸지 말고 `lerobot.*` tool group을 추가한 뒤 Manipulation Agent에서 strategy별로 사용할 수 있게 한다.
-4. GUI는 기존 web dashboard와 Live GUI contract를 깨지 않고 LeRobot-specific tabs를 추가한다.
-5. 모든 start/stop/safe-stop 신호는 typed signal로 관리하고 session_id/run_id/experiment_id를 로그와 SSE에 포함한다.
-6. Vision Agent는 camera ownership을 유지하고 Manipulation Agent는 typed VisionObservation을 소비한다.
-8. 각 GUI surface마다 test-mode state machine, API tests, SSE tests, fault-injection tests를 둔다.
+1. Implement a test-mode bridge first; defer live subprocess/ROS2 integration.
+2. Use ROBOTIS OMX-AI as the initial live hardware profile and SO-101 as a test-mode compatibility profile with a disabled live placeholder. Build around `RobotProfile`/`LeRobotRobotAdapter` so robot.type/teleop.type can be changed for expansion.
+3. Add a `lerobot.*` tool group for strategy-specific use by Manipulation Agent rather than immediately replacing `robot.pick_place`.
+4. Add LeRobot-specific GUI tabs without breaking the existing web dashboard or Live GUI contract.
+5. Use typed signals for all start/stop/safe-stop actions and include session_id/run_id/experiment_id in logs and SSE.
+6. Keep camera ownership with Vision Agent; Manipulation Agent consumes typed VisionObservation.
+8. Provide a test-mode state machine, API tests, SSE tests, and fault-injection tests for each GUI surface.
 
 ## 4. Canonical implementation guideline
 
-현재 프로젝트에 맞춘 실제 구현 기준 문서는 다음 파일이다.
+The detailed implementation guideline for this project is:
 
 - `docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md`
 
-이 문서를 우선 기준으로 삼고, 본 사전조사 문서와 Codex 프롬프트는 배경/작업 지시 원자료로 사용한다.
+Use that guideline with its current-contract notice; this preliminary research document and the Codex prompt are background and original task-instruction material.
 
-## 5. Codex 파일
+<a id="5-codex-파일"></a>
+## 5. Codex File
 
-Codex용 상세 프롬프트는 `docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt`에 작성되어 있다.
+The detailed Codex prompt is retained at `docs/oldversion/system/codex_lerobot_robotis_gui_prompt.txt`.

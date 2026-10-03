@@ -17,7 +17,7 @@ last_verified: 2026-08-09
 verified_against: beca57f
 related_docs:
   - README.md
-  - docs/paper/README.md
+  - docs/README.md
 supersedes: []
 ---
 
@@ -30,7 +30,7 @@ changes. Detailed implementation history remains in Git.
 
 ### Added
 
-- [Retained 15-observation campaign audit](docs/paper/evidence/2026-09-28-campaign-archive-audit.md), distinguishing accepted measurements from failed attempts, recoveries, and unsupported claims of unattended operation.
+- [Retained 15-observation campaign audit](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-28-campaign-archive-audit.md), distinguishing accepted measurements from failed attempts, recoveries, and unsupported claims of unattended operation.
 - Screenshot-based GUI reference and bilingual tutorials for the existing application, with capture conditions and publication manifests.
 - Earlier one-cycle integration demonstration (`E-LIVE-LOOP-002`) for
   `run-20260907T043145Z-f6152b`: measured compression CSV, placement/clearance

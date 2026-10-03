@@ -9,9 +9,8 @@ summary: Records completion of one supervised integration cycle with measured co
 evidence_date: 2026-09-07
 method: Read-only audit of the latest operator-run cycle, loop-scoped results, event timestamps, CSV provenance, and SHA-256 digests.
 related_docs:
-  - docs/paper/06_evaluation_and_results.md
-  - docs/paper/09_claim_evidence_traceability.md
-  - docs/paper/evidence/2026-09-07-supervised-closed-loop.md
+  - docs/runtime/evidence/2026-09-28-campaign-archive-audit.md
+  - docs/runtime/evidence/2026-09-07-supervised-closed-loop.md
   - docs/runtime/loop_artifact_archiving.md
 supersedes: []
 ---
@@ -141,7 +140,7 @@ From repository root, with the separately retained local archive available:
 .venv/bin/python - <<'PY'
 import hashlib, json
 from pathlib import Path
-index = json.loads(Path('docs/paper/evidence/2026-09-07-latest-cycle-summary.json').read_text())
+index = json.loads(Path('docs/runtime/evidence/2026-09-07-latest-cycle-summary.json').read_text())
 for record in index['records']:
     path = Path(record['source_path'])
     assert hashlib.sha256(path.read_bytes()).hexdigest() == record['sha256'], path
@@ -149,7 +148,11 @@ print(f"{len(index['records'])} archived artifact hashes verified")
 PY
 ```
 
-Public package checks, which require no hardware or private archive:
+Historical public-package checks recorded on 2026-09-07 (no hardware or
+private archive was required). The manuscript-specific validator and tests
+were retired with the separate manuscript package; these commands preserve
+the audit provenance, not the current validation procedure. For current
+checks, see [Contributing](../../../CONTRIBUTING.md#tests-and-verification).
 
 ```bash
 .venv/bin/python scripts/validate_documentation.py
@@ -168,7 +171,6 @@ modified or reported as passing by this evidence update.
 
 ## Related Documents
 
-- [Evaluation and Results](../06_evaluation_and_results.md)
-- [Claim-Evidence Traceability](../09_claim_evidence_traceability.md)
+- [Later campaign results and provenance](2026-09-28-campaign-archive-audit.md)
 - [Earlier integration record](2026-09-07-supervised-closed-loop.md)
 - [Loop Artifact Archiving](../../runtime/loop_artifact_archiving.md)

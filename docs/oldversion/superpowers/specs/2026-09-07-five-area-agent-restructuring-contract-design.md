@@ -11,8 +11,8 @@ related_docs:
   - docs/runtime/three_level_control_model.md
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
-  - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
+  - docs/standards/documentation_standard.md
   - docs/templates/document_types.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
@@ -532,9 +532,9 @@ IDE outcome 라벨은 짧은 캡슐로 해당 연결선에 붙인다. 겹침 회
 검증은 ATR에 등록된 백엔드·모델 라우팅·기존 요청 옵션을 사용한다.
 기본 Design 경로는 `gemma4:e4b-it-nvfp4`이며, 등록된 31B 경로의 응답만으로
 Design의 기본 모델을 검증했다고 표현하지 않는다. 실행 조건과 확인 결과는
-[등록 경로 검증 기록](../../../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md)에 보존한다.
+[등록 경로 검증 기록](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md)에 보존한다.
 
-기존 [1사이클 실증](../../../paper/evidence/2026-09-07-latest-cycle-demonstration.md)은
+기존 [1사이클 실증](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md)은
 보존할 경로의 기준 근거이며 이 재구성의 검증 결과가 아니다. 이후 사용자 승인으로
 Design에 한해 [구현 계획](../plans/2026-09-07-design-decision-layer.md)과
 [5영역 Reference](../../../agents/design_agent.md)를 적용한다. 타 에이전트의 일괄
@@ -707,7 +707,7 @@ unknown/실패 사유를 전달한다. 수락/반려 예시는 같은 필수 인
 동일 조건 재측정에서 기대 선택 일치는 API 10/13 → 12/13, 로컬 9/13 → 12/13,
 고정 후 별도 입력은 API 6/6, 로컬 5/6이었다. 로컬의 같은 배경·다른 대상 상태 쌍
 오판은 남는다. 회귀 271 passed이며, 독립 정확도나 실제 폐루프 성공을 뜻하지 않는다.
-세부 한계와 측정 조건은 [범용 prompt 검증 기록](../../../paper/evidence/2026-09-08-vision-generic-prompt-verification.md)에 보존한다.
+세부 한계와 측정 조건은 [범용 prompt 검증 기록](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-08-vision-generic-prompt-verification.md)에 보존한다.
 
 ## Limitations and Known Gaps
 
@@ -807,5 +807,5 @@ Reference는 Design과 같은 6줄 Status at a Glance, 5영역 책임표, 도구
 - [Agent Reference 인덱스](../../../agents/README.md)
 - [API/Connection Matrix](../../../agents/agent_api_connection_matrix.md)
 - [문서 Standard](../../../standards/documentation_standard.md)
-- [논문 문서 Standard](../../../standards/paper_documentation_standard.md)
+- [논문 문서 Standard](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/standards/paper_documentation_standard.md)
 - [Loop Artifact Archiving](../../../runtime/loop_artifact_archiving.md)

@@ -1,14 +1,6 @@
 {
   "schema": "knowledge_publication.v1",
   "approved_assets": {
-    "docs/paper/06_evaluation_and_results.md": {
-      "sha256": "6dd193f747d89811b806abe2a95e3e778ef36397d58d519db059c5b6b9f429ef",
-      "review": "Owner-requested in-place copyedit reviewed 2026-10-03: original structure, research claims and evidence limits retained; no new experiment data, credentials, device actions or physical verification claims."
-    },
-    "docs/paper/09_claim_evidence_traceability.md": {
-      "sha256": "69d90abeb4eef087d25ce5463cee7247c152d06fdb477117855cb48fac922aec",
-      "review": "Owner-requested in-place copyedit reviewed 2026-10-03: original structure, claim/evidence mapping and dated scope retained; no new experiment data, credentials, device actions or physical verification claims."
-    },
     "docs/maintenance/documentation_review_20260929.md": {
       "sha256": "1c2dae6b31cc032f73f9db76bf50b110c018fb7b1f459dc3878ee1022078cb9d",
       "review": "Owner-requested documentation publication: current-contract annotations and text-only audit reviewed 2026-10-01; no new raw experiment records, credentials, device actions, or physical verification claims."
@@ -690,28 +682,8 @@
       "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
     },
     "docs/hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md": {
-      "sha256": "e516525191ab30025eb2ab3ba416e4fca160b779559d6999f138063618584419",
-      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added. Owner-requested documentation publication: current-contract annotations and text-only audit reviewed 2026-10-01; no new raw experiment records, credentials, device actions, or physical verification claims."
-    },
-    "docs/paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md": {
-      "sha256": "93df15c2fbf0022223d04c2c648e1fbf8f6e1d5dd1054764ea5e9eedbd4a8e68",
-      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
-    },
-    "docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md": {
-      "sha256": "2874d8e44d59cef2e28748df02d4742c1ba861ac113f3d4e0dc5587bfc5f924b",
-      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
-    },
-    "docs/paper/evidence/2026-09-08-vision-generic-prompt-verification.md": {
-      "sha256": "426b469854978c69207621f57916d36c4fbb78393428fe60d6dcc2b08ea64ef8",
-      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
-    },
-    "docs/paper/evidence/2026-09-09-analysis-improvement-validation.md": {
-      "sha256": "437cf3fff87e885b7d742133d4d87081b1a0b5ed793a55dcdc79f81980a6417f",
-      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
-    },
-    "docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md": {
-      "sha256": "134b938ecf3f1273f04a6257b8099de6129a88909f789cc7bbe3bdce526ca9ad",
-      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+      "sha256": "2a9552b54914331e597078129e20ca1e05ffb32d0c7fea7b3b38b4cad0b7c991",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
     },
     "docs/runtime/evidence/2026-09-06-loop-artifact-archiving-tests.md": {
       "sha256": "fd617a137ea86b733f621a7bad3338e54494871de5e9734fcb3f6ad77ee0d071",
@@ -724,6 +696,54 @@
     "docs/runtime/evidence/guardian_improvement_09_audit.md": {
       "sha256": "32477d02c5422148a62e11ab9f978771aea327f064604bd0fcdb2d4c1ea4f05f",
       "review": "Existing public Guardian evidence reviewed 2026-10-01 for owner-requested documentation publication. Current-contract annotations preserve historical scientific measurements and test outcomes; no private records, credentials or new physical verification claims."
+    },
+    "docs/runtime/evidence/2026-09-07-closed-loop-summary.json": {
+      "sha256": "d1d8818db22d9a19f23d00cee933c1237b066ab14749e9403a61c4e64f29d37b",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md": {
+      "sha256": "93df15c2fbf0022223d04c2c648e1fbf8f6e1d5dd1054764ea5e9eedbd4a8e68",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-07-latest-cycle-demonstration.md": {
+      "sha256": "0b0b1d7e553056d2d4ebcbc67756ececa252ae21ca635e3cc46324fefae3b632",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-07-latest-cycle-summary.json": {
+      "sha256": "63b3738a36e4d993c126ab7305d2ee630075cd69640c67d6f47aaffe3eeb79e7",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-07-supervised-closed-loop.md": {
+      "sha256": "42e86a37e291b5f9a9a08af87cfbf6c2ed33369a809d35386577736584c05d7b",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-08-vision-generic-prompt-verification.md": {
+      "sha256": "426b469854978c69207621f57916d36c4fbb78393428fe60d6dcc2b08ea64ef8",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-28-campaign-archive-audit.md": {
+      "sha256": "453a8542d0b6457a4d46166df9bcb24529362cc4edc2774523d2e69bbb41dbec",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-28-campaign-archive-summary.json": {
+      "sha256": "bf1c396ab8326caacf07699fc697c57e82f7b1d379a035e87b58e17f4107030a",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/architecture_inspection.md": {
+      "sha256": "eba193c35af317ee77de66f0561ac195b59081f71c2b155dd2fda4af46713a52",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/documentation_validation.md": {
+      "sha256": "a4f3d919c228d29752cb06992e71f32b211c310520373f12fb93edb4077ff605",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md": {
+      "sha256": "f9c2abd0d156d7998a37c89fec5aab44ccddf8772774dec65dc8f6f28a954e06",
+      "review": "Reviewed 2026-10-03 for the owner-requested manuscript retirement. Previously public evidence retained; only location, navigation, and explicit historical-scope notes changed where needed. Recorded measurements, outcomes, source hashes, limitations, and private/public boundaries are unchanged. No new run data, credentials, hardware actions, or physical validation claims."
+    },
+    "docs/maintenance/code_documentation_audit_20260928.md": {
+      "sha256": "529d4d6802c4e62bb99f4b5dbea1c55052e57221090d81b06627386dd68d5b22",
+      "review": "Reviewed 2026-10-03: existing public audit preserved; only related-document navigation changed after manuscript retirement. Historical measurements, conclusions, and verification scope unchanged; no new private data or hardware evidence."
     }
   },
   "approved_corpora": [

@@ -15,7 +15,7 @@ summary: Defines private vulnerability reporting and safe disclosure boundaries 
 related_docs:
   - README.md
   - CONTRIBUTING.md
-  - docs/paper/08_safety_ethics_and_limitations.md
+  - docs/runtime/guardian_graphwide_safety.md
 supersedes: []
 ---
 

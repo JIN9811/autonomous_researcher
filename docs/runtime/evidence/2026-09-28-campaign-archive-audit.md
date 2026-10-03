@@ -9,9 +9,8 @@ summary: Read-only reconciliation of fifteen retained Gyroid experiment iteratio
 evidence_date: 2026-09-28
 method: Inspect completed owner results, verify preserved artifact hashes and identities, and reproduce the recorded SEA normalization.
 related_docs:
-  - docs/paper/evidence/2026-09-28-campaign-archive-summary.json
+  - docs/runtime/evidence/2026-09-28-campaign-archive-summary.json
   - docs/runtime/loop_artifact_archiving.md
-  - docs/paper/06_evaluation_and_results.md
 supersedes: []
 -->
 
@@ -92,11 +91,14 @@ automatically attributed to this later campaign.
 ## Verification
 
 The read-only protocol above was executed on 2026-09-28. All 15 required
-iteration sets were present. The public summary is content-hashed in the paper
-artifact manifest; private source files were read, not modified.
+iteration sets were present. The public summary was content-hashed in the
+[then-current manuscript manifest](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/artifact_manifest.yaml).
+It is now retained under `docs/runtime/evidence/` with a reviewed hash in the
+[publication allowlist](../../knowledge/publication_allowlist.json). Private
+source files were read, not modified.
 
 ## Related Documents
 
 - [Analysis definition](../../agents/analysis_agent.md)
 - [BO owner](../../agents/bo_agent.md)
-- [Claim-evidence map](../09_claim_evidence_traceability.md)
+- [Loop artifact retention](../loop_artifact_archiving.md)

@@ -363,7 +363,7 @@ stop/start races, port ownership, partial cleanup failure and measured return;
 `tests/unit/test_utm_clear_cycle.py` covers downstream gates and cancellation.
 These are non-actuating tests. At that 2026-09-06 check, the new managed wrapper
 and post-sweep Vision confirmation had not been commissioned on hardware.
-The later [2026-09-07 supervised cycle](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+The later [2026-09-07 supervised cycle](../runtime/evidence/2026-09-07-supervised-closed-loop.md)
 records its own physical scope; neither record commissions every replay/profile.
 Broader pre-existing
 bridge failures were not hidden or treated as passing by this focused check.

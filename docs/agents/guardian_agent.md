@@ -26,7 +26,6 @@ related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
   - docs/agents/orchestrator_agent.md
-  - docs/paper/08_safety_ethics_and_limitations.md
   - docs/runtime/guardian_graphwide_safety.md
   - docs/modularity.md
 supersedes: []
@@ -393,6 +392,6 @@ remain external requirements.
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Orchestrator Agent](orchestrator_agent.md)
 - [Three-Level Control Model](../runtime/three_level_control_model.md)
-- [Safety, Ethics, and Limitations](../paper/08_safety_ethics_and_limitations.md)
+- [Guardian graph-wide safety](../runtime/guardian_graphwide_safety.md)
 - [Guardian Graph-wide Safety](../runtime/guardian_graphwide_safety.md)
 - [Security Policy](../../SECURITY.md)

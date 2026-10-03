@@ -12,7 +12,10 @@
 
 ## Starting a scenario
 
-In the Live GUI, enter `테스트 모드, 가상 브릿지`, `테스트 모드, 실제 프린터`, or `테스트 모드, 실제 출력`.
+In the Live GUI, select a scenario with one of these Korean command aliases:
+`테스트 모드, 가상 브릿지` (Test Mode, Virtual Bridge),
+`테스트 모드, 실제 프린터` (Test Mode, Installed Printer), or
+`테스트 모드, 실제 출력` (Test Mode, Physical Print).
 The model acts as the researcher: it asks about experiments, agrees to planning,
 answers setup questions, and approves the reviewed test plan. It uses saved
 scenario facts without injecting them wholesale into chat or admission. Each
@@ -35,10 +38,10 @@ Human chat takes over; stop, emergency stop, and session reset stop the input pr
 
 If initial ORC admission is deferred, automatic continuation resumes that same review in the background without starting a new series. The input producer remains available for subsequent runtime questions, including when admission allocated a new run before returning the deferred result.
 
-Bare `테스트 모드` does not authorize an arbitrary physical profile. The existing printer-choice prompt remains until the operator selects a mode.
+The bare Korean command alias `테스트 모드` (Test Mode) does not authorize an arbitrary physical profile. The existing printer-choice prompt remains until the operator selects a mode.
 
-The ORC classifier recognizes these workflow commands, including `설치 프린터`
-as an Installed Printer alias. A standalone test command starts automatic
+The ORC classifier recognizes these workflow commands, including the Korean command alias
+`설치 프린터` (Installed Printer). A standalone test command starts automatic
 conversation, not a saved-Setup edit. Ordinary experiments use the same dialogue
 with human replies. The greeting is bilingual; later replies follow the user's
 language. Intervening system questions preserve agreed values and the pending

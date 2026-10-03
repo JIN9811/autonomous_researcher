@@ -65,14 +65,15 @@ the LLM belongs to Middle. Mode policy still determines whether a particular run
 uses a real model; the badge alone is not execution evidence. Existing High,
 Middle, Low and cross-cutting background areas remain unchanged.
 
-## 한국어 요약
+<a id="한국어-요약"></a>
 
-각 에이전트 내부에서 **High-Level Control**은 LLM 추론·의사결정,
-**Middle-Level Control**은 API·내부 프로세스·계산·툴 디스패치,
-**Low-Level Control**은 실제 장비/브릿지 실행 경계입니다. Guardian은 세 계층 모두를 차단·검토할 수 있는
-안전면이고, Knowledge/Evidence는 모든 계층의 근거를 보존하는 증거면입니다.
-Device Workspace는 동일한 bridge를 사용할 수 있지만 자동 루프 밖의 수동
-운영면이므로 세 계층의 자동 진행과 동일시하지 않습니다.
+## Cross-Level Boundaries
+
+- **Guardian** can block or request review across all three control levels.
+- **Knowledge/Evidence** preserves the evidence produced at each level.
+- **Device Workspaces** provide manual operation outside the automatic loop.
+  Reusing the same device bridge does not make a workspace action an automatic
+  stage transition.
 
 ## Control Diagram
 

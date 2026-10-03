@@ -1,5 +1,5 @@
 ---
-{"topic_id":"design-role","owner":"design_agent","source_refs":["docs/agents/design_agent.md","docs/runtime/three_level_control_model.md"],"source_revision":{"docs/agents/design_agent.md":"5f3df4d37e8db19355efcb465dcd8b7f5fe06da12fc00c67300c9346a47d41f4","docs/runtime/three_level_control_model.md":"e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: design-role","status":"reviewed"}
+{"topic_id":"design-role","owner":"design_agent","source_refs":["docs/agents/design_agent.md","docs/runtime/three_level_control_model.md"],"source_revision":{"docs/agents/design_agent.md":"84d1e75fb3727cdcf530209ad8777daf80ffbfebdf2c6d413ca3f4a9535e0517","docs/runtime/three_level_control_model.md":"738af5921723e41f1d3fade400aa57a80dc84dddcc56a36c30f28fcebcad0b85"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: design-role","status":"reviewed"}
 ---
 
 # Design Agent — Specifications and Candidate Review

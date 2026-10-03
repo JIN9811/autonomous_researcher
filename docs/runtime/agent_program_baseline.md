@@ -212,7 +212,7 @@ Current tool-level event producer:
 - `printer.prepare` emits per-step progress for the Specimen Making Agent path.
 - `lerobot.*` emits per-step progress for the Manipulation Agent / LeRobot path.
 - `equipment.pyautogui.run` emits per-step progress for the Equipment Agent / Windows GUI macro path.
-- Main loop stage order includes `Manipulation -> Equipment -> Analysis`; Equipment stage results are stored in `run_metadata.equipment_result`, `run_metadata.equipment_handoff`, and summary fields under `latest_analysis`.
+- The main loop returns from Manipulation to executable Vision verification before Equipment; identity-scoped UTM-clearance routes may also run before Analysis. Equipment results are stored in `run_metadata.equipment_result`, `run_metadata.equipment_handoff`, and summary fields under `latest_analysis`.
 - Equipment validation requires `equipment_result` and `protocol_note`. If `equipment_result.ok` is false, the loop retries or errors instead of continuing to Analysis.
 - Analysis Agent reads UTM data from `run_metadata.equipment_result.utm_data`/`utm_curve`/`curve` or from `result_file`/`result_path`/CSV/JSON paths.
 - Test mode may synthesize a deterministic UTM curve when no data is available; live mode must not fabricate UTM metrics and returns `UTM_DATA_REQUIRED` when no readable data is present.
@@ -221,7 +221,7 @@ Current tool-level event producer:
 
 ## Tool Contract Baseline (MCP-style)
 
-Current tool names expected by agents:
+Current shared tool names (availability does not imply a module invokes them):
 
 - `printer.prepare`
 - `camera.capture`
@@ -232,12 +232,6 @@ Current tool names expected by agents:
 - `equipment.pyautogui.run`
 - `equipment.pyautogui.connection_status`
 - `equipment.pyautogui.save_connection`
-- `cae.health`
-- `calculix.health`
-- `calculix.prepare_input`
-- `calculix.solve`
-- `calculix.postprocess`
-- `calculix.run_job`
 - `pinn.health`
 - `pinn.dataset.build`
 - `pinn.train`
@@ -262,7 +256,13 @@ Current tool names expected by agents:
 - `lerobot.policy.download`
 - `device.health`
 
-Payload baseline:
+Retired tool names retained for historical integration records: `cae.health`,
+`calculix.health`, `calculix.prepare_input`, `calculix.solve`,
+`calculix.postprocess`, and `calculix.run_job`. The current bootstrap does not
+register CAE/CalculiX tools. It still registers `pinn.*`, but the current Analysis
+owner does not invoke them or depend on a device bridge.
+
+Payload baseline (CAE/CalculiX rows are historical contracts, not available current tools):
 
 | Tool | Minimal payload keys | Typical response keys |
 |---|---|---|
@@ -317,15 +317,15 @@ Equipment-specific integration rule:
 - Saved Windows bridge candidates use aliases, for example `windows_pyautogui_pc_1`, so LLM/tool-call planning can refer to a stable device identity and quick-connect later.
 - `program1` is the setup demo macro: after PyAutoGUI is installed on Windows it briefly moves the mouse and returns `program_log: "program1 completed"`.
 
-Analysis/BO/Guardian multi-fidelity integration rule:
+Analysis/BO/Guardian evidence integration and compatibility:
 
 - `AnalysisAgent` owns measured-data evidence, processed curves, metrics and the configured objective.
-- Analysis emits `analysis.multifidelity_comparison` with schema `multifidelity_comparison.v1`, `analysis.trust_score` with schema `trust_score.v1`, and `bo_handoff.schema_version=analysis_bo_handoff_v2`.
+- Analysis retains `bo_handoff.schema_version=analysis_bo_handoff_v2`. Its compatibility `analysis.trust_score` slot now contains `schema=analysis_admissibility.v1`, `score=null`, empty components/weights, and `gate=allow_bo` only when analysis succeeds and data is valid for metrics; otherwise it is `block`. It is not a weighted trust score, and optional model calibration does not block valid data. The earlier `multifidelity_comparison.v1` and `trust_score.v1` outputs are historical contracts, not guaranteed current Analysis outputs.
 - `experiments.schemas` defines additive typed records: `UTMRecord`, `FEAResult`, `PINNModelRecord`, `MultifidelityJob`, and `TrustScore`.
-- `device_bridges/pinn_bridge.py` is the explicit PINN/surrogate contract. If no active model is registered, `pinn.predict` returns `PINN_MODEL_UNAVAILABLE`; Analysis should display PINN as unavailable, not as a failed experiment.
-- `BOAgent` must read `analysis_bo_handoff_v2.trust_score` and `multifidelity_comparison`; `trust_gate=block` or `calibrate_only` prevents BO from treating the result as a normal optimization observation.
-- `GuardianAgent` must inspect `trust_score` and `multifidelity_comparison`. A blocking trust gate is a recoverable consistency issue unless a higher-priority stop condition exists.
-- Live GUI Analysis reports must render trust score/gate, UTM-FEA agreement, PINN availability, provenance/artifact links, and curve/contour evidence as report components rather than raw JSON.
+- `device_bridges/pinn_bridge.py` remains the standalone PINN/surrogate contract. If no active model is registered, `pinn.predict` returns `PINN_MODEL_UNAVAILABLE`. This is not an Analysis experiment failure; the current Analysis owner does not call PINN.
+- `BOAgent` reads `analysis_bo_handoff_v2.trust_score` and preserves supplied `multifidelity_comparison` for compatibility; `trust_gate=block` or `calibrate_only` prevents treating the result as a normal optimization observation.
+- `GuardianAgent` inspects `trust_score` and preserves supplied `multifidelity_comparison`. A blocking trust gate is a recoverable consistency issue unless a higher-priority stop condition exists.
+- Current Live GUI Analysis reports render measured curves, quality/admissibility gates, metrics, the configured objective, and provenance/artifact links. The earlier requirement for UTM-FEA agreement, PINN availability, and contour evidence describes the retired multi-fidelity presentation, not evidence that current Analysis generates. Historical evidence remains inspectable; reports should present available evidence as components rather than raw JSON.
 - Live GUI chat keeps each agent's operator-visible message. Completed loops may be collapsed into `Nth Loop Complete`, but expanding the loop must still show each agent message; system events are compact one-line entries.
 
 LeRobot-specific integration rule:
@@ -408,7 +408,7 @@ Frequently written by run loop merge:
 
 ## Live GUI Design Handoff Gate
 
-- The `실험 수행` trigger is not allowed to call Design Agent with fabricated defaults.
+- The Korean command alias `실험 수행` (Run Experiment) is not allowed to call Design Agent with fabricated defaults.
 - Before handoff, the controller must confirm these required values from the current Live GUI session:
   - experiment objective or evaluation metric
   - material
@@ -421,16 +421,16 @@ Frequently written by run loop merge:
   - `nozzle_diameter_mm=0.4`
   - `layer_height_mm=0.2`
   - `storage=internal`
-- In normal Live GUI mode, `실험 수행` builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds through the active printer bridge. The default bridge is Bambu Lab X2D; PrusaLink upload/start is used only when Prusa MK4S is explicitly selected.
-- In Live GUI `테스트 모드` and Main GUI `test`, the 3D Printer workspace's saved `test_unit_cell_size_mm` supplies a compatibility fallback (`cell_size_mm=10.0` when missing), not a fixed generated candidate. Explicit experimental inputs take precedence; LHS/BO candidates use the experimental contract's cell-size and wall-thickness bounds (test defaults: 5–10 mm and 0.6–1.2 mm).
-- In Live GUI `테스트 모드` and Main GUI `test`, `print.start_immediately` remains false until Specimen Making Agent asks for a printer path. Choosing `설치 프린터` promotes the printer step to the selected-printer ejection-only project-file path derived from the actual sliced artifact. Choosing `실제 출력` promotes the printer step to the full physical upload/start/print path.
-- Live GUI one-shot commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, `테스트 모드, 실제 프린터`, and `테스트 모드, 실제 출력` inject the selected `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without the separate printer-path prompt.
+- In normal Live GUI mode, the Korean command alias `실험 수행` (Run Experiment) builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds through the active printer bridge. The default bridge is Bambu Lab X2D; PrusaLink upload/start is used only when Prusa MK4S is explicitly selected.
+- In Live GUI Test Mode (Korean command alias: `테스트 모드`) and Main GUI `test`, the 3D Printer workspace's saved `test_unit_cell_size_mm` supplies a compatibility fallback (`cell_size_mm=10.0` when missing), not a fixed generated candidate. Explicit experimental inputs take precedence; LHS/BO candidates use the experimental contract's cell-size and wall-thickness bounds (test defaults: 5–10 mm and 0.6–1.2 mm).
+- In Live GUI Test Mode (Korean command alias: `테스트 모드`) and Main GUI `test`, `print.start_immediately` remains false until a printer path is selected. Installed Printer (Korean command alias: `설치 프린터`) promotes the printer step to the selected-printer ejection-only project-file path derived from the actual sliced artifact. Physical Print (Korean command alias: `실제 출력`) promotes the printer step to the full physical upload/start/print path.
+- Live GUI one-shot Korean command aliases `테스트 모드, 가상 브릿지` (Test Mode, Virtual Bridge), `테스트 모드, 설치 프린터` and `테스트 모드, 실제 프린터` (Test Mode, Installed Printer), and `테스트 모드, 실제 출력` (Test Mode, Physical Print) select `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without a separate printer-path prompt. These commands enter the shared automatic scenario dialogue and admission path; they do not bypass plan review or directly dispatch an agent.
 - If any required value is missing, the Live GUI must append an Orchestrator message that includes:
   - current confirmed values
   - missing values
   - field-level examples
-  - one complete example sentence ending with `실험 수행`
-- Test mode is the exception: `테스트 모드` still lets the LLM generate explicit test values and displays those generated values before handoff.
+  - one complete example sentence ending with the Korean command alias `실험 수행` (Run Experiment)
+- Test mode is the exception: the Korean command alias `테스트 모드` (Test Mode) lets the LLM generate explicit test values and displays those generated values before handoff.
 
 ## Test Mode Baseline
 

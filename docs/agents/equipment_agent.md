@@ -52,7 +52,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | LLM decision layer | Implemented; archived terminal evidence checked through registered API/local models |
 | Physical effect | Existing gated Skills and Windows/Local workers only |
 | Primary handoff | Verified CSV/readiness → Manipulation clearance → fresh Vision → Analysis |
-| Live hardware validation | Prior physical proof plus a [later multi-cycle archive](../paper/evidence/2026-09-28-campaign-archive-audit.md); fifteen completed Equipment records and two failed attempts retained, not a new commissioning test |
+| Live hardware validation | Prior physical proof plus a [later multi-cycle archive](../runtime/evidence/2026-09-28-campaign-archive-audit.md); fifteen completed Equipment records and two failed attempts retained, not a new commissioning test |
 | Known limit | One unchanged registered-model retry completed; the first attempt stopped on a Knowledge tool-contract error, so both outcomes remain in the reliability record |
 
 ## Summary and Actual Role
@@ -718,7 +718,7 @@ workflow, locked entry gate, optional Vision, CSV/readiness and GUI projections,
 and Windows pairing/packaging. The 2026-09-07 GUI checks covered coalesced polling,
 retry and terminal evidence retention. The earlier physical eight-block Equipment
 → UTM clear → Analysis → BO-managed LHS → Design run is documented separately in
-the [supervised closed-loop demonstration](../paper/evidence/2026-09-07-supervised-closed-loop.md).
+the [supervised closed-loop demonstration](../runtime/evidence/2026-09-07-supervised-closed-loop.md).
 That historical execution does not validate this new decision layer. Automated
 tests do not actuate the physical UTM; no hardware execution, deployment or service
 restart is part of this reconstruction.

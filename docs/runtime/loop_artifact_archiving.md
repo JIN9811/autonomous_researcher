@@ -38,7 +38,7 @@ supersedes: []
 
 ## Summary
 
-The [2026-09-28 retained-campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+The [2026-09-28 retained-campaign audit](evidence/2026-09-28-campaign-archive-audit.md)
 checks fifteen completed observation sets and all 485 invocation statuses.
 This verifies artifact retention, not every physical action, and does not erase failed attempts.
 

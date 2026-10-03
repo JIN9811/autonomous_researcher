@@ -39,7 +39,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | LLM decision layer | Processing selection and evidence review; numerical results remain code-owned |
 | Physical effect | None; no device bridge dependency |
 | Primary handoff | `bo_observation.v1` and `analysis_bo_handoff_v2`, with provenance |
-| Verification scope | Numerical/contract regressions plus [15 retained observation sets](../paper/evidence/2026-09-28-campaign-archive-audit.md): identity, canonical curve/metrics hashes and SEA normalization checked; no new physical test |
+| Verification scope | Numerical/contract regressions plus [15 retained observation sets](../runtime/evidence/2026-09-28-campaign-archive-audit.md): identity, canonical curve/metrics hashes and SEA normalization checked; no new physical test |
 | Known gap | No validated measurement-error estimator; observation uncertainty remains unset |
 
 ## Overview and Responsibilities
@@ -215,7 +215,7 @@ controlled LLM responses and blocked device boundaries, not new registered-model
 or physical validation. At that revision, the wider legacy UI suite and
 documentation validator reported unrelated Equipment/Windows expectations; this is
 not a claim that every repository test passes. The prior supervised physical demonstration
-is documented separately in the [cycle evidence](../paper/evidence/2026-09-07-supervised-closed-loop.md).
+is documented separately in the [cycle evidence](../runtime/evidence/2026-09-07-supervised-closed-loop.md).
 
 ## Validation warnings and archived-data recovery
 

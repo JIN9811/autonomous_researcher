@@ -60,7 +60,7 @@ Main GUI: **Bayesian Optimization · Workspace** opens the optimization workspac
 | Numeric candidate authority | LHS / BoTorch; two continuous variables by default |
 | Physical effect | None |
 | Primary handoff | `next_design_request.v1` → Orchestrator → Design |
-| Live hardware validation | BO has no device authority; [15-cycle archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains recommendations and terminal final report; no controlled optimization-benefit claim |
+| Live hardware validation | BO has no device authority; [15-cycle archive](../runtime/evidence/2026-09-28-campaign-archive-audit.md) retains recommendations and terminal final report; no controlled optimization-benefit claim |
 | Known gap | No demonstrated optimization gain from the LLM decision layer |
 
 ## Installed Package and Executable Structure
@@ -506,7 +506,7 @@ The [redacted verification record](assets/verification/bo_decisions_2026-09-10.j
 retains run IDs, exact coordinates, tool sequences and timings. Reproduce with
 `scripts/verify_bo_decisions.py --execute` against available registered providers.
 
-The [supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+The [supervised integration record](../runtime/evidence/2026-09-07-supervised-closed-loop.md)
 remains historical evidence for the prior loop: BO-managed LHS point 2/8
 reached Design. It is not evidence for this new LLM strategy layer or for
 acquisition-stage optimization gain.

@@ -18,8 +18,7 @@ last_verified: 2026-09-29
 verified_against: dd0d772
 related_docs:
   - docs/agents/agent_api_connection_matrix.md
-  - docs/paper/02_system_architecture.md
-  - docs/paper/appendix_a_interfaces.md
+  - docs/runtime/architecture.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
   - docs/standards/documentation_standard.md
@@ -231,7 +230,7 @@ sidecars, and explicit `complete` and `error` nodes.
 
 | Reader | Start here | Then read |
 |---|---|---|
-| Paper reviewer | [Matrix](agent_api_connection_matrix.md) | System, platform, and interface paper chapters |
+| Researcher / reviewer | [Matrix](agent_api_connection_matrix.md) | Control model, module contracts, and recorded evidence |
 | Operator | Relevant physical agent | Safety/effect, errors/recovery, GUI, then hardware Guide |
 | Agent developer | Relevant agent Reference | Python class, module manifest, adjacent handoff owner |
 | API integrator | Matrix API view | Relevant Reference API and connection tables, then OpenAPI |
@@ -283,7 +282,7 @@ Use this order for current behavior:
 
 ```text
 executable code and checked-in configuration
--> active Documentation/Paper Standard
+-> active Documentation Standard
 -> these active agent References and the matrix
 -> active runtime/hardware Guides
 -> approved Designs
@@ -332,7 +331,7 @@ When an agent contract changes:
 3. update the matrix if handoff, API, connection, effect, or safety boundaries
    change;
 4. update adjacent References only for their handoff summary;
-5. run documentation and paper publication validators;
+5. run documentation validation and the staged publication-boundary check;
 6. do not promote a new route or tool to live evidence without a qualifying
    evidence record.
 
@@ -358,7 +357,7 @@ or physical-cycle performance.
   checks and the separation of public documentation from private context.
 
 - [Agent API and Connection Matrix](agent_api_connection_matrix.md)
-- [System Architecture](../paper/02_system_architecture.md)
-- [Platform Architecture](../paper/04_platform_architecture.md)
-- [Interfaces Appendix](../paper/appendix_a_interfaces.md)
+- [System Architecture](../runtime/architecture.md)
+- [Platform Architecture](../modularity.md)
+- [Agent API connection matrix](agent_api_connection_matrix.md)
 - [Current Code Snapshot](../runtime/current_code_snapshot.md)

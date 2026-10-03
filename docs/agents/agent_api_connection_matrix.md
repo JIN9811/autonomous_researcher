@@ -35,7 +35,6 @@ verified_against: dd0d772
 related_docs:
   - docs/agents/README.md
   - docs/runtime/three_level_control_model.md
-  - docs/paper/appendix_a_interfaces.md
   - docs/runtime/current_code_snapshot.md
   - docs/modularity.md
 supersedes: []
@@ -373,7 +372,6 @@ References; this update performs no model inference or device actuation.
 ## Related Documents
 
 - [Agent Reference Index](README.md)
-- [System Architecture](../paper/02_system_architecture.md)
-- [Platform Architecture](../paper/04_platform_architecture.md)
-- [Interfaces Appendix](../paper/appendix_a_interfaces.md)
+- [System Architecture](../runtime/architecture.md)
+- [Platform Architecture](../modularity.md)
 - [Current Code Snapshot](../runtime/current_code_snapshot.md)

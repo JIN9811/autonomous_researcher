@@ -274,7 +274,8 @@ utm_vision_runtime:
   allow_virtual_bridge_in_test: true
 ```
 
-The runtime command always prepends:
+Illustrative launch environment and command sequence for the recorded local
+installation (not fixed values for every installation):
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -288,6 +289,11 @@ export UTM_CAMERA_FPS=60.0
 export UTM_CAMERA_PIXEL_FORMAT=mjpeg2rgb
 bash /home/<user>/external_repos/UTM/scripts/start_utm_vision_stack.sh
 ```
+
+The installed bridge builds camera environment values from the saved camera
+configuration and applies the best-effort V4L2 control to that selected device.
+The `/dev/video0` example is not a hard-coded device requirement. Setup paths,
+model location, FPS, and pixel format must match the configured installation.
 
 ## Low-Latency Image Transport Contract
 
@@ -450,7 +456,8 @@ artifacts/browser_checks/utm_runtime_live_gui_flow_compact.png
 artifacts/browser_checks/utm_live_gui_test_mode_fullpath_summary.json
 ```
 
-The full-path summary records that historical Live GUI `테스트 모드, 가상 브릿지` fixture:
+The full-path summary records the historical Live GUI `테스트 모드, 가상 브릿지`
+(“Test mode, Virtual Bridge”) fixture:
 it completed with `workflow_complete=true`, `stage=complete`, `loop_count=5`, and
 messages from Design through Guardian. Five loops is that fixture's count, not
 a universal completion requirement for current configured runs.

@@ -9,11 +9,10 @@ audience:
   - researcher
 scope:
   - repository_contributions
-  - paper_documentation
-summary: Defines how to propose, verify, and review code and paper-documentation contributions to ATR.
+  - repository_documentation
+summary: Defines how to propose, verify, and review code and documentation contributions to ATR.
 related_docs:
   - docs/standards/documentation_standard.md
-  - docs/standards/paper_documentation_standard.md
   - docs/README.md
   - SECURITY.md
 supersedes: []
@@ -66,32 +65,31 @@ git diff --check
 .venv/bin/python scripts/validate_documentation.py
 ```
 
-Paper-facing changes also run:
+Documentation changes also run:
 
 ```bash
-.venv/bin/python scripts/validate_paper_publication.py
 .venv/bin/python -m pytest -q \
   tests/unit/test_documentation_validation.py \
-  tests/unit/test_paper_publication_validation.py
+  tests/unit/test_knowledge_publication.py
 ```
 
 Figure changes must retain editable `.dot` sources and deterministic `.svg`
 renderings. Runtime changes require subsystem-specific tests; documentation
 checks do not substitute for runtime behavior tests.
 
-## Paper Documentation Contributions
+<a id="paper-documentation-contributions"></a>
 
-Follow the
-[Paper Documentation Standard](docs/standards/paper_documentation_standard.md).
-In particular:
+## Research Documentation Contributions
 
-- system contribution precedes platform contribution;
-- every material claim has a stable ID and evidence status;
-- `supported` and `partially_supported` claims reference machine-readable
-  evidence;
+Follow the [Documentation Standard](docs/standards/documentation_standard.md).
+The research manuscript is maintained separately; repository documents explain
+the implementation and preserve the scope of recorded evidence. In particular:
+
+- separate current implementation, proposed changes, and historical results;
+- support factual claims with source code or identifiable evidence;
 - quantitative results state environment, unit, denominator, uncertainty where
   applicable, and evidence ID;
-- absent results use `not_evaluated` rather than blank cells or optimistic prose;
+- state when results are unavailable rather than inventing values or conclusions;
 - English canonical changes synchronize the Korean root README when thesis,
   RQs, evaluation, safety, reproduction, citation, or license status changes.
 
@@ -103,8 +101,8 @@ results, or scientific conclusions.
 Use focused commit messages that explain the outcome, for example:
 
 ```text
-docs: add system-first paper evaluation matrix
-test: enforce claim-evidence integrity
+docs: clarify operator setup and evidence references
+test: enforce documentation and evidence integrity
 fix: preserve approval scope during resume
 ```
 

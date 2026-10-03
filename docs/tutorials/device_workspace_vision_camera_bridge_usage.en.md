@@ -20,7 +20,7 @@ supersedes: []
 
 # Vision Tutorial — Camera Setup and Evidence Checks
 
-[한국어](device_workspace_vision_camera_bridge_usage.ko.md) · [Tutorial index](first_autonomous_run.md)
+[Korean](device_workspace_vision_camera_bridge_usage.ko.md) · [Tutorial index](first_autonomous_run.md)
 
 ## Goal and preparation
 

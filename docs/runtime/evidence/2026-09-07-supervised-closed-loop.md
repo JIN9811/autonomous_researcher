@@ -9,8 +9,7 @@ summary: One supervised mixed-mode ATR iteration reached UTM clearance, analysis
 evidence_date: 2026-09-07
 method: Read-only observation of the operator-started live run, event timestamps, archived agent results, and SHA-256 checks.
 related_docs:
-  - docs/paper/06_evaluation_and_results.md
-  - docs/paper/09_claim_evidence_traceability.md
+  - docs/runtime/evidence/2026-09-28-campaign-archive-audit.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/agents/equipment_agent.md
 supersedes: []
@@ -123,7 +122,7 @@ available (this only reads files):
 .venv/bin/python - <<'PY'
 import hashlib, json
 from pathlib import Path
-index = json.loads(Path('docs/paper/evidence/2026-09-07-closed-loop-summary.json').read_text())
+index = json.loads(Path('docs/runtime/evidence/2026-09-07-closed-loop-summary.json').read_text())
 for record in index['records']:
     path = Path(record['source_path'])
     assert hashlib.sha256(path.read_bytes()).hexdigest() == record['sha256'], path
@@ -132,9 +131,11 @@ PY
 ```
 
 This command intentionally cannot reproduce raw evidence in a clean public
-checkout without the separately retained archive. Public document/manifest
-integrity is checked by `scripts/validate_documentation.py` and
-`scripts/validate_paper_publication.py`.
+checkout without the separately retained archive. At the time of this audit,
+public document/manifest integrity was checked by
+`scripts/validate_documentation.py` and `scripts/validate_paper_publication.py`.
+The latter was retired with the manuscript package; current checks are listed
+in [Contributing](../../../CONTRIBUTING.md#tests-and-verification).
 
 ## Limitations and Known Gaps
 
@@ -147,7 +148,6 @@ this record does not retrospectively claim the updated GUI ran during it.
 
 ## Related Documents
 
-- [Evaluation and Results](../06_evaluation_and_results.md)
-- [Claim-Evidence Traceability](../09_claim_evidence_traceability.md)
+- [Later campaign results and provenance](2026-09-28-campaign-archive-audit.md)
 - [Lab Equipment Agent](../../agents/equipment_agent.md)
 - [Loop Artifact Archiving](../../runtime/loop_artifact_archiving.md)

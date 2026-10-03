@@ -53,7 +53,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | LLM decision layer | Generic multimodal review implemented; revised API/local choices matched 12/13 development expectations each, with remaining errors |
 | Physical effect | Possible through existing ActiveCam move/capture/return and verified rollout-stop paths |
 | Primary handoff | `vision_signal.v1` and role-specific verification evidence to the current graph consumer |
-| Live hardware validation | Earlier reconstruction tests were non-actuating; the [later campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains Vision attempts and failures; no new visual-classifier accuracy study is claimed |
+| Live hardware validation | Earlier reconstruction tests were non-actuating; the [later campaign archive](../runtime/evidence/2026-09-28-campaign-archive-audit.md) retains Vision attempts and failures; no new visual-classifier accuracy study is claimed |
 | Freshness | Handoff evidence expires 180 seconds after observation in LIVE and TEST; safety signals retain 5 seconds |
 
 ## Installed Package and Executable Structure
@@ -493,7 +493,7 @@ are not published repository evidence. Reproduction uses the verification script
 `--artifact-manifest` and `--backend` options against available archived captures.
 
 These results describe the initial prompt. The subsequent
-[generic prompt comparison](../paper/evidence/2026-09-08-vision-generic-prompt-verification.md)
+[generic prompt comparison](../runtime/evidence/2026-09-08-vision-generic-prompt-verification.md)
 records a new controlled baseline, the revised prompt/input context, held-out
 checks, and remaining errors. The initial 8/8 fixture result is not a claim that
 the larger cross-check passed.

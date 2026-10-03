@@ -19,8 +19,8 @@ method: focused deterministic, guarded provider-case, and aggregate-consumer ver
 related_docs:
   - docs/agents/orchestrator_agent.md
   - docs/runtime/langgraph_runtime.md
-  - docs/paper/05_experimental_setup.md
-  - docs/paper/07_reproducibility.md
+  - docs/tutorials/user_manual.en.md
+  - docs/runtime/evidence/2026-09-28-campaign-archive-audit.md
 supersedes: []
 -->
 
@@ -113,5 +113,5 @@ push was performed for this documentation evidence.
 
 - [Orchestrator Agent Reference](../../agents/orchestrator_agent.md)
 - [LangGraph Runtime](../langgraph_runtime.md)
-- [Experimental Setup](../../paper/05_experimental_setup.md)
-- [Reproducibility](../../paper/07_reproducibility.md)
+- [Experimental Setup](../../tutorials/user_manual.en.md)
+- [Reproducibility](2026-09-28-campaign-archive-audit.md)

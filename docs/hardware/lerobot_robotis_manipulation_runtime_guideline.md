@@ -11,6 +11,13 @@ Use the [LeRobot Reference](../device_bridges/lerobot_bridge.md) and
 ownership, effective device modes, replay/clearance and current telemetry UI.
 In particular, an effective-live profile can move hardware in a Test run.
 
+Reading the historical requirements: “current” and proposed additions in the
+early sections refer to their original implementation baseline, not missing
+features in today's installation. The installed code already registers
+`lerobot.*` tools and streams `planning_lerobot_step` events. Requirements below
+for fake Test behavior apply to an effective test/virtual bridge, not to a
+top-level Test run whose selected device profile resolves to live execution.
+
 ## 1. Purpose
 
 This document converts the LeRobot/ROBOTIS research prompt into an implementation guideline that matches the current `autonomous_researcher` runtime.
@@ -41,11 +48,16 @@ FastAPI Controller
             -> Web GUI
 ```
 
-Stage order is graph-configured in `graphs/configs/*.yaml`. The default closed-loop graph is:
+Stage order is graph-configured in `graphs/configs/*.yaml`. The original guideline summarized the closed loop as:
 
 ```text
 design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
 ```
+
+This linear summary does not replace the installed conditional graph. In
+`graphs/configs/atr_closed_loop.yaml`, the default `vision` transition is
+`equipment`, `manipulation` returns to `vision`, and selected routes/verification
+evidence determine transfer and clearance handoffs.
 
 Guardian routing in the default graph:
 
@@ -484,12 +496,13 @@ Rules:
 
 The current controller streams selected tool progress into Live GUI conversation messages.
 
-Current tool event handling only accepts:
+At the proposal baseline, tool event handling accepted only:
 
 - `printer.prepare`
 - `equipment.pyautogui.run`
 
-Add `lerobot.*` event support in `app/controller.py`.
+The proposed `lerobot.*` support is now implemented in `app/controller.py`, which
+maps these events to `manipulation_ai` and `planning_lerobot_step`.
 
 Recommended role/message mapping:
 
@@ -501,7 +514,7 @@ Recommended role/message mapping:
 | `lerobot.train.*` | `manipulation_ai` | `planning_lerobot_step` |
 | `lerobot.rollout.*` | `manipulation_ai` | `planning_lerobot_step` |
 
-Message style:
+Exact emitted message example (the Korean phrase means “stage progress”):
 
 ```text
 Manipulation Agent / LeRobot 단계 진행: PRECHECK -> ok
@@ -1068,7 +1081,7 @@ Installation-specific checks (not a claim that the LeRobot integration remains u
 - Saved profile ports, camera identities, installed CLI versions and ROS process
   health must be checked on the target installation; old machine-specific values
   are not universal defaults.
-- The [later campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+- The [later campaign archive](../runtime/evidence/2026-09-28-campaign-archive-audit.md)
   retains Manipulation attempts. This is not payload-limit certification or a
   cross-device safety study.
 - The dated Pi0.5 update below records its original settings; current saved

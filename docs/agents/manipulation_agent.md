@@ -51,7 +51,7 @@ Physical test profiles use the same policy-reference and execution-confirmation 
 | LLM decision layer | Bounded skill selection and post-Vision result review; non-actuating evidence below |
 | Physical effect | Possible only through existing rollout, fixed-skill and managed-replay executors |
 | Primary handoff | `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis |
-| Live hardware validation | The [campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains transfer/clearance attempts; invocation completion is not a measured grasp-success rate |
+| Live hardware validation | The [campaign archive](../runtime/evidence/2026-09-28-campaign-archive-audit.md) retains transfer/clearance attempts; invocation completion is not a measured grasp-success rate |
 | Known gap | No new pose-to-policy routing; failures after motion still require explicit recovery review |
 
 ### Asynchronous startup failure and Vision admission
@@ -598,7 +598,7 @@ disposal handoff. The simulator's curve follows configured geometry and target
 strain; disposal and fresh verification still precede Analysis. Full-loop and
 preflight-only results are listed separately in the validation ledger above.
 
-The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+The [2026-09-07 supervised integration record](../runtime/evidence/2026-09-07-supervised-closed-loop.md)
 observed transfer/placement, rollout stop, post-UTM managed disposal, fresh
 Vision clearance, and Analysis entry. The disposal invocation and final
 clearance remain separate archived results; this is one supervised observation,

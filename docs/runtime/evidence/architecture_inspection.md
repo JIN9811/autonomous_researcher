@@ -14,7 +14,7 @@ summary: Records the initial paper-scoped route and graph structure inspection.
 evidence_date: 2026-08-09
 method: Imported FastAPI route inspection and direct YAML graph parsing at the recorded code baseline.
 related_docs:
-  - docs/paper/02_system_architecture.md
+  - docs/runtime/architecture.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
 ---
@@ -24,7 +24,8 @@ supersedes: []
 ## Summary
 
 Evidence ID `E-INSPECT-ARCH-001` records the bounded architecture counts used
-by the paper package.
+by the former manuscript package. Counts and outcomes below describe the
+recorded 2026-08-09 baseline; they are not counts of the current application.
 
 ## Environment
 
@@ -78,5 +79,5 @@ outcomes, or certify optional backends and devices.
 
 ## Related Documents
 
-- [System architecture](../02_system_architecture.md)
+- [System architecture](../architecture.md)
 - [Current code snapshot](../../runtime/current_code_snapshot.md)

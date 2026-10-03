@@ -11,13 +11,12 @@ audience:
   - developer
 scope:
   - repository
-  - paper
-summary: Paper-first landing page for the Autonomous Researcher Framework system and supporting platform.
+  - research_project
+summary: Research project overview of the Autonomous Researcher Framework system and supporting platform.
 related_docs:
   - README.ko.md
-  - docs/paper/README.md
   - docs/README.md
-  - docs/standards/paper_documentation_standard.md
+  - docs/standards/documentation_standard.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
   - docs/modularity.md
@@ -68,13 +67,13 @@ supersedes: []
 
 | Documentation | What you'll find |
 |:---:|:---:|
-| **[Paper overview](docs/paper/README.md)** | Research motivation, contributions, and the paper reading path. |
-| **[System architecture](docs/paper/02_system_architecture.md)** | Orchestration, agent responsibilities, and execution interfaces. |
+| **[Control model](docs/runtime/three_level_control_model.md)** | Reasoning, software processing, device execution, and their boundaries. |
+| **[System architecture](docs/runtime/architecture.md)** | Orchestration, agent responsibilities, and execution interfaces. |
 | **[Modularity](docs/modularity.md)** | Core and specialist ownership, packages, bridges, and configuration lifecycle. |
 | **[Agent references](docs/agents/README.md)** | Each agent's role, LLM decisions, tools, and verification. |
 | **[Device bridges](docs/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
-| **[Results and evidence](docs/paper/06_evaluation_and_results.md)** | Demonstrated outcomes and their supporting artifacts. |
+| **[Results and evidence](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md)** | Demonstrated outcomes and their supporting artifacts. |
 | **[Setup and operation](install/README.md)** | Installation, configuration, and operator workflows. |
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
 
@@ -124,7 +123,7 @@ interfaces and agent-owned procedures while retaining existing instruments.
 
 The contribution is their **integration into a reusable research framework**:
 simple hardware, advanced software coordination, and experiment feedback through
-explicit agent handoffs. The current [experimental cycle](docs/paper/03_closed_loop_method.md)
+explicit agent handoffs. The current [experimental cycle](docs/runtime/closed_loop_and_pages_reference.md)
 is one configured application of that architecture.
 
 ## System Architecture
@@ -142,7 +141,7 @@ contribute capabilities to that plan rather than defining one fixed sequence.
   <img src="docs/assets/presentation/framework-overview.webp" alt="Research intent, configurable Orchestration Plan, and specialist-agent task/result exchange" width="100%">
 </p>
 
-- Task routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
+- Task routing and specialist-agent coordination — [System architecture](docs/runtime/architecture.md).
 - Plan configuration and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
 
 ### Agents
@@ -178,7 +177,7 @@ returns, alongside control, device-bridge and evidence connections.
 
 ## Demonstration and Evidence
 
-The latest [retained campaign audit](docs/paper/evidence/2026-09-28-campaign-archive-audit.md)
+The latest [retained campaign audit](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md)
 reconciles **15 completed experimental observations** with per-iteration Gyroid
 STL, stress–strain curves, properties and BO input/next-point records. Matching
 artifact hashes and SEA normalization were checked; failed attempts and recovery
@@ -193,9 +192,9 @@ of the platform**.
 
 | Question | Evidence |
 |---|---|
-| What completed in the recorded cycle? | [Closed-loop results](docs/paper/06_evaluation_and_results.md) |
-| Which artifacts support each claim? | [Claim–evidence map](docs/paper/09_claim_evidence_traceability.md) |
-| How can the checks be reproduced? | [Reproducibility](docs/paper/07_reproducibility.md) |
+| What completed in the recorded cycle? | [Closed-loop results](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md) |
+| Which artifacts support the recorded results? | [Artifact checks and results](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md#results) |
+| How can the checks be reproduced? | [Archive inspection protocol](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md#reproduction-protocol) |
 | Where are per-cycle outputs retained? | [Loop artifact archiving](docs/runtime/loop_artifact_archiving.md) |
 
 Agent-local API, local-model, and virtual-device checks are reported in the
@@ -229,9 +228,9 @@ model backends, and operator workspaces. Its extension surfaces make the
 demonstrated system reusable; compatibility with another laboratory still
 requires integration and validation.
 
-[Platform architecture](docs/paper/04_platform_architecture.md) ·
+[Platform architecture](docs/modularity.md) ·
 [Runtime IDE](docs/runtime/runtime_ide.md) ·
-[Interface contracts](docs/paper/appendix_a_interfaces.md)
+[Interface contracts](docs/agents/agent_api_connection_matrix.md)
 
 ## Device Bridge References
 
@@ -254,17 +253,17 @@ at 1920 × 1080.
 
 | Reader | Start here |
 |---|---|
-| Researcher or reviewer | [Problem and contributions](docs/paper/01_problem_and_contributions.md) → [Results](docs/paper/06_evaluation_and_results.md) |
+| Researcher or reviewer | [Control model](docs/runtime/three_level_control_model.md) → [Recorded results](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md) |
 | Operator | [Installation](install/README.md) → [First-run tutorial](docs/tutorials/first_autonomous_run.en.md) → [Device bridges](docs/device_bridges/README.md) |
 | Developer | [Runtime reference](docs/runtime/current_code_snapshot.md) → [Agent APIs](docs/agents/agent_api_connection_matrix.md) |
 | Contributor | [Contributing](CONTRIBUTING.md) → [Documentation rules](docs/standards/documentation_standard.md) |
 
-Consult [operational limitations](docs/paper/08_safety_ethics_and_limitations.md)
+Consult [operational limitations](docs/runtime/guardian_graphwide_safety.md)
 before connecting physical equipment. [Security policy](SECURITY.md) covers
 vulnerability reporting.
 
 ## Citation and License
 
 Use the repository's [citation metadata](CITATION.cff) and [license](LICENSE).
-The [paper package](docs/paper/README.md) is a working research narrative;
-publication metadata is recorded only when available.
+The research manuscript is maintained separately. Publication metadata is
+recorded only when available.

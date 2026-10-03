@@ -14,8 +14,8 @@ summary: Records the initial focused tests for general and paper-specific docume
 evidence_date: 2026-08-09
 method: Focused pytest execution plus documentation validator execution in the repository virtual environment.
 related_docs:
-  - docs/paper/07_reproducibility.md
-  - docs/paper/09_claim_evidence_traceability.md
+  - CONTRIBUTING.md
+  - docs/standards/documentation_standard.md
 supersedes: []
 ---
 
@@ -27,6 +27,12 @@ Evidence ID `E-TEST-DOC-001` records the initial automated checks for document
 front matter, manifests, local links, snapshot labels, required paper files,
 narrative priority, claim-evidence references, output hashes, figure pairs, and
 personal-path rejection.
+
+This is a historical record from 2026-08-09. The manuscript-specific files,
+validator, and tests were later retired when the manuscript moved outside
+this repository. Commands and outcomes below describe the recorded baseline;
+see [Contributing](../../../CONTRIBUTING.md#tests-and-verification) for current
+documentation checks.
 
 ## Environment
 
@@ -69,5 +75,5 @@ effectiveness.
 
 ## Related Documents
 
-- [Reproducibility](../07_reproducibility.md)
-- [Claim-evidence traceability](../09_claim_evidence_traceability.md)
+- [Current documentation checks](../../../CONTRIBUTING.md#tests-and-verification)
+- [Documentation standard](../../standards/documentation_standard.md)

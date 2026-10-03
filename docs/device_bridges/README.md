@@ -20,8 +20,7 @@ verified_against: dd0d772
 related_docs:
   - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/agents/agent_api_connection_matrix.md
-  - docs/paper/02_system_architecture.md
-  - docs/paper/appendix_a_interfaces.md
+  - docs/runtime/architecture.md
   - docs/standards/documentation_standard.md
   - docs/modularity.md
 supersedes: []
@@ -228,7 +227,7 @@ overview is conceptual; owning references and source code provide detail.
 
 | Reader | Start here | Then read |
 |---|---|---|
-| Paper reviewer | [Matrix](bridge_api_connection_matrix.md) | figures, known gaps, paper interfaces appendix |
+| Researcher / reviewer | [Matrix](bridge_api_connection_matrix.md) | figures, known gaps, and device interface contracts |
 | Operator | device-specific Reference | configuration, effect gate, recovery, linked hardware Guide |
 | Agent developer | agent Reference | bridge Reference tools/API sections and matrix |
 | Integrator | connection figure | protocol, authentication, modes, status/evidence contract |
@@ -285,7 +284,7 @@ When a bridge contract changes:
 4. update the matrix for entry, protocol, effect, evidence, or recovery drift;
 5. update graph/tool classification when registration changes;
 6. update root and index navigation if a canonical boundary changes;
-7. run documentation, paper, figure-freshness, and focused bridge validation.
+7. run documentation, publication-boundary, figure-freshness, and focused bridge validation.
 
 ## Limitations and Known Gaps
 
@@ -311,6 +310,6 @@ the current index does not silently recertify their older snapshots. The new
 
 - [Bridge API and Connection Matrix](bridge_api_connection_matrix.md)
 - [Agent Reference Index](../agents/README.md)
-- [System Architecture](../paper/02_system_architecture.md)
-- [Interfaces Appendix](../paper/appendix_a_interfaces.md)
+- [System Architecture](../runtime/architecture.md)
+- [Agent API connection matrix](../agents/agent_api_connection_matrix.md)
 - [Documentation Standard](../standards/documentation_standard.md)

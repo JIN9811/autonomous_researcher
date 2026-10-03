@@ -49,7 +49,7 @@ physical-evidence entries below retain their original scope and are not rerun cl
 | LLM decision layer | Implemented / locally verified |
 | Physical effect | None |
 | Primary handoff | `design_candidate.v1` → Specimen |
-| Live hardware validation | Design is software-only; fifteen matched Design/Specimen/Analysis records are retained in the [campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md), not independent fabrication certification |
+| Live hardware validation | Design is software-only; fifteen matched Design/Specimen/Analysis records are retained in the [campaign audit](../runtime/evidence/2026-09-28-campaign-archive-audit.md), not independent fabrication certification |
 | Known gap | Candidate-matched performance prediction unavailable |
 
 ### Module Ownership and Layout
@@ -465,8 +465,8 @@ decision evidence for later knowledge work.
 | Loop-scoped retention | Module tests and `tests/integration/test_all_agent_loop_archives.py` | Two-loop decision evidence and all agent archive identities; not hardware proof |
 | Module frontend extraction | `tests/js/design_live_report.test.cjs` and isolated browser fixture | Existing markup/values preserved; no operating Live GUI server restarted |
 | Continuous BO domain and exact coordinates (2026-09-10) | BO, Design, parameter-space, BoTorch and controller regression tests | Custom bounds, legacy compatibility and `7.13789` / `0.32123456` preserved through geometry arguments; no device execution |
-| Actual DesignAgent API / registered vLLM 31B | [Agent verification](../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md) | API 6.34 s / 31B 12.11 s: accepted local decision and matching handoff; 31B used registered model fallback; E4B-primary and closed-loop acceptance pending |
-| Retained campaign linkage (2026-09-28) | [Fifteen-iteration audit](../paper/evidence/2026-09-28-campaign-archive-audit.md) | 15/15 Design-result identities and Design/Specimen STL hashes match; no new device action or independent physical certification |
+| Actual DesignAgent API / registered vLLM 31B | [Agent verification](../runtime/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md) | API 6.34 s / 31B 12.11 s: accepted local decision and matching handoff; 31B used registered model fallback; E4B-primary and closed-loop acceptance pending |
+| Retained campaign linkage (2026-09-28) | [Fifteen-iteration audit](../runtime/evidence/2026-09-28-campaign-archive-audit.md) | 15/15 Design-result identities and Design/Specimen STL hashes match; no new device action or independent physical certification |
 
 The [implementation verification record](../oldversion/superpowers/plans/2026-09-07-design-decision-layer.md#verification)
 records a successful actual local-model accept/tool-dispatch smoke test, focused

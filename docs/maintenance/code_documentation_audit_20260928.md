@@ -10,7 +10,7 @@ evidence_date: 2026-09-28
 method: Static code/configuration inspection, read-only archive audit and scoped automated regressions.
 related_docs:
   - docs/runtime/current_code_snapshot.md
-  - docs/paper/evidence/2026-09-28-campaign-archive-audit.md
+  - docs/runtime/evidence/2026-09-28-campaign-archive-audit.md
   - docs/README.md
 supersedes: []
 -->
@@ -70,7 +70,7 @@ PY
 
 ## Campaign Evidence
 
-The [new archive audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+The [new archive audit](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-28-campaign-archive-audit.md)
 checks 15 accepted observation sets and retains failed/cancelled attempts.
 It supersedes the *current inventory claim* that only one cycle is available;
 it does not rewrite the earlier one-cycle reports or establish unattended

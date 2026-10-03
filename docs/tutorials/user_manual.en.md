@@ -21,7 +21,7 @@ supersedes: []
 
 # Operator Walkthroughs
 
-[한국어](user_manual.ko.md) · [First run](first_autonomous_run.en.md) · [Tutorial index](first_autonomous_run.md)
+[Korean](user_manual.ko.md) · [First run](first_autonomous_run.en.md) · [Tutorial index](first_autonomous_run.md)
 
 ## Before you start
 
@@ -68,8 +68,9 @@ workspace operation. Opening a page is not a stage-completion action.
 2. Compare **Installed Printer** and **Physical Print**.
 3. Inspect each agent's boundary, print-body/cooling choices and auto-ejection.
 4. Save only the profile you intend to use; reload to verify.
-5. In Live, explicitly request the matching scenario:
-   `테스트 모드, 실제 프린터` or `테스트 모드, 실제 출력`.
+5. In Live, explicitly request the matching scenario. The supported Korean
+   command aliases are `테스트 모드, 실제 프린터` for Installed Printer and
+   `테스트 모드, 실제 출력` for Physical Print.
 
 ![Installed Printer: ejection path without printing the body](assets/screenshots/2026-09-29/profile-installed.png)
 

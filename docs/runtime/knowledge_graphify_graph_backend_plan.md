@@ -15,9 +15,9 @@
 
 ## Purpose
 
-이 문서는 8번 개선안의 후속 고도화로, `Knowledge Agent`의 JSON/JSONL 기반 typed memory를 Graphify 기반 project graph 및 graph database backend와 연결하는 계획이다.
+This plan followed Improvement 08 and proposed connecting `Knowledge Agent` JSON/JSONL typed memory to a Graphify project graph and graph-database backend.
 
-목표는 기존 runtime을 깨지 않고 아래 구조를 추가하는 것이다.
+The goal was to add the following structure without breaking the existing runtime.
 
 ```text
 Project code/docs graph
@@ -33,16 +33,16 @@ Runtime typed memory
   -> Knowledge / BO / Guardian / Self-Evolution query context
 ```
 
-Graphify는 runtime memory store를 대체하지 않는다. Graphify는 코드, 문서, PDF, diagram, rationale를 구조화하는 repository-level knowledge graph builder로 사용하고, runtime 실험 기억은 현재 `knowledge/*` typed schema를 source of truth로 유지한다.
+Under this proposal, Graphify would not replace the runtime memory store. It would structure code, documents, PDFs, diagrams, and rationale as a repository-level knowledge-graph builder, while runtime experiment memory would retain the then-current `knowledge/*` typed schemas as its source of truth.
 
 ## External Finding Summary
 
-조사 기준:
+Findings recorded for the proposal:
 
-- Graphify 공식 페이지는 code, docs, papers, diagrams를 읽어 queryable knowledge graph를 만들고 `graph.html`, `graph.json`, `GRAPH_REPORT.md`를 출력한다고 설명한다.
-- Graphify는 `NetworkX` graph와 Tree-sitter 기반 구조 추출, LLM semantic extraction, Leiden community detection을 사용하는 방향이다.
-- Graphify 자체는 Neo4j 같은 graph DB가 아니라 graph artifact generator에 가깝다.
-- Neo4j는 Python driver와 Cypher query를 제공하므로 `graph.json` 및 ATR typed memory를 graph DB에 적재하는 backend로 현실적이다.
+- Graphify's official page described reading code, documents, papers, and diagrams to create a queryable knowledge graph and output `graph.html`, `graph.json`, and `GRAPH_REPORT.md`.
+- Graphify's approach used `NetworkX` graphs, Tree-sitter structural extraction, LLM semantic extraction, and Leiden community detection.
+- Graphify itself was closer to a graph-artifact generator than a graph database such as Neo4j.
+- Neo4j's Python driver and Cypher queries made it a practical candidate backend for loading `graph.json` and ATR typed memory into a graph database.
 
 References:
 
@@ -53,13 +53,13 @@ References:
 
 ## Design Principles
 
-1. 기존 `memory/knowledge/*.jsonl`은 계속 유지한다.
-2. Graph DB는 mirror/index/query accelerator로 시작한다. source of truth가 아니다.
-3. Knowledge Agent는 graph DB가 없어도 동작해야 한다.
-4. Graphify project graph와 runtime experiment graph를 분리하되, `doc_ref`, `module_id`, `agent_id`, `run_id`, `artifact_ref`로 연결한다.
-5. live hardware action과 graph write는 분리한다. graph backend failure가 실험 run을 막으면 안 된다.
-6. 모든 graph DB write는 provenance와 source JSONL offset 또는 artifact fingerprint를 포함한다.
-7. Self-Evolution은 graph query 결과를 evidence로 사용할 수 있지만, graph query만으로 variant를 자동 활성화하지 않는다.
+1. Retain existing `memory/knowledge/*.jsonl` files.
+2. Introduce the graph database as a mirror/index/query accelerator, not the source of truth.
+3. Knowledge Agent must remain functional without a graph database.
+4. Separate the Graphify project graph from the runtime experiment graph, linking them through `doc_ref`, `module_id`, `agent_id`, `run_id`, and `artifact_ref`.
+5. Separate live hardware actions from graph writes. Graph-backend failures must not block experiment runs.
+6. Include provenance and a source JSONL offset or artifact fingerprint in every graph-database write.
+7. Self-Evolution may use graph-query results as evidence, but a graph query alone must not automatically activate a variant.
 
 ## Target Architecture
 

@@ -20,7 +20,7 @@ supersedes: []
 
 # 3D Printer Tutorial — Save, Slice, Inspect, Then Print
 
-[한국어](device_workspace_3dp_usage.ko.md) · [Tutorial index](first_autonomous_run.md)
+[Korean](device_workspace_3dp_usage.ko.md) · [Tutorial index](first_autonomous_run.md)
 
 ## Goal and preparation
 

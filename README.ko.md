@@ -11,14 +11,13 @@ audience:
   - developer
 scope:
   - repository
-  - paper
+  - research_project
   - korean_companion
 summary: AX4LAB의 시스템 기여와 이를 지원하는 플랫폼을 소개하는 한국어 메인 문서.
 related_docs:
   - README.md
-  - docs/paper/README.md
   - docs/README.md
-  - docs/standards/paper_documentation_standard.md
+  - docs/standards/documentation_standard.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
   - docs/modularity.md
@@ -69,13 +68,13 @@ supersedes: []
 
 | 문서 | 주요 내용 |
 |:---:|:---:|
-| **[논문 개요](docs/paper/README.md)** | 연구 배경, 기여, 논문 구성과 읽는 순서. |
-| **[시스템 아키텍처](docs/paper/02_system_architecture.md)** | 오케스트레이션, 에이전트별 책임, 실행 인터페이스. |
+| **[제어 모델](docs/runtime/three_level_control_model.md)** | 추론·소프트웨어 처리·장비 실행의 역할과 경계. |
+| **[시스템 아키텍처](docs/runtime/architecture.md)** | 오케스트레이션, 에이전트별 책임, 실행 인터페이스. |
 | **[모듈화](docs/modularity.md)** | 코어·전문 owner, Package, Device Bridge, 설정 수명주기. |
 | **[에이전트 상세 문서](docs/agents/README.md)** | 각 에이전트의 역할, LLM 판단, 도구, 검증 현황. |
 | **[Device Bridges](docs/device_bridges/README.md)** | 로봇, 실험 장비, 해석 도구의 연동 규약. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | 실행 계획 편집, 실행 제어, 런 상태 확인. |
-| **[결과와 근거](docs/paper/06_evaluation_and_results.md)** | 실증 결과와 이를 뒷받침하는 아티팩트. |
+| **[결과와 근거](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md)** | 실증 결과와 이를 뒷받침하는 아티팩트. |
 | **[설치와 운영](install/README.md)** | 설치, 설정, 운영 절차. |
 | **[전체 문서](docs/README.md)** | 상세 문서, 가이드, 문서 작성 규칙. |
 
@@ -123,7 +122,7 @@ AX4LAB은 **계층적 자동화, 멀티에이전트 조율, VLA 기반 매니퓰
 
 핵심 기여는 이 요소들을 **재사용 가능한 연구 프레임워크로 통합한 것**입니다.
 간결한 하드웨어, 고도화된 소프트웨어 조율, 명확한 에이전트 간 인계를 통해
-실험 피드백을 연결합니다. 현재의 [실험 사이클](docs/paper/03_closed_loop_method.md)은
+실험 피드백을 연결합니다. 현재의 [실험 사이클](docs/runtime/closed_loop_and_pages_reference.md)은
 이 아키텍처를 적용한 하나의 실행 구성입니다.
 
 ## 시스템 아키텍처
@@ -141,7 +140,7 @@ Orchestration Plan을 통해 결과를 조율합니다. 전문 에이전트는 �
   <img src="docs/assets/presentation/framework-overview.webp" alt="연구 의도, 구성 가능한 Orchestration Plan, 전문 에이전트 간 작업과 결과 교환" width="100%">
 </p>
 
-- 작업 라우팅과 전문 에이전트 조율 — [시스템 아키텍처](docs/paper/02_system_architecture.md).
+- 작업 라우팅과 전문 에이전트 조율 — [시스템 아키텍처](docs/runtime/architecture.md).
 - 실행 계획 설정과 모니터링 — [Runtime IDE](docs/runtime/runtime_ide.md).
 
 ### 에이전트
@@ -176,7 +175,7 @@ High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도�
 
 ## 실증과 근거
 
-최신 [캠페인 아카이브 검증](docs/paper/evidence/2026-09-28-campaign-archive-audit.md)에서는
+최신 [캠페인 아카이브 검증](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md)에서는
 **완료된 실험 관측 15개**의 Gyroid STL, 응력–변형률 곡선, 물성,
 BO 입력·다음 추천 기록을 대조했습니다. 산출물 해시와 SEA 정규화가 일치하며,
 실패 시도와 복구 이력도 보존되어 있습니다. 이는 기록된 다중 사이클 실행의
@@ -189,9 +188,9 @@ BO 입력·다음 추천 기록을 대조했습니다. 산출물 해시와 SEA �
 
 | 확인할 내용 | 근거 |
 |---|---|
-| 기록된 사이클에서 무엇이 완료되었나요? | [Closed-loop 결과](docs/paper/06_evaluation_and_results.md) |
-| 각 주장은 어떤 아티팩트로 뒷받침되나요? | [주장–근거 대응표](docs/paper/09_claim_evidence_traceability.md) |
-| 검증을 어떻게 재현할 수 있나요? | [재현 방법](docs/paper/07_reproducibility.md) |
+| 기록된 사이클에서 무엇이 완료되었나요? | [Closed-loop 결과](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md) |
+| 기록된 결과를 뒷받침하는 산출물은 무엇인가요? | [산출물 검사와 결과](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md#results) |
+| 검증을 어떻게 재현할 수 있나요? | [아카이브 검사 절차](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md#reproduction-protocol) |
 | 사이클별 산출물은 어디에 보관되나요? | [루프 아티팩트 보관](docs/runtime/loop_artifact_archiving.md) |
 
 에이전트별 API, 로컬 모델, 가상 장비 검증은 각 상세 문서에 기록되어 있으며,
@@ -224,9 +223,9 @@ BO 입력·다음 추천 기록을 대조했습니다. 산출물 해시와 SEA �
 워크스페이스와 분리합니다. 이러한 확장 지점은 실증된 시스템을 재사용할 수
 있게 하며, 다른 실험실에 적용할 때는 별도의 연동과 검증이 필요합니다.
 
-[플랫폼 아키텍처](docs/paper/04_platform_architecture.md) ·
+[플랫폼 아키텍처](docs/modularity.md) ·
 [Runtime IDE](docs/runtime/runtime_ide.md) ·
-[인터페이스 규약](docs/paper/appendix_a_interfaces.md)
+[인터페이스 규약](docs/agents/agent_api_connection_matrix.md)
 
 ## Device Bridge 상세 문서
 
@@ -248,16 +247,15 @@ Runtime IDE와 Replay를 설명한
 
 | 독자 | 시작할 문서 |
 |---|---|
-| 연구자·리뷰어 | [문제 정의와 기여](docs/paper/01_problem_and_contributions.md) → [결과](docs/paper/06_evaluation_and_results.md) |
+| 연구자·리뷰어 | [제어 모델](docs/runtime/three_level_control_model.md) → [기록된 결과](docs/runtime/evidence/2026-09-28-campaign-archive-audit.md) |
 | 운영자 | [설치](install/README.md) → [첫 실행 튜토리얼](docs/tutorials/first_autonomous_run.ko.md) → [Device Bridges](docs/device_bridges/README.md) |
 | 개발자 | [런타임 상세 문서](docs/runtime/current_code_snapshot.md) → [에이전트 API](docs/agents/agent_api_connection_matrix.md) |
 | 기여자 | [기여 가이드](CONTRIBUTING.md) → [문서 작성 규칙](docs/standards/documentation_standard.md) |
 
-실제 장비를 연결하기 전에 [운영 조건과 한계](docs/paper/08_safety_ethics_and_limitations.md)를
+실제 장비를 연결하기 전에 [운영 조건과 한계](docs/runtime/guardian_graphwide_safety.md)를
 확인하세요. 취약점 제보 절차는 [보안 정책](SECURITY.md)에 안내되어 있습니다.
 
 ## 인용과 라이선스
 
 저장소의 [인용 정보](CITATION.cff)와 [라이선스](LICENSE)를 참고하세요.
-[논문 문서 모음](docs/paper/README.md)은 작성 중인 연구 문서이며,
-출판 정보는 확정되는 대로 기록합니다.
+논문 원고는 별도로 관리하며, 출판 정보는 확정되는 대로 기록합니다.

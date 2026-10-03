@@ -137,7 +137,7 @@ with OpenAI `gpt-5.5` in 6.34 seconds and registered vLLM `gemma4:31b` in 12.11 
 Both accepted `cand-1-01` and preserved that candidate through the specification
 and handoff. The local run used the existing 31B model fallback after the E4B
 primary connection failed. Operational GUI settings were not changed.
-See the [verification record](../../../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md).
+See the [verification record](https://github.com/JIN9811/autonomous_researcher/blob/862f36a/docs/paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md).
 
 ## Additional Acceptance: API + Virtual Closed Loop + Registered Models
 

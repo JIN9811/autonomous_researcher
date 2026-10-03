@@ -22,7 +22,7 @@ supersedes: []
 
 # First Autonomous Run — Step by Step
 
-[한국어](first_autonomous_run.ko.md) · [All tutorials](first_autonomous_run.md)
+[Korean](first_autonomous_run.ko.md) · [All tutorials](first_autonomous_run.md)
 
 ## Goal and prerequisites
 
@@ -95,7 +95,8 @@ The figure shows historical data. Opening Live does not confirm admission of a n
 
 ## Step 4 — Request and review the test plan
 
-In Live chat, enter this supported example:
+In Live chat, enter this supported Korean command alias for test mode with a
+virtual bridge:
 
 ```text
 테스트 모드, 가상 브릿지

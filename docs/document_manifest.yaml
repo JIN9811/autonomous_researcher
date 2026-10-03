@@ -20,13 +20,12 @@ documents:
   - docs/maintenance/code_documentation_audit_20260928.md
   - docs/oldversion/README.md
   - docs/standards/documentation_standard.md
-  - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
   - docs/agents/orchestrator_agent.md
   - docs/agents/design_agent.md
-  - docs/paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md
+  - docs/runtime/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md
   - docs/agents/specimen_agent.md
   - docs/agents/vision_agent.md
   - docs/agents/manipulation_agent.md
@@ -45,24 +44,11 @@ documents:
   - docs/device_bridges/utm_vision_bridge.md
   - docs/device_bridges/base_simulator_bridges.md
   - docs/device_bridges/plc_safety_bridge.md
-  - docs/paper/README.md
-  - docs/paper/evidence/2026-09-07-supervised-closed-loop.md
-  - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
-  - docs/paper/evidence/2026-09-28-campaign-archive-audit.md
-  - docs/paper/01_problem_and_contributions.md
-  - docs/paper/02_system_architecture.md
-  - docs/paper/03_closed_loop_method.md
-  - docs/paper/04_platform_architecture.md
-  - docs/paper/05_experimental_setup.md
-  - docs/paper/06_evaluation_and_results.md
-  - docs/paper/07_reproducibility.md
-  - docs/paper/08_safety_ethics_and_limitations.md
-  - docs/paper/09_claim_evidence_traceability.md
-  - docs/paper/appendix_a_interfaces.md
-  - docs/paper/appendix_b_hardware_and_deployment.md
-  - docs/paper/evidence/architecture_inspection.md
-  - docs/paper/evidence/documentation_validation.md
-  - docs/paper/assets/tables/README.md
+  - docs/runtime/evidence/2026-09-07-supervised-closed-loop.md
+  - docs/runtime/evidence/2026-09-07-latest-cycle-demonstration.md
+  - docs/runtime/evidence/2026-09-28-campaign-archive-audit.md
+  - docs/runtime/evidence/architecture_inspection.md
+  - docs/runtime/evidence/documentation_validation.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/runtime_ide.md
   - docs/runtime/loop_artifact_archiving.md

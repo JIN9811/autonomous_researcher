@@ -63,7 +63,7 @@ system/              technical references and curated system inputs
   standards/ templates/ maintenance/ repository/ process/
   plans/ specs/ references/ assets/ retained-history/
 docs/                human-facing navigation and procedures
-  tutorials/ gui/ paper/ assets/ project/
+  tutorials/ gui/ assets/ project/
   README.md README.ko.md
 workspace/           private generated state; final migration phase only
   memory/ runs/ artifacts/ outputs/ user_files/ logs/
@@ -87,9 +87,9 @@ symlinks is introduced to make the visible layout appear clean.
 | Runtime guide, curated Wiki, manual registry | `system/project`, `system/knowledge` and owner domains; preserve effective runtime text |
 | `docs/standards`, `templates`, `maintenance`, `repository`, `process`, `modularity.md` | Corresponding `system/` locations |
 | Active `docs/superpowers/plans` and `specs` | `system/plans` and `system/specs`; superseded documents follow the disposal rule below |
-| User tutorials, GUI tours, research narrative and their assets | Remain under `docs/`; technical GUI internals move to `system/runtime/gui/` by an explicit file mapping |
+| User tutorials, GUI tours, project overview and their assets | Remain under `docs/`; technical GUI internals move to `system/runtime/gui/` by an explicit file mapping |
 | Root `README.ko.md`, `REQUIREMENTS.md`, `CHANGELOG.md`, `CONTRIBUTING.md` | `docs/README.ko.md` and `docs/project/`; root README links to them |
-| Root `SECURITY.md`, `LICENSE`, `CITATION.cff` | `.github/SECURITY.md`, `runtime/LICENSE`, `docs/paper/CITATION.cff`; preserve bytes and link from root README |
+| Root `SECURITY.md`, `LICENSE`, `CITATION.cff` | `.github/SECURITY.md`, `runtime/LICENSE`, `docs/project/CITATION.cff`; preserve bytes and link from root README |
 | Root `references/`, presentation `image/` | `system/references/`, `system/assets/presentation/`; preserve complete example/asset bundles and provenance |
 | Tracked `memory/*.py` compatibility package | `runtime/memory/`; never confuse importable source with private data |
 | Ignored private stores, runs, outputs and local residue | Stay authoritative at existing locations until the final offline migration; then named `workspace/` stores |

@@ -18,14 +18,14 @@ dock. Completed-session data; private values redacted.*
 | Coverage | Run control, models, agent reports and device-workspace entry |
 | Implementation | [Main GUI](../../web/static/app.js) · [Live GUI](../../web/static/planning.js) |
 | Execution boundary | Controls can invoke runtime/device actions; this guide is not execution evidence |
-> [Runtime Closed-Loop/페이지/에이전트 실행 레퍼런스](../runtime/closed_loop_and_pages_reference.md)
+> [Closed-Loop Runtime, Pages and Agent Execution Reference](../runtime/closed_loop_and_pages_reference.md)
 
 
 Web dashboard panels:
 - global run metrics
 - run control buttons
 - current NemoClaw/vLLM model cells with per-model Loading/Unloading controls and status dots
-- Device Workspaces panel with dedicated launchers for the selected 3D Printer Bridge, Windows PyAutoGUI Bridge GUI, LeRobot / ROBOTIS GUI, BO Workspace, and UTM ROS System runtime evidence card
+- Device Workspaces panel with dedicated launchers for 3D Printer, Windows Automation, Manipulation, Bayesian Optimization, PLC Safety, Vision, and Knowledge; device evidence lives in those workspaces and run-owned Live reports
 - live loop timeline
 - agent status
 - device health
@@ -100,6 +100,9 @@ Terminal launcher:
 - Detailed command usage lives in `install/README.md`.
 
 Live GUI chat route:
+
+Korean phrases below are literal supported chat aliases, not untranslated instructions: `실험 수행` means “run experiment,” `실제 시험 수행` means “run a real test,” `테스트 모드` means “test mode,” `가상 브릿지` means “virtual bridge,” `설치 프린터` means “installed printer,” and `실제 출력` means “physical print.” Combined aliases retain those meanings.
+
 - The Live GUI conversation is the operator-facing surface for orchestrator discussion and handoff execution.
 - Opening Live GUI does not automatically load NemoClaw/vLLM models. Operators must use the main dashboard Loading buttons or `atr model load <model>` before sending model-backed chat/workflow requests.
 - Server startup, Live GUI open, backend switching, and planning bootstrap are side-effect free with respect to Kubernetes vLLM scale-up.
@@ -133,11 +136,11 @@ writable topics and recovery rules.
 - Material and print defaults may come from the operator-controlled 3D Printer workspace profile when not stated in chat. This counts as a confirmed GUI default, not an LLM-fabricated value.
 - Validated print defaults are shown/used when the operator does not override them. The active printer profile decides which bridge/profile values are authoritative: default is Bambu Lab X2D, while Prusa MK4S remains available only through explicit fleet selection.
 - 3D Printer workspace route:
-  - Main dashboard button: `Open 3D GUI`
+  - Main dashboard launcher: `3D Printer` / `Workspace`
   - Route: `/printer`
-  - Main dashboard card label: `3D Printer Bridge`; it represents the selected printer bridge, not a fixed Prusa-only workspace.
+  - The launcher opens the selected printer's workspace, not a fixed Prusa-only page.
   - BambuLab X2D bridge architecture and operating contract are documented in `docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md`.
-  - The main dashboard card reads `/api/printer/status?mode=live` as a read-only bridge-health view, independent of the Run Control mode selector. The Test Status button remains inside `/printer` for virtual/status-only checks.
+  - The current Main template uses a launcher, not an embedded printer-health card. The compatibility status handler in `app.js` returns without fetching when those old card elements are absent. Use `/printer` for status checks; its Test Status button is the virtual/status-only check.
   - API surface: `/api/printer/fleet`, `/api/printer/profile`, `/api/printer/status`, `/api/printer/video-status`, `/api/printer/video-stream.mjpeg`, `/api/printer/connection`, `/api/printer/upload-path-probe`, `/api/printer/bambu-slice-artifact`, `/api/printer/http-artifact-route`, `/api/printer/bambu-prestart-check`, `/api/printer/start-command-draft`, `/api/printer/start-gate`, `/api/printer/start-publish`, `/api/printer/spc-readiness`, `/api/printer/autoejection-status`, `/api/printer/autoejection-config`, `/api/printer/autoejection-test`, `/api/printer/bambu-autoejection-patch`, `/api/printer/bambu-autoejection-sweep-test`, `/api/printer/bed-clear`, `/api/printer/bambu-autoejection-proof-template`, and `/api/printer/bambu-autoejection-completion-audit`.
   - `/api/printer/status?mode=live` may reuse a short MQTT snapshot cache so GUI refreshes do not create a new MQTT client and `pushall` request on every poll. `/api/printer/start-publish` post-publish observation must bypass that cache with a fresh bridge observation.
   - Fleet memory: `memory/printer_fleet.json`.
@@ -145,7 +148,7 @@ writable topics and recovery rules.
   - Connection memory remains profile-specific: Bambu uses `memory/bambu_connection.json`; Prusa uses `memory/prusa_connection.json`.
   - `Printer Fleet Selection` is the first device-selection layer. `bambulab_x2d_lab_01` is the default active profile. `prusa_mk4s_lab_01` is never used as an automatic fallback; it must be selected by the operator or passed explicitly as `printer_profile_id`.
   - All printer status/profile/start-readiness APIs consume the active fleet profile unless a request explicitly provides `printer_profile_id`. This keeps GUI, CUI, and agent tool calls aligned.
-  - The Main dashboard's 3DP card uses a generic subtitle: `Selected printer profile · bridge telemetry`. Brand/model names are shown as active profile data, not as the card's fixed identity.
+  - The Main launcher subtitle is `Workspace`. Brand/model and telemetry belong to the selected printer's workspace/report, not to a fixed brand-specific Main card.
   - Live GUI Specimen Making report is a read-only job monitor for `specimen_agent_report.v1`. It renders `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, a wide central `Live Job Monitor`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, and `Handoff / Artifacts`. The central `Live Job Monitor` must be the only full-width focus card and must use backend values from `build_queue`, `printer_status`, `estimated_print_time`, `layer_preview`, `handoff_status`, and `artifact_ledger`; it must not invent progress, camera, or layer values when the backend has not reported them.
   - The frontend must keep the last `/api/printer/fleet` printer list while rendering later status/SPC responses. `/api/printer/status` and `/api/printer/spc-readiness` may omit `available_printers`, so the UI must not replace the Bambu/Prusa selectable list with `No selectable printer profiles reported`.
   - The profile stores print defaults only: material, printer model/profile, slicer profile hint, nozzle diameter, layer height, first-layer controls, PLA bed-temperature controls, test specimen size, storage, max print time, overwrite, and live start-after-upload preference.
@@ -207,26 +210,26 @@ writable topics and recovery rules.
 - Bambu autoejection is not a Manipulation Agent provider handoff in the primary path. Manipulation Agent remains available only for failed-ejection recovery or downstream specimen transfer after the printer-side bed-clear gate has made the state explicit.
 - `/api/printer/autoejection-status`, `/api/printer/autoejection-config`, `/api/printer/autoejection-test`, `/api/printer/bambu-autoejection-patch`, `/api/printer/bambu-autoejection-sweep-test`, `/api/printer/bed-clear`, `/api/printer/spc-readiness`, and `/api/printer/bambu-prestart-check` expose native patch readiness, validator blockers, artifact paths, internal plate path, and bed-clear evidence. If the backend also returns a manipulation handoff payload, the GUI renders it as recovery/downstream-transfer evidence only.
 - The 3D Printer workspace may offer `Fill Native G-code Defaults` for the Bambu autoejection fields, but this button only fills local form values. It must not write `memory/bambu_autoejection.json`, mark the gate ready, or run motion until the operator explicitly clicks `Save Autoejection Config`.
-- The 3D Printer workspace may offer `Validate G-code Preview`, `Generate Ejection Test Artifact`, and `Generate Sweep Test Artifact` style actions. `Validate G-code Preview` and the left/center/right validation buttons call the patch API with `validate_only=true`; they return the would-be tail, object bounds, and blocker evidence without writing `.autoeject.*` artifacts, sidecar manifests, or run workspace manifests. `Generate Ejection Test Artifact`, `Generate Sweep Test Artifact`, and `Generate Patched Artifact` are the only local-file-generating actions in this panel, and even those keep `will_publish=false` / `start_enabled=false`.
+- The 3D Printer workspace offers `Validate G-code Preview`, `Generate Ejection Test Artifact`, `Generate Sweep Test Artifact`, and `Generate Patched Artifact`. The preview calls the patch API with `validate_only=true`, returning the would-be tail, object bounds, and blockers without writing `.autoeject.*` artifacts, sidecar manifests, or run workspace manifests. The three Generate controls create local artifacts without publishing a Bambu print. Left/center/right are choices in the direction selector, not separate validation or live-ejection buttons.
 - The Bambu autoejection panel includes a collapsed `Validation Evidence` area. It summarizes only audit fields such as schema marker, source plate path, plate id, loop index, validation state, blockers, object bounds, sweep path parameters, patched artifact path, and manifest path. It must not render full plate G-code or raw ejection-tail G-code into the browser.
-- Bambu autoejection tests must not reuse the Prusa MK4S bed-sweep workflow. In the default Bambu profile the left/center/right controls generate standalone Bambu ejection artifacts or validation summaries with `motion_started=false` unless the explicit live publish gate is passed. If that gate is passed, `/api/printer/autoejection-test` starts the `.autoeject.gcode.3mf` through the normal upload/start `project_file` path, not direct MQTT `gcode_line`.
+- Bambu autoejection tests must not reuse the Prusa MK4S bed-sweep workflow. `Generate Ejection Test Artifact` sends the selected direction to `/api/printer/autoejection-test` with `mode=test` and `start_immediately=false`; for Bambu it returns an artifact with `motion_started=false`. The API remains live-capable: an explicit live request with immediate start and successful live gates starts the `.autoeject.gcode.3mf` through the normal upload/start `project_file` path, not direct MQTT `gcode_line`.
 - The verified Bambu standalone path is recorded in `memory/bambu_autoejection.json.runtime_paths` as a project-file artifact path. `home_after_standalone=false` is intentional: the autoejection tail does not perform full `G28` homing, and an unexpected `G28` inside the generated tail is a blocker.
 - The Bambu autoejection evidence must preserve the execution boundary: `source_artifact_path`, `patched_artifact_path`, `internal_plate_path`, `validation.ok`, `validation.blockers`, `bed_clear_required`, `bed_clear_verified`, `requires_guardian_approval=true`, and `requires_operator_confirmation=true`. The 3D Printer workspace status line and Live GUI Specimen runtime report must show these fields so operators do not mistake artifact generation for physical ejection.
 - After `Video Status` or `Pre-start Check` refreshes the Bambu camera panel, `Mark Bed Clear` must submit the latest preview/evidence reference as `camera_snapshot_path` in `/api/printer/bed-clear`. This keeps the operator bed-clear decision tied to visible camera evidence instead of a bare checkbox state.
 - When the latest bed-clear evidence has `BAMBU_POST_EJECT_BED_NOT_CLEAR`, the 3D Printer workspace disables the `Publish Start` button in addition to relying on backend `/api/printer/start-gate` and `/api/printer/start-publish` blockers. `Mark Bed Clear` re-enables the button only after the bed-clear payload has no blocker.
 - Every Bambu patch/test artifact records a sidecar `.manifest.json` next to the generated artifact. When the patch API or pre-start check has a `run_id`, the backend also writes `runs/<run_id>/workspace/printer/bambu_autoejection_manifest.json` as the stable run workspace manifest. For `.gcode.3mf`, patched plate G-code must keep hash metadata consistent by updating an existing `Metadata/plate_#.gcode.md5` or adding it when missing. The GUI/API may summarize the manifest fields, but it must preserve source/patched sha256, internal plate path, `plate_id`, `loop_index`, object bounds, cooldown-wait validation, validation blockers, and `will_publish=false` / `start_enabled=false` until the guarded publish route is explicitly used.
-- If the active profile is explicitly switched to Prusa MK4S, the same left/center/right controls are rendered as `Autoeject` actions and use the Prusa bed-sweep G-code route through the Prusa bridge live gates.
-- Physical upload/start uses the validated MK4S sequence: upload the requested/display filename, wait for PrusaLink transfer idle, read `GET /api/v1/files/{storage}/{requested_name}` metadata, then start the returned storage filename such as `AUTOEJ~1.GCO`. The runtime card should surface `transfer_wait`, `start.path_resolution`, `start.retry_history`, upload result, and start result when present.
-- Physical start does not trust the start HTTP response alone. After each start request, the bridge polls PrusaLink `status/job`; if `PRINTING` is not confirmed, it retries the start request every 1 second up to the configured attempt budget. This handles cases where PrusaLink accepts or drops the start signal while the printer is still settling.
+- Explicitly selecting Prusa MK4S does not restore the removed left/center/right live `Autoeject` buttons. The existing `/api/printer/autoejection-test` provider branch still supports the Prusa bed-sweep G-code route through its applicable mode, upload, and start gates.
+- When Prusa MK4S is explicitly selected, physical upload/start uses its validated sequence: upload the requested/display filename, wait for PrusaLink transfer idle, read `GET /api/v1/files/{storage}/{requested_name}` metadata, then start the returned storage filename such as `AUTOEJ~1.GCO`. The runtime card should surface `transfer_wait`, `start.path_resolution`, `start.retry_history`, upload result, and start result when present. The default Bambu provider uses its own artifact-transfer and MQTT `project_file` path described above.
+- Prusa physical start does not trust the start HTTP response alone. After each start request, the bridge polls PrusaLink `status/job`; if `PRINTING` is not confirmed, it retries the start request every 1 second up to the configured attempt budget. This handles cases where PrusaLink accepts or drops the start signal while the printer is still settling.
 - For Prusa physical start paths, including normal live print, test-mode Physical Print, standalone Prusa autoejection test, and separate Prusa ejection job mode, the bridge checks PrusaLink `status/job`. It must not start another job while a previous job remains active at 99% or 100%; appended autoejection tails can still be executing homing or bed-sweep moves. The bridge waits until `/api/v1/job` is cleared and the printer reports idle/FINISHED before the next upload/start. The local MK4S PrusaLink 2.1.2 endpoint set does not expose a working `POST /api/printer/ready`, so the runtime must not depend on SetReady.
 - The 3D Printer workspace print profile includes `first_layer_height_mm`, `slow_first_layer_enabled`, `first_layer_speed_mm_s`, `bed_temperature_c`, and `first_layer_bed_temperature_c`; defaults are 0.2 mm first-layer height, slow first layer enabled at 10 mm/s, and 60 C bed targets for PLA adhesion. PrusaSlicer must receive `--layer-height`, `--first-layer-height`, `--bed-temperature`, `--first-layer-bed-temperature`, and, when enabled, `--first-layer-speed`.
 - The 3D Printer workspace's `Test Specimen Defaults` section retains the active test-mode fallback inputs: specimen X/Y/Z dimensions (`test_specimen_size_mm`) and fallback cell size (`test_unit_cell_size_mm`) in `memory/prusa_print_profile.json`. They supply missing `specimen_size_mm`, `max_specimen_size_mm`, and `cell_size_mm` values, including Physical Print test routes; explicit contract values take precedence. The single fallback cell size does not pin LHS/BO candidates or configure their search range. Current test-mode search defaults are cell size 5–10 mm and wall thickness 0.6–1.2 mm. Save through `Save Print Defaults`; existing runs are not mutated.
 - In Live GUI `테스트 모드`, the generated test spec uses FDM-printable gyroid TPMS with the 3D Printer workspace saved test unit-cell size, defaulting to `cell_size_mm=10.0`, starts with physical printing off, and routes to Specimen Making Agent's printer-path selection: virtual bridge, Installed Printer scoped execution (including the authorized ejection-only path; not universally read-only), or explicit Physical Print.
 - One-shot Live GUI commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, and `테스트 모드, 실제 출력` set the printer path during orchestration and continue without the separate path prompt.
-- `테스트 모드, 실제 출력` must not keep the browser fetch open through the long PrusaLink upload/start step; it schedules the Physical Print workflow in the background and updates the chat via planning events/session refresh.
+- `테스트 모드, 실제 출력` must not keep the browser fetch open through the selected printer's potentially long slicing, transfer, and start steps; it schedules the Physical Print workflow in the background and updates the chat via planning events/session refresh.
 - Physical TPMS gyroid output uses the operator/profile-controlled cap setting. The default profile generates a 0.8 mm bottom cap for bed adhesion and leaves the top cap off to avoid unsupported FDM sag; the operator may enable the top cap only when a flat upper compression face is required.
 - Main GUI `test` defaults do not by themselves authorize physical printing; the resolved device profile and explicit printer-path selection determine effects. Only an all-virtual profile guarantees simulated equipment I/O. Main GUI `live` opens the Live GUI so the operator can provide values and trigger actual printing from the chat.
-- The 3D Printer workspace provides standalone autoejection test buttons for left/center/right assumed object positions. These buttons do not print a specimen. For Prusa, they generate the same bed-sweep ejection program used by the normal autoeject path, inject synthetic object bounds for the selected position, then upload/start that ejection-only G-code through PrusaLink live upload/start gates. For Bambu, they generate a standalone Bambu `.autoeject.gcode.3mf` artifact and, only after live gates are explicitly passed, start it through the normal Bambu `project_file` path.
+- The current workspace exposes validation and artifact generation, not standalone left/center/right live-ejection buttons. The guarded standalone API remains available and does not print a specimen body: Prusa uses the normal bed-sweep builder with synthetic object bounds for the requested position and may upload/start the ejection-only G-code through PrusaLink live gates; Bambu generates a standalone `.autoeject.gcode.3mf` and may start it through `project_file` only when the explicit live request passes its gates. Removing the GUI buttons does not make that API artifact-only or non-actuating.
 - Direct 3D Printer workspace autoejection results must be mirrored into the active Live GUI session as a `printer_ai`/`SpecimenMakingAgent` message, not only written to the `/printer` log. The mirrored specimen payload must preserve `selected_printer`, `autoejection`, `autoejection_handoff`, `ejection_result`, `motion_started`, `published`, `failure_code`, artifact path, and `step_trace`. Live GUI runtime event sources must merge run-scoped events with `/api/events/recent` so standalone workspace events remain visible in the device strip/timeline even when a run is active.
 - While Live GUI is open, the Live GUI 3D Printer card polls `GET /api/printer/status?mode=live&emit=1` on the existing bounded refresh interval and refreshes device screen/progress/material/connection fields. These monitor updates emit `workspace_monitor_snapshot` events for Live GUI device-strip status, but must not append chat transcript messages or register artifact files. `/printer` remains the dedicated manual workspace for operator actions and detailed logs, not the owner of Live GUI heartbeat polling.
 - The 3D Printer workspace includes a `Physical Proof Package` subsection for Bambu native autoejection. `Build Fail-Closed Proof Template` writes a proof JSON scaffold through `/api/printer/bambu-autoejection-proof-template`; `Run Completion Audit` reads a selected or latest package through `/api/printer/bambu-autoejection-completion-audit`. Both actions are non-actuating and must not upload, publish MQTT, capture new camera frames, or move printer axes. A proof template success message only means the audit file exists; physical success requires the completion audit to verify file-backed camera evidence, patch manifest, post-publish observation, bed-clear evidence, and next-job gate evidence.
@@ -246,7 +249,7 @@ writable topics and recovery rules.
 - `printer.prepare` may stream per-step events into the same chat while the tool is running.
 
 UTM ROS System workspace:
-- Main dashboard card label: `UTM ROS System`.
+- Main dashboard launcher: `Vision` / `Workspace`, opening `/device-bridge/vision-utm`.
 - Purpose: expose cloned UTM ROS vision runtime state without replacing the Windows/PyAutoGUI UTM control path.
 - Buttons: `Loading` calls `POST /api/equipment/utm-runtime/start`, `Probe` calls `POST /api/equipment/utm-runtime/probe` plus graph/frame refresh, and `Unloading` calls `POST /api/equipment/utm-runtime/stop`.
 - Graph panel: reads `GET /api/equipment/utm-runtime/graph` and renders the UTM repo flow `usb_cam -> rectify_node -> green_dot_monitor -> yolov8`. The expected flow is derived from `~/external_repos/UTM` launch/script files; actual ROS nodes/topics are read from `ros2 node list`, `ros2 topic list`, and `ros2 node info`.
@@ -256,7 +259,7 @@ UTM ROS System workspace:
 - Test mode: if ROS topic/camera evidence is absent, `vision.equipment_cross_check` continues through `virtual_utm_bridge` and leaves an explicit fallback trace. Live mode must not claim physical UTM completion from virtual evidence.
 
 Windows PyAutoGUI Bridge GUI route:
-- Main dashboard button: `Open Windows Bridge GUI`
+- Main dashboard launcher: `Windows Automation` / `Workspace`
 - Route: `/equipment/windows`
 - Hardware workspace entry points, including Windows Bridge, live under Main GUI Device Workspaces, not Live GUI.
 - Saved bridge candidates are still persisted in `memory/windows_pyautogui_connection.json` and are shared by all GUI windows.
@@ -350,7 +353,7 @@ LeRobot GUI route:
 - Training GUI exposes the LeRobot CLI fields needed for practical local training: dataset repo/root, policy type, policy repo ID, output dir, job name, device, batch size, steps, num workers, eval/log/save frequencies, checkpoint saving, resume, AMP, optimizer, scheduler, policy chunk/action/observation windows, WandB controls, and one-safe-arg-per-line advanced CLI options. Supported operator-facing policy types now include ACT, Pi0.5, X-VLA, and SmolVLA.
 - Training GUI includes `WandB Local Server` controls. `Start` launches W&B Server through the TorchCodec-ready conda env on `http://127.0.0.1:8081`, switches the train form to `wandb.enable=true` and the operator-facing `wandb.mode=local server`, and fills `WANDB_BASE_URL` for the backend. The bridge maps local server mode to the W&B CLI's `--wandb.mode=online` because W&B treats a self-hosted/local server as an online sync target. `Open` opens the local dashboard. Port `8081` is the default because port `8080` is already used by a Docker proxy on the local workstation. On the Spark `aarch64` host, run `docker run --privileged --rm tonistiigi/binfmt --install amd64` once if the local W&B Docker image reports `exec format error`.
 - The LeRobot workspace also acts as the Manipulation Agent management GUI. Its `Manipulation Agent Bridge` panel calls `/api/lerobot/manipulation-agent/run`, which runs the actual `ManipulationAgent` with selected strategy, Pi0.5/X-VLA/SmolVLA/generic policy type, profile, policy checkpoint/repo, source/target locations, specimen handoff metadata, and vision observation JSON.
-- Manipulation Agent Bridge has `Save Agent Defaults` and `Test Agent Bridge` actions. Save persists live/test loop defaults in `memory/manipulation_agent_bridge.json`; Test forces the same agent-mediated execution path through `mode=test` so the operator can validate payload/profile/policy wiring before live orchestration.
+- Manipulation Agent Bridge has `Save Task Defaults` and `Test Agent Bridge` actions. Save persists the selected task's live/test loop defaults in `memory/manipulation_agent_bridge.json`; Test forces the same agent-mediated execution path through `mode=test` so the operator can validate payload/profile/policy wiring before live orchestration.
 - Policy paths for Manipulation Agent Bridge must be selectable through the same local browse mechanism used by rollout. This keeps operator selection consistent between direct LeRobot rollout and agent-mediated manipulation.
 - The current ROBOTIS OMX default GUI training shape maps to `lerobot-train --dataset.repo_id=<dataset> --dataset.root=<root> --policy.type=<policy> --output_dir=<output> --job_name=<job> --policy.device=<device> --policy.repo_id=<repo> --batch_size=<n> --steps=<n> --num_workers=<n>` plus explicit eval/log/save and optimizer/scheduler fields.
 - ACT training defaults follow Hugging Face LeRobot defaults: `batch_size=8`, `steps=100000`, `num_workers=4`, `eval_freq=20000`, `log_freq=200`, `save_freq=20000`, `policy.n_obs_steps=1`, `policy.chunk_size=100`, and `policy.n_action_steps=100`.
@@ -413,7 +416,7 @@ Manipulation Agent / Pi0.5 GUI:
 - The LeRobot workspace `Manipulation Agent Bridge` panel exposes the two bounded tasks used by the live loop: `transfer_to_utm` and `clear_utm_to_disposal`.
 - Task selection updates the default source, target, task instruction, and Vision observation template; operators may still override those fields.
 - The panel includes Policy Backend, Policy Type (`pi05`, `xvla`, `smolvla`, or `act`), Pi0.5 RTC Execution Horizon, Pi0.5 RTC Max Guidance Weight, Max Duration Seconds, Safe Action Clamp, camera/display, and continuous-rollout controls. X-VLA and SmolVLA use the generic LeRobot rollout path unless a future policy-specific runtime adapter is added, and the bridge does not attach ACT temporal-ensemble flags to VLA rollout commands.
-- `Save Agent Defaults` persists these values to `memory/manipulation_agent_bridge.json`; `Test Agent Bridge` runs the same Manipulation Agent path in forced test mode; `Run Manipulation Agent` runs the actual agent-mediated path for the selected GUI mode.
+- `Save Task Defaults` persists these values for the selected task to `memory/manipulation_agent_bridge.json`; `Test Agent Bridge` runs the same Manipulation Agent path in forced test mode; `Run Manipulation Agent` runs the actual agent-mediated path for the selected GUI mode.
 - The Manipulation runtime report panel summarizes Skill Episode Board, Preflight, Pi0.5/Policy Runtime, Vision Dependency, Observed Task Stage, Decision/Handoff, and Evidence. It is a human-readable report surface; raw JSON remains in backend trace/output.
 - Live GUI selected-agent report for Manipulation Agent reads `state.run_metadata.manipulation_report` and `state.run_metadata.robot_task_result`, then renders the same task, policy, preflight, Vision, stage machine, rollout, decision, and evidence sections.
 
@@ -422,7 +425,7 @@ GUI browser inspection requirement:
 - Preferred local stack: Firefox + `/snap/bin/geckodriver` + `selenium` from `requirements.txt`.
 - Repeatable 3DP/Bambu proof-package route audit: `tests/ui/printer_gui_browser_audit.py`. It opens `/printer`, verifies `Physical Proof Package` controls, creates a fail-closed proof template at a caller-controlled local path, and runs the non-actuating completion audit. The expected visible state is `template_written_fail_closed · fail-closed` followed by `incomplete · blockers=<n>` until real physical evidence is supplied.
 - Standard inspection flow:
-  1. Start a temporary FastAPI server, for example `.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 7862`. For Bambu HTTP artifact fetch validation, bind to a LAN-reachable address instead, for example `--host 0.0.0.0`, and use `http://<ATR서버-LAN-IP>:7862` as `public_base_url`.
+  1. Start a temporary FastAPI server, for example `.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 7862`. For Bambu HTTP artifact fetch validation, bind to a LAN-reachable address instead, for example `--host 0.0.0.0`, and use `http://<ATR-SERVER-LAN-IP>:7862` as `public_base_url`.
   2. Use Selenium to open the changed route at a fixed viewport such as 1920x1080.
   3. Check that required labels/buttons/panels exist in the DOM and that key report content renders without raw JSON dumps where a human report is expected.
   4. Save screenshots to `runs/` or `artifacts/` for audit evidence.
@@ -451,15 +454,15 @@ Equipment report browser audit:
 Windows Bridge GUI browser audit:
 - Repeatable browser audit script: `tests/ui/windows_bridge_gui_browser_audit.py`.
 - Bridge implementations: `install/windows_pyautogui_bridge_server.py` and `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`.
-- The script opens the standalone Windows PyAutoGUI bridge root page, injects a non-actuating fake `step_trace`, verifies Run Timeline rendering, checks required operator panels, and enforces no horizontal overflow at 1920px.
-- Required visible sections include Local Operator Console, Payload Preview, Run Timeline, UTM Protocol, Preflight + Run Live UTM, Stop / Abort, Live Proof Checklist, Request Audit, Bridge Files, Step Trace, Artifacts, Artifact Preview, and Operator Log.
+- The script opens the standalone Windows PyAutoGUI bridge root page and checks the compact Console, four-digit pairing display, idle recording controls, collapsed Diagnostics, and layout. Its Program Manager check imports, validates, saves, and deletes a bounded log-only draft without executing it. Use a disposable unpaired test worker: this audit writes local program state and may issue a new pairing code; it is not read-only.
+- Required sections are Bridge Status, Program Manager, Recording, Latest Local Result, and Diagnostics. The audit rejects removed token-entry and UTM/proxy controls; it also checks that built-in `program1` is read-only and the 1920px layout has no horizontal overflow.
 - Audit evidence screenshot path: `artifacts/ui/windows_bridge_gui_browser_audit.png`.
 
 Windows Equipment live preflight:
-- The Windows PyAutoGUI Bridge GUI exposes a `Live Preflight` button next to UTM profile/readiness controls.
+- The Linux `/equipment/windows` workspace exposes `Live Preflight` under selected-Profile settings and diagnostics, next to the UTM profile/readiness controls. This is not a Windows standalone Console control.
 - The action calls `/api/equipment/windows/live-preflight` with explicit confirmation and displays the structured result in the Result Log.
 - The preflight is non-actuating: it may check bridge health, program registry, locator listing, and optionally capture one screenshot, but it must not call `/execute`.
-- Operators should use this after `Save UTM Profile` and before `Run UTM Protocol Test` or an autonomous Lab Equipment run.
+- Operators should use this after `Save UTM Profile` and before the UTM `Run Profile Action` or an autonomous Lab Equipment run.
 
 <a id="2026-05-30-live-gui-lab-equipment-evidencerecovery-surface"></a>
 
@@ -489,12 +492,12 @@ The Equipment report also displays request-audit details under Live Evidence Aud
 
 ## Windows PyAutoGUI Bridge Local GUI Proof Checklist
 
-The Windows-side bridge page at `http://<windows-bridge>:8765/` includes a `Live Proof Checklist` panel.
+The former Windows-side `Live Proof Checklist` is no longer part of the compact Console. Open the Console locally at `http://127.0.0.1:8765/`; use the Linux workspace for UTM proof and handoff decisions.
 
-- `Refresh Evidence` calls only passive endpoints: `/health`, `/readiness`, and `/request-log`.
-- `Auto-refresh request audit` polls `/request-log` every 5 seconds while the page is visible.
-- The checklist shows Health + PyAutoGUI, UTM locator readiness, local live-safety confirmation, request-log `/execute`, screen evidence, and CSV parse-probe state.
-- The panel is for local operator awareness; Linux-side workflow gates remain authoritative for autonomous handoff.
+- Bridge Status shows server, desktop/PyAutoGUI, endpoint, data-root, and pairing state; use `Health` or `Refresh` for a fresh read.
+- Expand `Diagnostics` and select `Request Log` for request-audit evidence. It is loaded on demand, not polled every five seconds.
+- Program Manager validates and tests bounded programs; a successful local test is not UTM completion or Analysis approval.
+- Check UTM locator readiness, applicable safety confirmation, `/execute` identity, screen evidence, save/export responsibility, and CSV parse evidence in Linux's Profile-specific readiness/evidence views. Linux workflow gates remain authoritative.
 
 <a id="2026-05-30-windows-equipment-evidence-proof-checklist"></a>
 
@@ -513,7 +516,7 @@ The Linux-side Windows Equipment workspace renders a proof checklist from `/api/
 
 The Windows Equipment workspace blocks UTM live execution before contacting Windows `/execute` when setup readiness is incomplete.
 
-- A UTM `Run UTM Protocol Test` request first evaluates passive readiness with the exact payload overrides from the GUI.
+- A UTM `Run Profile Action` request first evaluates passive readiness with the exact payload overrides from the GUI.
 - Non-simulated UTM control requires `ready_for_autonomous_profile=true`.
 - If blocked, the Result Log shows `UTM_PRE_EXECUTION_READINESS_BLOCKED`, `bridge_not_called=true`, and the readiness blockers. This is intentionally non-actuating.
 - Simulation-mode UTM requests use the weaker `ready_for_setup_test` gate.
@@ -521,11 +524,11 @@ The Windows Equipment workspace blocks UTM live execution before contacting Wind
 
 ### Windows Equipment Proof Package
 
-The Windows Equipment workspace exposes `Build Proof Package` for the Lab Equipment/UTM stage. The button calls `/api/equipment/windows/proof-package` and renders a single JSON package containing readiness, live preflight summary, evidence audit, proof checklist, request-log `/execute` proof, screen/data evidence refs, Vision frame IDs, blockers, warnings, and next actions. `Verify Proof Package` re-checks the persisted package and re-runs the Linux UTM CSV signal-quality gate, so flat/all-zero force or displacement files remain blocked even if the summary claimed a parseable CSV. This is a non-actuating review/export path; it must not call the Windows bridge `/execute` endpoint.
+The Linux Windows Equipment workspace exposes `Build Package` for the Lab Equipment/UTM stage. The button calls `/api/equipment/windows/proof-package` and renders a single JSON package containing readiness, live preflight summary, evidence audit, proof checklist, request-log `/execute` proof, screen/data evidence refs, Vision frame IDs, blockers, warnings, and next actions. `Verify Package` re-checks the persisted package and re-runs the Linux UTM CSV signal-quality gate, so flat/all-zero force or displacement files remain blocked even if the summary claimed a parseable CSV. This is a non-actuating review/export path; it must not call the Windows bridge `/execute` endpoint.
 
 ### Windows Equipment Proof Package Artifact
 
-The Windows Equipment workspace `Build Proof Package` action saves a JSON artifact for the current run under `artifacts/equipment/<run_id>/utm/`, returned as `package_artifact` from `/api/equipment/windows/proof-package`. The proof checklist remains available after page refresh, server restart, or later audit.
+The Linux Windows Equipment workspace `Build Package` action saves a JSON artifact for the current run under `artifacts/equipment/<run_id>/utm/`, returned as `package_artifact` from `/api/equipment/windows/proof-package`. The proof checklist remains available after page refresh, server restart, or later audit.
 
 ### Windows Equipment Browser Audit
 
@@ -537,21 +540,21 @@ The Linux-side `/equipment/windows` workspace has a repeatable Selenium browser 
 
 ### Windows Standalone Bridge Proof Gates
 
-The Windows bridge root GUI includes a compact seven-gate proof strip in the Live Proof Checklist. It summarizes the same gate state used by the detailed checklist: bridge health, UTM locators, local safety confirmation, `/execute` request-log proof, screen evidence, save/export responsibility, and CSV parse readiness. `tests/ui/windows_bridge_gui_browser_audit.py` checks the gate DOM ids and the 1920px layout without horizontal overflow.
+The standalone Console no longer renders a seven-gate proof strip. Linux `/equipment/windows` owns the current seven evidence cards: Windows Bridge, Skill / Program, Vision, Screen, Equipment Effect, Data Transfer, and Analysis Handoff. Their evidence audit preserves Profile-specific locator, safety, request-identity, save/export, and CSV checks; a green connection card alone cannot authorize handoff. The standalone browser audit checks Console structure, not these Linux proof gates.
 
 ### Windows PyAutoGUI Bridge Field Runbook
 
-The standalone Windows bridge GUI includes a `Field Runbook` in the left connection column. The four cards summarize the operator path for live UTM work: connect the bridge, calibrate UTM locators, execute only a registered protocol, and verify handoff evidence. The cards update from the same proof-state logic as the Windows `Live Proof Checklist`, so they are not decorative status badges.
+The former `Field Runbook` cards are not present in the compact Windows Console. The operational sequence still applies across the two owners: pair/select the intended worker, validate Profile-specific locators, execute only the exact approved program/Skill, and verify handoff evidence.
 
-Use this page on the Windows workstation when calibrating or checking the PyAutoGUI bridge directly. Use the Linux `/equipment/windows` page for bridge discovery, saved profile management, Linux artifact pull verification, and autonomous Lab Equipment Agent handoff checks.
+Use the Windows Console for desktop readiness, local program validation/testing, and raw recording. Use Linux `/equipment/windows` for discovery, saved Profile/worker management, locator and execution setup, artifact transfer verification, and autonomous Lab Equipment handoff checks. A recording starts after a five-second countdown; stop it through the topmost overlay's `STOP`, then inspect its saved frames. Recording does not compile or approve a Skill on Windows.
 
 <a id="2026-05-30-windows-pyautogui-bridge-gui-update"></a>
 
 ## Windows PyAutoGUI Bridge GUI
 
-The standalone Windows PyAutoGUI bridge page includes a `Bridge Command Kit` in the Connection panel. It copies Linux curl health, Windows PowerShell health, and curl `/execute` commands from the same URL/token/payload shown in the browser. This keeps GUI and CUI operation comparable during equipment debugging.
+The standalone page has four sections: Bridge Status, Program Manager, Recording, and Latest Local Result, plus collapsed Diagnostics. The former Bridge Command Kit, token-entry field, sticky UTM command rail, and proof-driven next-action banner have been removed.
 
-The page also waits for an entered bridge token before auto-running authenticated checks, widens the sticky live command rail for 1920x1080 operator displays, and color-codes Step Trace rows by status. The command banner includes `Recommended next action`, which follows the first open Live Proof Checklist gate and jumps to the appropriate token, Health, Readiness, safety confirmation, screenshot, evidence refresh, or Live UTM control.
+Pair Linux from the four-digit code in Bridge Status; the saved internal key is reused after restart. `New Code` refreshes an unpaired code; `Reset Pairing` clears the current pairing and requires Linux to pair again. Local setup/recording controls do not require pasting a secret into the browser. Recording lifecycle and preview routes are pairing-optional, but package transfer and remote execution require authentication; restrict network access with the firewall. Raw result JSON is collapsed under Latest Local Result; request logs are loaded through Diagnostics. For equivalent PowerShell checks and exact authentication boundaries, see the [Windows Bridge usage guide](../../Pyautogui_server_for_window/docs/USAGE.md).
 
 Orchestrator Supervisor report:
 - The Orchestrator report is `Orchestration Supervisor / Follow-up Control`.
