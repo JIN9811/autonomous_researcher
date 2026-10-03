@@ -24,28 +24,20 @@ supersedes: []
 
 ## Goal and preparation
 
-This guide has two stopping points. First, save a print profile and create a sliced
-artifact **without starting a print**. Continue to the optional physical section
-only when you intend to use the device under supervision. Saving defaults, creating
-a file and completing a physical print are three different outcomes.
-
-Prepare a selected printer/slicer profile and an STL or supported 3MF that the
-server can read. A path on your browser's computer is not necessarily a path on
-the server. For device work, prepare the correct connection, a clear work area
-and the approvals for the intended print/ejection sequence. If an active run owns
-the printer, inspect its report instead of starting competing workspace operations.
+Save an intentional print profile and produce an inspectable sliced artifact
+**without starting a print**. Physical execution is a separate final step.
+You need the selected printer/slicer profile and a local STL or supported 3MF input.
+For device work, also prepare the correct printer connection and a supervised,
+clear workspace.
 
 Open **Main → Device Workspaces → 3D Printer**, or `/printer`.
 Figures are 1920 × 1080 captures from 29 September 2026. Their values are saved
 installation examples, not a recommended profile. No slicing, transfer, print or
 configuration save was triggered for these screenshots.
 
-## Save settings and produce an artifact
+## Step 1 — Select the intended printer
 
-### Step 1 — Select the intended printer
-
-Start at **Bridge Connection**. The selected provider determines which connection
-and slicing path will be used; do not treat a second printer as an automatic fallback.
+Scroll to **Bridge Connection**.
 
 1. In **Printer Fleet Selection**, inspect **Active Printer Profile**.
 2. If changing devices, select the intended printer and click **Set Active Printer**.
@@ -56,19 +48,14 @@ and slicing path will be used; do not treat a second printer as an automatic fal
 
 ![Printer selection and private connection fields](assets/screenshots/2026-09-29/printer-connection.png)
 
-Use the figure to locate the fleet selector and private connection fields. After
-reload, confirm that the selected printer and connection still match your device.
-An empty access-code field preserves the saved code; it does not mean no password
-is configured. Bambu is the default provider, and the slicing buttons below describe
-that path. For a deliberately selected Prusa or other fleet path, follow the
-[printer-fleet reference](../device_bridges/printer_fleet_bridge.md). Keep connection
-JSON and credential-bearing screenshots private.
+**Expected:** the selected printer and connection match your device. An empty access
+code field keeps the saved code; it is not proof that no password is configured.
+Bambu is the default provider; another printer is an explicit selection, not an
+automatic fallback. Do not publish connection JSON or screenshots with credentials.
 
-### Step 2 — Set geometry placement and base print settings
+## Step 2 — Set geometry placement and base print settings
 
-In **Print Defaults**, prepare the settings that will be consumed by the next
-slice. Use the experiment's validated material and geometry requirements, not
-numbers copied from this screenshot.
+Scroll to **Print Defaults**.
 
 1. Match material, printer/nozzle profile, layer height and bed temperature to the
    actual setup and validated experiment.
@@ -79,16 +66,13 @@ numbers copied from this screenshot.
 
 ![Print Defaults and specimen-center placement](assets/screenshots/2026-09-29/printer-defaults.png)
 
-The figure locates **Specimen placement** within the defaults. Check that the
-specimen fits both the bed and the intended handling path, with center coordinates
-in millimetres. If X/Y changes, re-slice the original model; saving a new placement
-cannot move the toolpath already stored in an existing G-code file.
+**Expected:** units, printer profile and placement are deliberate. The specimen must
+fit the bed and intended handling path. Changing X/Y requires re-slicing the original
+model; saving defaults does not relocate an existing G-code file.
 
-### Step 3 — Save start, speed and calibration options
+## Step 3 — Save start, speed and calibration options
 
-Use **Print Start & Early Layers** to decide which startup and early-layer changes
-belong in the new artifact. A saved number and an enabled option are separate:
-check both when you want a setting applied.
+In **Print Start & Early Layers**, adjust only the controls required by your test.
 
 ![Independent print-start options and their save button](assets/screenshots/2026-09-29/printer-start-options.png)
 
@@ -101,24 +85,19 @@ check both when you want a setting applied.
 | Early-layer Z cap | Independent enable checkbox for the configured early-layer interval |
 | Bed leveling / flow calibration | Separate requested options, not proof that a calibration ran |
 
-The shared scale applies to **XYZ motion**, not just XY. The
-[Bambu control semantics](../device_bridges/bambu_x2d_bridge.md#control-semantics)
-explain the persisted fields, including the historical key `xy_speed_scale_percent`.
+The shared scale applies to **XYZ motion**. The configuration key retains its historical
+name `xy_speed_scale_percent`.
 
 1. Enter values even if a corresponding checkbox is currently off.
 2. Check only the options you want applied.
 3. Click **Save Print Defaults**.
 4. Reload the page and verify both numbers and checkbox states.
 
-Compare the reloaded numbers and checkboxes with the choices you made. A disabled
-option can retain its number without applying it. These defaults do not modify
-an existing artifact or an active print; the next step creates the new artifact.
-**Test Specimen Defaults** supplies a fallback specimen, not the BO search space.
+**Expected:** saved values survive reload. Disabled options may retain their numeric
+values without applying them. Existing artifacts and an active print remain unchanged.
+**Test Specimen Defaults** is a fallback specimen setup, not the BO search-space editor.
 
-### Step 4 — Generate a sliced artifact without printing
-
-Slicing turns the source model and saved defaults into a specific file. Keep its
-returned path and hash so that later checks refer to the file you actually prepared.
+## Step 4 — Generate a sliced artifact without printing
 
 1. Confirm the source path belongs to the intended specimen.
 2. Click **Slice Bambu Artifact** near the top of the workspace.
@@ -129,29 +108,14 @@ returned path and hash so that later checks refer to the file you actually prepa
 
 ![Top-level preparation and execution controls](../gui/assets/screenshots/2026-09-29/printer.png)
 
-The top-level figure places preparation and execution controls close together:
-for this step, use **Slice Bambu Artifact**, not a start control. Confirm “sliced
-artifact ready” evidence with **no upload or MQTT publish**. A nonempty path without
-a successful response is insufficient. If slicing fails, read the failure code and
-check the server-local input, slicer executable and profile before trying again.
+**Expected:** “sliced artifact ready” evidence with **no upload or MQTT publish**.
+This is the stopping point for a slicing-only exercise. A nonempty path without a
+successful response is insufficient. If slicing fails, inspect the source path,
+slicer executable/profile and failure code before continuing.
 
-You have finished the slicing-only task when the saved settings survive reload and
-the output path/hash, placement and available mass/time evidence can be inspected.
-Record them with the original source path. No physical completion is claimed; stop
-here unless you have a separate supervised hardware task.
+## Step 5 — Inspect auto-ejection separately
 
-## Optional: prepare and supervise physical execution
-
-The following steps are not prerequisites for a successful slice. They prepare or
-inspect a real-device workflow. Ejection artifacts can move hardware when executed,
-and **Publish Start** can start the printer. Confirm the actual bed state, clear
-motion area, current approvals and device ownership before crossing that boundary.
-For a run-owned job, use the Live/SPC sequence rather than a parallel manual start.
-
-### Step 5 — Inspect auto-ejection separately
-
-If the approved print includes automatic ejection, open **Bambu G-code Autoejection**.
-Review the routine as its own motion program, not as an incidental slice setting.
+For an approved auto-ejection setup, scroll to **Bambu G-code Autoejection**.
 
 1. Inspect native provider, direction, push offset/lane and sweep settings.
 2. If editing, save with **Save Autoejection Config**.
@@ -161,52 +125,43 @@ Review the routine as its own motion program, not as an incidental slice setting
 
 ![Auto-ejection configuration and artifact controls](assets/screenshots/2026-09-29/printer-ejection.png)
 
-The figure separates configuration from preview and artifact generation. Verify
-the generated file and validation evidence before use; they establish what is
-prepared, not that an ejection occurred. **Fill Native G-code Defaults** only fills
-the local form and still requires save/generation. Do not execute an ejection or
-sweep test artifact simply to test a button.
+**Expected:** generated/validated file evidence, not a claim that ejection happened.
+**Fill Native G-code Defaults** changes the local form; it still needs save/generation.
+Ejection/sweep test artifacts are motion programs if later executed.
+Do not run them simply to test a button.
 
-### Step 6 — Understand physical proof and start gates
+## Step 6 — Understand physical proof and start gates
 
 ![Physical Proof Package and completion audit](assets/screenshots/2026-09-29/printer-proof.png)
 
-Use the **Physical Proof Package** area in the figure to distinguish evidence
-preparation from a completed physical action. **Build Fail-Closed Proof Template**
-creates an evidence form to fill; **Run Completion Audit** checks that evidence.
-Neither performs or proves ejection on its own. Inspect the actual bed before
-using **Mark Bed Clear**: it asserts a physical condition, not an error reset.
+**Build Fail-Closed Proof Template** prepares evidence to complete;
+**Run Completion Audit** checks it. Neither button demonstrates physical ejection
+by itself. **Mark Bed Clear** is a statement about the actual bed, not an error-reset
+shortcut. Use it only after the relevant physical inspection.
 
 For a supervised physical run, prefer the existing Live loop and its SPC handoff.
 Standalone preparation exposes **Pre-start Check**, **Print Command Draft**,
 **Start Gate Check** and **Publish Start**. They are not interchangeable:
 
-| Control or operation | What its result means |
-|---|---|
-| Pre-start Check | Inspect current readiness and any blocking reason |
-| Print Command Draft | A command has been prepared, not executed |
-| Start Gate Check | The start conditions were checked; printing has not thereby occurred |
-| Publish Start | Can issue the physical start; requires the intended artifact and current approval |
-| Upload-path probing / transfer | Can contact or write to the printer, even before printing |
+- A draft is not a printer command execution.
+- Passing a gate is not printing.
+- **Publish Start** can start the device and is outside the slicing-only exercise.
+- Upload-path probing and transfer can contact/write to the printer.
 
 Use the exact prepared artifact and current approvals; never substitute an older
 success record. Refer to the [Bambu bridge](../device_bridges/bambu_x2d_bridge.md)
 for transport, cleanup and completion contracts.
 
-### Step 7 — Watch the run-owned SPC evidence
+## Step 7 — Watch the run-owned SPC evidence
 
-Once the approved run starts, open **SPC → Report** in Live. Match its job identity
-and artifact to what was prepared, then check transfer/start results, telemetry
-freshness, remaining time, camera and the post-print handoff. The screenshot is a
-historical report that locates these checks, not current proof about your printer.
+In Live, select **SPC → Report**. Check current job identity, transfer/start result,
+telemetry freshness, remaining time, camera and post-print handoff evidence.
 
 ![Run-owned SPC monitoring](../gui/assets/screenshots/2026-09-29/live-specimen.png)
 
-Completion evidence must belong to this run and artifact. An idle printer or an
-old finished job does not establish that this job completed. A frozen camera frame
-also does not establish a stopped printer: inspect telemetry and frame timestamps
-separately. If the run is waiting, preserve its evidence and follow
-[printer wait recovery](../gui/printer_wait_recovery.md) before attempting Resume.
+**Expected:** evidence belongs to this run/artifact, not merely a printer that says
+“idle” or an old job that says “finished.” A frozen camera frame does not establish
+whether the printer stopped; inspect telemetry and frame timestamps separately.
 
 ## Troubleshooting and completion
 
@@ -220,12 +175,8 @@ separately. If the run is waiting, preserve its evidence and follow
 | Ejection shown as configured | Validation/proof and actual completion are separate |
 | Values differ from screenshots | Use your saved/validated profile, not the illustration |
 
-For a slicing-only task, retain the source path, saved configuration, output
-path/hash and validation result. For a physical run, also retain the run/job ID,
-start and actual completion evidence, including the required post-print handoff.
-Keep the two outcomes explicitly distinct. [Artifact preservation](../gui/artifact_preservation.md)
-explains how to retain the referenced files; an unresolved physical state needs
-operator inspection, not another publish attempt.
+Finish by recording source path, saved configuration, output path/hash and the
+validation result. Keep a slicing-only test explicitly labeled as such.
 
 ## Further reading
 

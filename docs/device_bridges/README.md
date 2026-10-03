@@ -27,31 +27,68 @@ related_docs:
 supersedes: []
 -->
 
-<a id="device-bridges"></a>
+Verification scope: full-document read and static source/configuration inspection
+at `dd0d772`; no hardware, model-provider or service execution. Dated test and
+physical-evidence entries below retain their original scope and are not rerun claims.
 
-# Connect laboratory equipment
+# Device Bridges
 
-A device bridge connects an agent's requested operation to a robot policy,
-printer protocol, camera service, or instrument desktop workflow. Agents
-decide what to do and assess the outcome; the selected bridge executes the
-request and returns status and evidence.
+<sub>Reuse laboratory equipment. Separate research decisions from device execution.</sub>
 
-If you are setting up equipment, start with its operating guide. If you are
-integrating a new capability, use the reference and connection matrix.
+AX4LAB connects **robot policies, native device APIs, and desktop-operated
+instruments** through tools and Device Bridges. Agents own research decisions
+and task assessment; bridges adapt those requests to the selected equipment
+and return status, observations, and artifacts.
 
-## Set up or operate a device
+The integration layer lets the framework reuse existing capabilities without
+embedding a particular printer protocol, robot process, or desktop workflow
+inside the research plan. Virtual devices use related integration boundaries,
+but are distinguished from physical equipment below. Analysis consumes measured
+data and has no active computation-device bridge.
 
-| Task | Guide |
-|---|---|
-| Configure slicing, placement, and printing | [3DP workspace](../tutorials/device_workspace_3dp_usage.en.md) |
-| Set up camera observations | [Vision workspace](../tutorials/device_workspace_vision_camera_bridge_usage.en.md) |
-| Record or execute a robot policy | [LeRobot operation](../hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
-| Connect the Windows instrument PC | [Windows setup](../hardware/windows_pyautogui_bridge_windows_setup.md), then [Equipment operation](../hardware/windows_pyautogui_equipment_agent_guideline.md) |
-| Review the supervisory PLC connection | [PLC operator guide](plc_safety_bridge.md) |
-| Understand nozzle cleanup before ejection | [Pre-ejection cleanup](x2d_pre_eject_cleanup.md) |
+## Integration Architecture
 
-Check the selected profile and live device state before a physical action.
-TEST is not necessarily hardware-free; see the [mode guide](../runtime/test_mode.md).
+The [Manipulation Agent Package](../../packages/agents/manipulation/README.md)
+and Vision package both pin `lerobot@1.0.0`. Its canonical implementation lives
+under `device_bridges/lerobot/`, with exact legacy import aliases and one runtime
+identity, `lerobot_bridge`. Device Bridges exposes ten internal capability groups
+under this shared bridge; the [LeRobot Reference](lerobot_bridge.md) documents
+their existing workspace, API, configuration and artifact boundaries.
+
+The installed [Vision Agent Package](../../packages/agents/vision/README.md)
+declares the observation-only `camera_vision@1.0.0` bridge. Package Manager lists
+the package; Device Bridges presents package → bridge and opens its existing
+observation components. [Camera/Vision](utm_vision_bridge.md) shares its temporal
+observer with Equipment and depends on LeRobot for motion, ActiveCam capture/return
+and rollout stop. Local configuration, calibration and evidence stores remain in place.
+
+Agent procedures call registered tools or shared runtime resources. Managers
+select providers where needed; the owning adapter executes the requested
+operation and exposes evidence for the agent's next decision.
+
+The [Modularity Reference](../modularity.md) explains why Package dependency
+links are composition metadata, while registered tools, gates, and the bridge
+remain the execution path. A package reference never grants direct device control.
+
+![Specialist agents use tools and Device Bridges to connect robotics, API-controlled devices, and PC-operated instruments, receiving status, observations, and artifacts](assets/figures/device-bridge-overview.webp)
+
+- Agent decisions and tool ownership — [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md).
+- Protocols, execution modes, and return evidence — [Bridge API and Connection Matrix](bridge_api_connection_matrix.md).
+
+## Integration Approaches
+
+Different interfaces require different adapters, not a new research plan for
+each communication protocol.
+
+| Approach | Existing capability | Adapter responsibility | Evidence returned |
+|---|---|---|---|
+| Policies and robot skills | Learned policies, teleoperation, configured replay | Profile/port/camera handling and execution lifecycle | Session state, telemetry, observations and termination records |
+| Native device control | Device APIs and provider protocols | Connection, artifact transfer, command dispatch and status reconciliation | Job/status responses and artifact identity |
+| Desktop workflow execution | Instrument software without a usable control API | Selected worker, deployed Flow/Skills and bounded GUI actions | Screenshots, step traces, execution records and acquired files |
+
+These are complementary routes. Observation services support physical tasks;
+Simulators provide explicitly labeled test
+responses. A successful API response alone does not establish task completion.
 
 ## Bridge Catalog
 
@@ -97,68 +134,6 @@ Current paths worth distinguishing:
 - **Robotics and vision:** rollout/replay termination and fresh visual verification are separate evidence. ActiveCam capture can include robot motion; it is not just an image read.
 - **Analysis:** consumes measured data without owning a device bridge.
 - **Modes:** TEST does not universally mean no hardware. Selected transport, per-agent settings and live/promotion gates determine the actual effect.
-
-## How the connections fit together
-
-![Agents request operations through tools and bridges, then receive status, observations, and artifacts](assets/figures/device-bridge-overview.webp)
-
-Policies, native APIs, and desktop workflows need different adapters. They
-share a separation between the requested task, the actual effect, and the
-returned evidence. A successful API response alone is not task completion.
-
-## Integration Approaches
-
-Different interfaces require different adapters, not a new research plan for
-each communication protocol.
-
-| Approach | Existing capability | Adapter responsibility | Evidence returned |
-|---|---|---|---|
-| Policies and robot skills | Learned policies, teleoperation, configured replay | Profile/port/camera handling and execution lifecycle | Session state, telemetry, observations and termination records |
-| Native device control | Device APIs and provider protocols | Connection, artifact transfer, command dispatch and status reconciliation | Job/status responses and artifact identity |
-| Desktop workflow execution | Instrument software without a usable control API | Selected worker, deployed Flow/Skills and bounded GUI actions | Screenshots, step traces, execution records and acquired files |
-
-These are complementary routes. Observation services support physical tasks;
-Simulators provide explicitly labeled test
-responses. A successful API response alone does not establish task completion.
-
-## Integrate or inspect a capability
-
-Start with the [bridge connection matrix](bridge_api_connection_matrix.md)
-for protocols, execution modes, and evidence. The
-[agent connection matrix](../agents/agent_api_connection_matrix.md) describes
-the consumer's decisions and tool ownership. [Modularity](../modularity.md)
-explains composition; a Package dependency does not grant device-control
-authority.
-
-<details>
-<summary>Installed composition and extension points</summary>
-
-## Integration Architecture
-
-The [Manipulation Agent Package](../../packages/agents/manipulation/README.md)
-and Vision package both pin `lerobot@1.0.0`. Its canonical implementation lives
-under `device_bridges/lerobot/`, with exact legacy import aliases and one runtime
-identity, `lerobot_bridge`. Device Bridges exposes ten internal capability groups
-under this shared bridge; the [LeRobot Reference](lerobot_bridge.md) documents
-their existing workspace, API, configuration and artifact boundaries.
-
-The installed [Vision Agent Package](../../packages/agents/vision/README.md)
-declares the observation-only `camera_vision@1.0.0` bridge. Package Manager lists
-the package; Device Bridges presents package → bridge and opens its existing
-observation components. [Camera/Vision](utm_vision_bridge.md) shares its temporal
-observer with Equipment and depends on LeRobot for motion, ActiveCam capture/return
-and rollout stop. Local configuration, calibration and evidence stores remain in place.
-
-Agent procedures call registered tools or shared runtime resources. Managers
-select providers where needed; the owning adapter executes the requested
-operation and exposes evidence for the agent's next decision.
-
-The [Modularity Reference](../modularity.md) explains why Package dependency
-links are composition metadata, while registered tools, gates, and the bridge
-remain the execution path. A package reference never grants direct device control.
-
-- Agent decisions and tool ownership — [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md).
-- Protocols, execution modes, and return evidence — [Bridge API and Connection Matrix](bridge_api_connection_matrix.md).
 
 ## Extension Points
 
@@ -210,28 +185,6 @@ Tool/resource registration lives in `mcp_tools/` and `app/bootstrap.py`. New
 equipment still needs its own integration and validation; registry membership
 does not imply plug-and-play compatibility.
 
-</details>
-
-## Detailed Figure Navigation
-
-Existing Flow, Execution and Connections diagrams remain unchanged. The new
-overview is conceptual; owning references and source code provide detail.
-
-<details>
-<summary>Detailed figure index</summary>
-
-| Boundary | Diagrams |
-|---|---|
-| Printer Fleet | [Flow](assets/figures/printer_fleet_01_system_handoffs.svg) · [Execution](assets/figures/printer_fleet_02_execution_effect_boundary.svg) · [Connections](assets/figures/printer_fleet_03_api_connection_architecture.svg) |
-| Bambu Lab X2D | [Flow](assets/figures/bambu_x2d_01_system_handoffs.svg) · [Execution](assets/figures/bambu_x2d_02_execution_effect_boundary.svg) · [Connections](assets/figures/bambu_x2d_03_api_connection_architecture.svg) |
-| Prusa MK4S | [Flow](assets/figures/prusa_mk4s_01_system_handoffs.svg) · [Execution](assets/figures/prusa_mk4s_02_execution_effect_boundary.svg) · [Connections](assets/figures/prusa_mk4s_03_api_connection_architecture.svg) |
-| LeRobot | [Flow](assets/figures/lerobot_01_system_handoffs.svg) · [Execution](assets/figures/lerobot_02_execution_effect_boundary.svg) · [Connections](assets/figures/lerobot_03_api_connection_architecture.svg) |
-| Windows PyAutoGUI | [Flow](assets/figures/windows_pyautogui_01_system_handoffs.svg) · [Execution](assets/figures/windows_pyautogui_02_execution_effect_boundary.svg) · [Connections](assets/figures/windows_pyautogui_03_api_connection_architecture.svg) |
-| UTM Vision | [Flow](assets/figures/utm_vision_01_system_handoffs.svg) · [Execution](assets/figures/utm_vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/utm_vision_03_api_connection_architecture.svg) |
-| Base and Simulators | [Flow](assets/figures/base_simulator_01_system_handoffs.svg) · [Execution](assets/figures/base_simulator_02_execution_effect_boundary.svg) · [Connections](assets/figures/base_simulator_03_api_connection_architecture.svg) |
-
-</details>
-
 ## Scope and Classification
 
 <details>
@@ -254,8 +207,25 @@ separate Controller service. Graph labels are not a current model/provider roste
 
 </details>
 
+## Detailed Figure Navigation
+
+Existing Flow, Execution and Connections diagrams remain unchanged. The new
+overview is conceptual; owning references and source code provide detail.
+
 <details>
-<summary>Specialist reading, older procedures, and maintenance</summary>
+<summary>Detailed figure index</summary>
+
+| Boundary | Diagrams |
+|---|---|
+| Printer Fleet | [Flow](assets/figures/printer_fleet_01_system_handoffs.svg) · [Execution](assets/figures/printer_fleet_02_execution_effect_boundary.svg) · [Connections](assets/figures/printer_fleet_03_api_connection_architecture.svg) |
+| Bambu Lab X2D | [Flow](assets/figures/bambu_x2d_01_system_handoffs.svg) · [Execution](assets/figures/bambu_x2d_02_execution_effect_boundary.svg) · [Connections](assets/figures/bambu_x2d_03_api_connection_architecture.svg) |
+| Prusa MK4S | [Flow](assets/figures/prusa_mk4s_01_system_handoffs.svg) · [Execution](assets/figures/prusa_mk4s_02_execution_effect_boundary.svg) · [Connections](assets/figures/prusa_mk4s_03_api_connection_architecture.svg) |
+| LeRobot | [Flow](assets/figures/lerobot_01_system_handoffs.svg) · [Execution](assets/figures/lerobot_02_execution_effect_boundary.svg) · [Connections](assets/figures/lerobot_03_api_connection_architecture.svg) |
+| Windows PyAutoGUI | [Flow](assets/figures/windows_pyautogui_01_system_handoffs.svg) · [Execution](assets/figures/windows_pyautogui_02_execution_effect_boundary.svg) · [Connections](assets/figures/windows_pyautogui_03_api_connection_architecture.svg) |
+| UTM Vision | [Flow](assets/figures/utm_vision_01_system_handoffs.svg) · [Execution](assets/figures/utm_vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/utm_vision_03_api_connection_architecture.svg) |
+| Base and Simulators | [Flow](assets/figures/base_simulator_01_system_handoffs.svg) · [Execution](assets/figures/base_simulator_02_execution_effect_boundary.svg) · [Connections](assets/figures/base_simulator_03_api_connection_architecture.svg) |
+
+</details>
 
 ## Recommended Reading Paths
 
@@ -340,12 +310,6 @@ Individual references retain their own verification dates and evidence scope;
 the current index does not silently recertify their older snapshots. The new
 [overview prompt](../assets/presentation/device-bridge-overview.txt) and
 [image provenance](../assets/presentation/README.md) accompany the figure.
-
-The later full-document and static source/configuration review used
-`dd0d772` on 2026-09-29. It did not run hardware, a model provider, or a service.
-Individual references retain their own test and physical-evidence scope.
-
-</details>
 
 ## Related Documents
 

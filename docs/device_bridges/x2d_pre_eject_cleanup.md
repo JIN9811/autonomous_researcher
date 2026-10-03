@@ -1,11 +1,5 @@
 # X2D pre-ejection nozzle cleanup
 
-Use this reference to check the order of the X2D end-of-print sequence or to
-prepare the explicitly supervised first-layer rehearsal below. Ordinary full-height
-printing uses the production patcher; it does not require the rehearsal script.
-For the operator's save/slice/publish workflow, use the
-[3DP workspace guide](../tutorials/device_workspace_3dp_usage.en.md).
-
 The operator confirmed the supervised first-layer sequence test on 2026-09-18
 and approved this sequence for regular printing. The production X2D artifact
 patcher applies it to normal full-height specimens; the one-layer truncation
@@ -41,18 +35,9 @@ file in place of a rejected ejection-only file.
 
 ## Supervised first-layer path rehearsal
 
-Start with the original sliced `.gcode.3mf` for the planned specimen. Preserve
-that file and use the command only to generate a separate rehearsal artifact:
-
 `PYTHONPATH=. .venv/bin/python scripts/prepare_x2d_first_layer_path_trial.py ORIGINAL.gcode.3mf`
 
 This is a file-generation command only. It builds and validates the complete specimen's revised end/ejection path, then retains only the original specimen's first printing layer and that entire end sequence. Startup and first-layer moves come from the original slice, not a separately designed test plate. It writes a new archive and recalculates its plate MD5 without changing the original.
-
-Inspect the generated archive and report returned by the command before any
-publish: check the source/output paths, validation result, planned geometry and
-actual printed height. If generation or validation fails, stop at the file stage;
-do not bypass the failure by sending the original full-print file or selecting
-another transfer route. Retain the failure output and artifact identity for review.
 
 For a planned 30 × 30 × 30 mm specimen, the rehearsal prints only the original first 0.2 mm layer but keeps the full-height specimen's ejection path. The report explicitly distinguishes actual printed height from planned geometry. It does not claim the thin layer will detach at the normal sweep height: the operator removes that layer after all motion ends. This verifies sequencing and leakage behavior, not full-height mechanical release. The usual production object-height validator is not relaxed.
 

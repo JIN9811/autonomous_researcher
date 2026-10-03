@@ -11,50 +11,6 @@ Use the [LeRobot Reference](../device_bridges/lerobot_bridge.md) and
 ownership, effective device modes, replay/clearance and current telemetry UI.
 In particular, an effective-live profile can move hardware in a Test run.
 
-## For operators: use the current workspace without following the old plan
-
-The numbered implementation guideline below is retained history, including its
-old test-mode assumptions, workstation values and acceptance checklist. Do not
-use those proposals to commission a robot or override a current gate. For
-today's workspace controls and measured evidence, use the
-[LeRobot operating tasks](../gui/gui.md#operate-the-robot-workspace) and the
-[LeRobot bridge contract](../device_bridges/lerobot_bridge.md).
-
-Start at Main → **Open LeRobot GUI**. Opening `/lerobot` does not move the arm.
-Check the selected profile, saved follower/leader and camera identities, effective
-device mode, and whether another session owns those devices before any start.
-For the OMX setup, leader IDs are `1–6` and follower IDs `11–16`; a contradictory
-mapping needs correction, not a silent role swap. Historical `/dev/ttyACM*`
-numbers and camera serials below describe one installation, not portable defaults.
-
-Choose the task you actually need:
-
-- For teleoperation/recording, use the corresponding session controls and watch
-  that action's status/log box. Save the returned session ID. Recording completes
-  only when the dataset is saved; confirm the actual output path and
-  `meta/atr_pipeline.json`, and verify the expected depth features if RGB-D was
-  requested. A command containing `use_depth=true` is not proof of recorded depth.
-- For a standalone policy rollout, inspect **Inference / Rollout** and
-  **Save Rollout Defaults**. For the closed-loop task, inspect **Manipulation
-  Agent Bridge** and **Save Agent Defaults** instead. These are separate saved
-  settings; do not assume one form changed the other.
-- To review a completed robot session, use Live MAN's measured/target plots,
-  completion verification and saved action logs. A motion/grasp rate alone does
-  not prove specimen placement or authorize Equipment handoff.
-- For simulation comparison, use the
-  [Isaac mirror procedure](isaac_sim_robotis_omx_mirror_mode.md). For saved data,
-  use the [recording output reference](../runtime/lerobot_isaac_data_outputs_structure.md).
-
-When a start fails, retain the exact failure code, session ID and filtered
-`log_tail`. Missing identity, calibration, camera ownership or live approval is a
-reason to stop and resolve that condition, not to launch a second session or
-switch sensors. When a command may already have moved hardware, inspect the
-actual state and stop evidence before recovery. Read-only
-[experiment Replay](../gui/run_replay.md) must not be confused with robot replay,
-which is a device operation.
-
-## Historical implementation guideline
-
 ## 1. Purpose
 
 This document converts the LeRobot/ROBOTIS research prompt into an implementation guideline that matches the current `autonomous_researcher` runtime.

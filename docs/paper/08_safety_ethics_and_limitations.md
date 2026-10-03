@@ -30,19 +30,36 @@ claim_ids:
 
 # Safety, Ethics, and Limitations
 
-<a id="summary"></a>
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Topic | Human oversight, control boundaries and scientific integrity |
+| Evidence boundary | [Limitations](#limitation-register); implemented controls are not safety certification |
+| Recorded basis | [Source of truth](#source-of-truth) · [Verification scope](#verification) |
+
+## Summary
 
 ATR coordinates software, models, remote workers, and potentially hazardous
 laboratory equipment. Its Guardian, approval, dry-run, capability, stop, and
 evidence mechanisms are defense layers, not a universal safety guarantee.
 Laboratory-specific authorization and physical controls remain required.
 
-## Implemented Control Categories
+## Normative Scope
 
-The practical question is what remains unknown after a control passes. A schema
-check can establish a well-formed request without establishing that the motion
-is safe; a receipt can establish recorded execution without establishing
-scientific validity. Read each mechanism with its remaining uncertainty.
+This chapter applies to paper claims, artifact evaluation, operator procedures,
+and release of examples or evidence involving consequential actions. It does
+not replace institutional safety, legal, ethics, cybersecurity, or equipment
+requirements.
+
+## Source of Truth
+
+Safety behavior is defined by executable policies, runtime/controller state,
+device bridge contracts, graph safety metadata, deployment configuration, and
+the evidence recorded for a specific environment. Documentation is subordinate
+to those controls.
+
+## Implemented Control Categories
 
 | Category | Current mechanism | What it does not establish | Evaluation state |
 |---|---|---|---|
@@ -121,12 +138,6 @@ live protocol.
 
 ## Scientific Integrity
 
-The retained fifteen-observation campaign includes changing working-tree state
-and recovery interventions. Reporting completed observations must therefore
-retain those conditions rather than calling the campaign unattended. Likewise,
-the earlier supervised cycles have their own skipped-deposition and specimen
-identity limitations; they are not interchangeable material measurements.
-
 The system MUST preserve failed, stopped, and contradictory outcomes when they
 affect interpretation. Selective omission of interventions or failed runs is
 not permitted. Model-generated explanations, curated knowledge notes, and
@@ -168,20 +179,6 @@ every domain hazard. It also does not establish compliance with a specific
 regulatory or institutional framework.
 
 ## Verification
-
-<a id="source-of-truth"></a>
-
-Safety behavior is defined by executable policies, runtime/controller state,
-device bridge contracts, graph safety metadata, deployment configuration, and
-the evidence recorded for a specific environment. Documentation is subordinate
-to those controls.
-
-<a id="normative-scope"></a>
-
-This chapter applies to paper claims, artifact evaluation, operator procedures,
-and release of examples or evidence involving consequential actions. It does
-not replace institutional safety, legal, ethics, cybersecurity, or equipment
-requirements.
 
 Reviewed on 2026-08-09 against the implemented control categories and current
 paper evidence state. No `E-LIVE` safety-effectiveness record is present.

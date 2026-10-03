@@ -1,24 +1,5 @@
 # CPU computation workers
 
-This is the support reference for a busy computation queue or a slow report.
-Numerical work can continue while the interface remains responsive; queue
-activity is not proof that a device is moving or an experiment has completed.
-
-## Check progress before changing the server
-
-In Live GUI, compare the run/stage context with the compute indicator and the
-selected owner's report. A queued job must wait for capacity; dependent stages
-of one experiment still run in order. Support can inspect the read-only
-`GET /api/runtime/compute` response for active/queued work and process IDs.
-Keep that response with the run/cycle and failure evidence if a job times out.
-
-Do not raise application-server worker counts, restart an active experiment, or
-repeat a hardware operation to clear a calculation queue. Cancellation rejects
-the calculation result and does not automatically replay partial artifact writes.
-For stale robot presentation, see [monitoring and freshness](monitoring_workers.md).
-Configuration and benchmark details below are maintainer material, not tuning
-instructions for an active run.
-
 The web server remains the **only controller**. A shared pool of at most three
 persistent Python subprocesses runs numerical work. The operating system schedules
 them across available CPUs; this is not hard CPU affinity and does not duplicate
@@ -58,9 +39,6 @@ pool. Full hardware capability isolation is not an OS sandbox: the job allowlist
 is trusted application code.
 
 ## Validation and cost
-
-The measurements below are retained historical software evidence; they have not
-been rerun as part of this editorial guide.
 
 `python -m scripts.benchmark_compute_workers` starts its own minimal loopback HTTP
 server with synthetic gyroid jobs, never the application bootstrap. It does not

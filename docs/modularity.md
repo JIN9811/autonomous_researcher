@@ -40,6 +40,20 @@ supersedes: []
 
 # Modularity Reference
 
+## Status at a Glance
+
+| At a glance | Current implementation |
+|---|---|
+| Core | Orchestrator, Knowledge, and Guardian remain bootstrap-registered platform owners, not removable specialist packages |
+| Specialist owners | Design, Specimen, Vision, Manipulation, Equipment, Analysis, and BO expose installed Agent Package metadata |
+| Device integration | Device Bridges own provider connections, commands, status, and effect boundaries; packages only reference them |
+| Package exchange | Experimental Package export/import carries a graph, package references, bindings, and detached module configurations |
+| Core owner plans | Optional Knowledge/Guardian `module.owner_plan` declarations can be validated and explicitly applied for future runs |
+| Runtime | The existing graph and LangGraph run loop select work; each new run pins its module configuration snapshot |
+| Verification scope | Controlled model/equipment substitutes and browser/API checks cover the current contracts; no new hardware result is claimed |
+
+## Summary
+
 AX4LAB modularity separates four questions: who owns a capability, how it is
 described, how an experiment composes it, and what actually executes it. This
 keeps an agent's reasoning and UI close to its owner while leaving shared graph,
@@ -50,20 +64,15 @@ hot-swapped. A Package describes composition. The active graph and registered
 runtime still decide what runs, and a Device Bridge remains the only module that
 can cross its declared provider or equipment effect boundary.
 
-## Choose the change you are making
+## Scope and Source of Truth
 
-If you want to inspect an existing workflow, use [Runtime IDE](runtime/runtime_ide.md#inspect-a-run-without-changing-it)
-without changing configuration. If you want to exchange an experiment draft,
-use [Experimental Packages](../packages/README.md#exchange-an-experiment-draft).
-If you are adding a capability, identify the responsible agent and any separate
-Device Bridge before writing a package manifest. A package is a description of
-installed capabilities; it does not install their code or execute them.
-
-A specialist package and a core owner have different lifecycles. Design,
-Specimen, Vision, Manipulation, Equipment, Analysis and BO expose installed
-Agent Package metadata. Orchestrator, Knowledge and Guardian remain
-bootstrap-registered platform owners. The controlled checks reported below
-cover these contracts, not a new hardware result.
+This Reference was rechecked against the committed implementation on
+2026-09-29 by static source inspection. The dated controlled-runtime tests below
+are separate evidence, not newly repeated hardware checks. Executable code, checked-in graph/module configuration, registered
+handlers and tools, and persisted run evidence remain authoritative. The
+[archived architecture Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
+records the preceding development decisions; it does not override the current
+implementation described here.
 
 ## Terms and Relationships
 
@@ -137,21 +146,6 @@ pins and consumes the result. The figure covers configuration lifecycle by
 inspection and controlled tests; it does not show a run or device starting.
 [Editable DOT source](assets/modularity/lifecycle.dot).
 
-To change a Knowledge or Guardian declaration:
-
-1. Open Package Manager and inspect the existing Orchestration graph as a
-   reference. Select Default or Configured for the intended core owner.
-2. Edit the declaration, or import its detached module configuration. Keep
-   unrelated owner settings unchanged.
-3. Choose **Validate Draft**. Resolve the reported errors; validation does not
-   persist the draft.
-4. While no active run prevents application, choose **Apply for Future Runs**.
-   Confirm the returned version/configuration before starting a later run.
-   This action does not itself start one.
-5. For a future run, inspect its pinned module snapshot. Do not expect a running
-   snapshot to change. Default removes the declaration and restores legacy
-   future-run behavior; it does not remove the core owner.
-
 The Package Manager shows the current Orchestration graph as a reference, plus
 Default/Configured controls for Knowledge and Guardian. `Validate Draft` calls
 the existing module validator without persistence. `Apply for Future Runs`
@@ -166,11 +160,6 @@ owner-plan authority. With no declaration, both owners retain their legacy
 behavior and do not emit synthetic plan evidence.
 
 ## Extension Example
-
-Work backward from the evidence a new capability must return. Define its
-input/output contract, failure and uncertain-effect states, then identify
-which registered handler and bridge will own execution. Test and validate those
-boundaries before attaching it to an experiment graph.
 
 Suppose a future `spectroscopy` specialist owner needs a vendor instrument. Its
 agent module would register the existing-style handler and own its decision,
@@ -196,16 +185,6 @@ it. The package reference itself would never call the instrument.
   not physical reliability, safety effectiveness, or scientific validity.
 
 ## Verification
-
-### Scope and source of truth
-
-This Reference was rechecked against the committed implementation on
-2026-09-29 by static source inspection. The dated controlled-runtime tests below
-are separate evidence, not newly repeated hardware checks. Executable code, checked-in graph/module configuration, registered
-handlers and tools, and persisted run evidence remain authoritative. The
-[archived architecture Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
-records the preceding development decisions; it does not override the current
-implementation described here.
 
 On 2026-09-14, focused owner/module/package/API regressions passed 158 tests
 with 10 existing deprecation/schema warnings; the Package Manager/editor suite

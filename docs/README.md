@@ -10,7 +10,7 @@ audience:
   - maintainer
 scope:
   - repository_documentation
-summary: Reader entry points for setup, running experiments, recovery, results, and extension.
+summary: Audience-, type-, and domain-oriented index for ATR documentation.
 related_docs:
   - README.md
   - docs/paper/README.md
@@ -29,166 +29,213 @@ related_docs:
 supersedes: []
 -->
 
-<a id="documentation-index"></a>
+# Documentation Index
 
-# AX4LAB documentation
+Use this index to choose a reading path. Detailed behavior belongs in the linked
+owner reference, not in a second copy of the same instructions here.
 
-[한국어](README.ko.md) · [Project overview](../README.md)
-
-Start with the task you want to complete. You do not need to learn the module
-contracts or read the research paper before running your first experiment.
-
-## Start here
-
-1. [Install AX4LAB](../install/README.md) and open the application.
-2. [Run your first experiment](tutorials/first_autonomous_run.en.md):
-   choose a mode, prepare the equipment it uses, review the setup, approve
-   execution, and find the result.
-3. Keep the [user manual](tutorials/user_manual.en.md) nearby for later runs.
-   The [screen tour](gui/visual_structure.md) shows where the controls live.
-
-**Choose the mode before preparing the equipment.** TEST is not necessarily
-hardware-free. Virtual Bridge, Installed Printer, and Physical Printing have
-different physical effects. The [mode guide](runtime/test_mode.md) explains
-the differences; the first-run tutorial walks through the choice.
-
-<a id="summary"></a>
-<a id="1-audience-paths"></a>
-
-## What do you want to do?
-
-| Task | Read this |
+| Goal | Start here |
 |---|---|
-| Set up an external API or use the local model | [Model and API-key setup](runtime/api_keys.md) |
-| Change slicing, placement, or printer options | [3DP workspace](tutorials/device_workspace_3dp_usage.en.md) |
-| Set up the observation camera and check its images | [Vision Camera Bridge workspace](tutorials/device_workspace_vision_camera_bridge_usage.en.md) |
-| Record, train, or run a robot policy | [LeRobot workspace and operating routes](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
-| Connect the Windows instrument PC | [Windows bridge installation](hardware/windows_pyautogui_bridge_windows_setup.md), then [Equipment operation](hardware/windows_pyautogui_equipment_agent_guideline.md) |
-| Read agent cards and follow the current stage | [Live GUI](gui/gui.md) |
-| Supply documents and inspect stored knowledge | [Source Library](knowledge/manual_rag_knowledge.en.md), [Memory operations](knowledge/markdown_memory_operations.en.md) |
-| Add a module or change the experiment composition | [Modularity](modularity.md), then [Runtime IDE](runtime/runtime_ide.md) and [Packages](../packages/README.md) |
+| Install and run the application | [Installation](../install/README.md) → [Tutorial selector](tutorials/first_autonomous_run.md) |
+| Understand the existing screens | [GUI structure and 1920 × 1080 screenshots](gui/visual_structure.md) |
+| Understand the research and retained results | [Paper overview](paper/README.md) → [Results](paper/06_evaluation_and_results.md) |
+| Change or extend a module | [Modularity](modularity.md) → [Runtime IDE](runtime/runtime_ide.md) → [Packages](../packages/README.md) |
+| Inspect an agent or device contract | [Agent references](agents/README.md) · [Bridge references](device_bridges/README.md) |
+| Find older decisions | [Historical archive](oldversion/README.md), not current operating instructions |
 
-The workspace guides cover direct device use. A manual workspace action is not
-automatically a completed stage in an experiment; inspect the current run's
-evidence and handoff state in Live GUI.
+## Summary
 
-## When a run needs attention
+Current references describe the checked-in implementation. Guides explain how
+to use it. Evidence reports describe only the dated checks and runs they name.
+Designs and plans do not establish implemented behavior.
 
-Start from the symptom, not from a previous failure message.
+## Scope
 
-| Situation | Guide |
+This index covers public project documentation, including the separate
+[historical archive](oldversion/README.md). Generated run data, credentials,
+datasets, and local-only retired artifacts are not made public by linking them.
+The [documentation manifest](document_manifest.yaml) defines the subset with
+machine-enforced metadata; it is not the complete repository file inventory.
+
+## Evidence Basis
+
+- [Campaign archive audit, 2026-09-28](paper/evidence/2026-09-28-campaign-archive-audit.md):
+  15 retained experimental observations and their STL, curves, properties and BO
+  records; not a new unattended hardware trial.
+- [Earlier supervised one-cycle report, 2026-09-07](paper/evidence/2026-09-07-supervised-closed-loop.md):
+  mixed-mode demonstration with explicit deposition and specimen-identity limits.
+- [Code/documentation audit, 2026-09-28](maintenance/code_documentation_audit_20260928.md):
+  dated main-code, test, campaign and separate RPT-worktree distinctions.
+- [Documentation standard](standards/documentation_standard.md):
+  authority, classification and verification rules.
+
+## 1. Audience Paths
+
+| Reader | Recommended sequence |
 |---|---|
-| A paused or interrupted run needs to continue | [Resume and recovery](gui/run_resume.md) |
-| A print is still running, but its wait stopped updating | [Printer-wait recovery](gui/printer_wait_recovery.md) |
-| A camera image arrived, but the review did not finish | [Vision review recovery](gui/vision_review_recovery.md) |
-| The Equipment workflow has the wrong or missing selection | [Equipment selection recovery](gui/equipment_selection_recovery.md) |
-| A hardware alert remains visible | [Hardware alert lifecycle](gui/hardware_alert_lifecycle.md) |
+| New operator | [Install](../install/README.md), [first run EN](tutorials/first_autonomous_run.en.md) / [한국어](tutorials/first_autonomous_run.ko.md), [user manual EN](tutorials/user_manual.en.md) / [한국어](tutorials/user_manual.ko.md) |
+| Existing operator | [GUI reference](gui/visual_structure.md), [Live details](gui/gui.md), [Replay](gui/run_replay.md), relevant workspace guide below |
+| Researcher / reviewer | [Paper](paper/README.md), [claim–evidence map](paper/09_claim_evidence_traceability.md), [reproducibility](paper/07_reproducibility.md), [limitations](paper/08_safety_ethics_and_limitations.md) |
+| Developer | [Code snapshot](runtime/current_code_snapshot.md), [control model](runtime/three_level_control_model.md), [runtime](runtime/langgraph_runtime.md), [module contracts](modularity.md) |
+| Documentation contributor | [Writing standard](standards/documentation_standard.md), [paper standard](standards/paper_documentation_standard.md), [templates](templates/document_types.md), [contributing](../CONTRIBUTING.md) |
 
-Before retrying an operation, establish whether it already produced a physical
-effect. An interrupted response does not prove that the printer, robot, or
-instrument did nothing. These guides explain what can be reconciled and when
-operator confirmation is still needed.
+## 1.1 Documents by Type
 
-## Find results and review earlier cycles
+| Type | Meaning | Entry point |
+|---|---|---|
+| Index | Navigation, not a second runtime specification | This page |
+| Standard | Authoring, evidence and publication requirements | [Standards](standards/documentation_standard.md) |
+| Reference | Current implemented behavior with source ownership | [Runtime snapshot](runtime/current_code_snapshot.md) |
+| Guide | Operator/developer procedure | [Tutorials](tutorials/first_autonomous_run.md) |
+| Design / Plan | Proposed decisions or implementation work; check lifecycle and branch | [Plans](superpowers/plans/) · [Designs](superpowers/specs/) |
+| Evidence | Dated observations and checks, with limits | [Evidence map](paper/09_claim_evidence_traceability.md) |
+| Archive | Historical intent; never a current execution instruction | [Archive index](oldversion/README.md) |
 
-Use an agent's **Artifacts** view for its saved files, or **Loop Artifacts** for
-a completed cycle. The [artifact guide](runtime/loop_artifact_archiving.md)
-explains run, loop, agent, and attempt ownership and how to recognize an
-incomplete archive.
+## 1.2 Authority and Conflict Resolution
 
-[Replay](gui/run_replay.md) is read-only inspection of saved session evidence.
-It is different from a **robot replay**, which executes a recorded motion.
-For run IDs, timestamps, event files, and diagnostic messages, see
-[Logs and run identities](runtime/logging.md).
+Actual code, active graph/module configuration and run evidence establish
+implementation and execution facts. A reference can explain those facts but
+cannot override them. Follow the [standard's authority rules](standards/documentation_standard.md)
+when documents disagree; do not treat a past successful run as current device readiness.
 
-<a id="evidence-basis"></a>
+## 2. Documents by Domain: 실제 런타임 구조 요약
 
-For scientific interpretation, start with the [research overview](paper/README.md),
-then read [results](paper/06_evaluation_and_results.md),
-[reproducibility](paper/07_reproducibility.md), and the
-[claim–evidence map](paper/09_claim_evidence_traceability.md).
-The retained campaign contains **15 completed observation sets**; this is not
-a claim of 15 uninterrupted, unattended hardware cycles. The
-[campaign audit](paper/evidence/2026-09-28-campaign-archive-audit.md) describes
-the retained evidence and its limits. The
-[earlier supervised demonstration](paper/evidence/2026-09-07-supervised-closed-loop.md)
-has its own mixed-mode and specimen-identity limitations.
+| Domain | Maintained owner documents |
+|---|---|
+| Execution, routes and modes | [Current snapshot](runtime/current_code_snapshot.md), [closed loop and pages](runtime/closed_loop_and_pages_reference.md), [experiment API](runtime/autonomous_experiment_runtime.md) |
+| Graph and module lifecycle | [LangGraph](runtime/langgraph_runtime.md), [Runtime IDE](runtime/runtime_ide.md), [modularity](modularity.md), [packages](../packages/README.md) |
+| Models and credentials | [Agent program baseline](runtime/agent_program_baseline.md), [API keys](runtime/api_keys.md) |
+| Safety and recovery evidence | [Guardian](runtime/guardian_graphwide_safety.md), [hardware alerts](gui/hardware_alert_lifecycle.md) |
+| Run persistence and playback | [Loop artifacts](runtime/loop_artifact_archiving.md), [read-only Replay](gui/run_replay.md) |
+| Knowledge | [Wiki and memory](knowledge/wiki_memory.md), [operations](knowledge/markdown_memory_operations.ko.md), [Source Library](knowledge/manual_rag_knowledge.ko.md), [runtime reference boundary](knowledge/runtime_reference_safety.md), [publication](knowledge/publication.md) |
+| Platform explanations | [English AX4LAB Wiki](knowledge/wiki/platform-overview.md) |
 
-<a id="3-페이지별-문서-맵"></a>
+Test mode is not a universal guarantee of no physical effects. Installed-printer
+and physical-printing scenarios have different boundaries; use the
+[tutorial's mode procedure](tutorials/first_autonomous_run.en.md) and the
+[scenario reference](runtime/autonomous_experiment_runtime.md).
+Package loading, module application, graph activation and run execution are
+separate actions; see [modularity](modularity.md).
 
-## Find a screen
+## 3. 페이지별 문서 맵
 
-| Screen | Route | Guide |
+The [screen reference](gui/visual_structure.md) contains the screenshot tour.
+The table below points to operating instructions, not archived design proposals.
+
+| Page | Route | Instructions |
 |---|---|---|
 | Main GUI | `/` | [User manual](tutorials/user_manual.en.md) |
-| Live GUI | `/live`, `/planning` | [Live GUI](gui/gui.md) |
-| Replay | `/replay` | [Read-only Replay](gui/run_replay.md) |
+| Live GUI | `/live`, `/planning` | [Live reference](gui/gui.md) |
+| Replay | `/replay` | [Read-only replay](gui/run_replay.md) |
 | Runtime IDE | `/ide` | [Runtime IDE](runtime/runtime_ide.md) |
-| Module Management | `/module-management` | [Modularity](modularity.md) |
+| Module Management | `/module-management` | [Module lifecycle](modularity.md) |
 | Knowledge | `/knowledge` | [Wiki and memory](knowledge/wiki_memory.md) |
-| 3DP | `/printer` | [3DP workspace](tutorials/device_workspace_3dp_usage.en.md) |
-| Vision Camera Bridge | `/device-bridge/vision-utm` | [Camera workspace](tutorials/device_workspace_vision_camera_bridge_usage.en.md) |
-| LeRobot | `/lerobot` | [Robot workspace](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
+| 3DP | `/printer` | [English](tutorials/device_workspace_3dp_usage.en.md) / [한국어](tutorials/device_workspace_3dp_usage.ko.md), [Bambu runtime](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
+| Vision Camera Bridge | `/device-bridge/vision-utm` | [English](tutorials/device_workspace_vision_camera_bridge_usage.en.md) / [한국어](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [ROS runtime](hardware/utm_ros_vision_runtime_bridge.md) |
+| LeRobot | `/lerobot` | [Robot workspace](hardware/lerobot_robotis_manipulation_runtime_guideline.md), [dataset naming](runtime/lerobot_dataset_policy_naming.md) |
 | BO | `/bo` | [BO reference](agents/bo_agent.md) |
-| Windows Equipment | `/equipment/windows` | [Equipment guide](hardware/windows_pyautogui_equipment_agent_guideline.md) |
+| Windows Equipment | `/equipment/windows` | [Windows equipment guide](hardware/windows_pyautogui_equipment_agent_guideline.md) |
 
-<a id="2-documents-by-domain-실제-런타임-구조-요약"></a>
-<a id="4-에이전트별-문서-맵"></a>
-<a id="41-디바이스-브릿지별-문서-맵"></a>
+## 4. 에이전트별 문서 맵
 
-## Understand or extend the system
+The [agent index](agents/README.md) owns the complete ten-agent inventory and
+figure navigation; the [connection matrix](agents/agent_api_connection_matrix.md)
+compares their APIs, effects and evidence.
 
-Read [system architecture](paper/02_system_architecture.md) for the overall
-design. When you need an exact interface, follow the owning reference:
+[ORC](agents/orchestrator_agent.md) · [DSN](agents/design_agent.md) ·
+[SPC](agents/specimen_agent.md) · [VIS](agents/vision_agent.md) ·
+[MAN](agents/manipulation_agent.md) · [EQP](agents/equipment_agent.md) ·
+[ANL](agents/analysis_agent.md) · [KNW](agents/knowledge_agent.md) ·
+[BO](agents/bo_agent.md) · [GRD](agents/guardian_agent.md)
 
-- [Agent index](agents/README.md) and [agent connection matrix](agents/agent_api_connection_matrix.md):
-  responsibilities, handoffs, tools, and evidence.
-- [Device bridge index](device_bridges/README.md) and [bridge matrix](device_bridges/bridge_api_connection_matrix.md):
-  supported capabilities, execution boundaries, and protocols.
-- [Runtime IDE](runtime/runtime_ide.md), [modularity](modularity.md), and
-  [packages](../packages/README.md): inspect and compose modules. Loading a
-  package, applying a module, activating a graph, and executing a run are
-  separate actions.
-- [Runtime snapshot](runtime/current_code_snapshot.md),
-  [control model](runtime/three_level_control_model.md),
-  [LangGraph runtime](runtime/langgraph_runtime.md),
-  [closed-loop routes (Korean technical reference)](runtime/closed_loop_and_pages_reference.md), and
-  [experiment runtime](runtime/autonomous_experiment_runtime.md):
-  implementation detail for integrators.
-- [Knowledge reference boundary](knowledge/runtime_reference_safety.md) and
-  [publication rules](knowledge/publication.md): how documentation and private
-  evidence are separated from runtime authority.
+Legacy `.txt` guides are not interchangeable with these current references.
+Some are still consumed by runtime code; consult their explicit scope before editing.
 
-<a id="scope"></a>
-<a id="11-documents-by-type"></a>
-<a id="12-authority-and-conflict-resolution"></a>
-<a id="5-폴더별-책임"></a>
-<a id="6-설명용-문서-폴더"></a>
-<a id="7-이전-개발-자료"></a>
-<a id="8-문서-유지-규칙"></a>
-<a id="migration-status"></a>
-<a id="limitations-and-known-gaps"></a>
-<a id="index-verification"></a>
-<a id="related-documents"></a>
+## 4.1 디바이스 브릿지별 문서 맵
 
-## About these documents
+[Seven canonical capability references](device_bridges/README.md) cover Printer
+Fleet, Bambu, Prusa, LeRobot, Windows PyAutoGUI, UTM Vision, and simulators.
+[PLC Safety](device_bridges/plc_safety_bridge.md) is a supplementary integration.
+The [bridge matrix](device_bridges/bridge_api_connection_matrix.md) distinguishes
+graph-projected entries from provider, sidecar and tool registrations.
 
-Guides explain tasks; references describe implementation; evidence reports
-record dated checks. Plans and archived designs are not operating instructions.
-Use the [historical archive](oldversion/README.md) only to understand earlier
-decisions. Runtime-consumed legacy guidelines are kept separate from this
-reader-facing overhaul.
+Printer setup belongs in the [3DP tutorial](tutorials/device_workspace_3dp_usage.en.md);
+the [pre-ejection cleanup guide](device_bridges/x2d_pre_eject_cleanup.md) explains
+the specific tested nozzle sequence. Neither document replaces a live readiness check.
 
-Documentation contributors should use the
-[writing standard](standards/documentation_standard.md),
-[templates](templates/document_types.md), and
-[paper standard](standards/paper_documentation_standard.md).
-The [manifest](document_manifest.yaml) tracks governed documents, not every
-file in the repository. The [file-by-file review](maintenance/documentation_review_20260929.md)
-and [code/documentation audit](maintenance/code_documentation_audit_20260928.md)
-retain their original dates and scope.
+## 5. 폴더별 책임
 
-Generated run data, credentials, and private memory remain local unless
-explicitly reviewed for publication. A document link does not make them public.
-Editing prose or checking links does not certify a device or repeat a physical
-experiment.
+| Location | Responsibility |
+|---|---|
+| `app/`, `orchestrator/`, `graphs/` | API, coordination, graph and module runtime |
+| `agents/`, `packages/`, `device_bridges/` | Owner modules, composition contracts and device effects |
+| `web/` | Shared GUI hosts and browser assets |
+| `knowledge/`, `memory/` | Knowledge services; private generated memory is separate from tracked source |
+| `runs/`, `artifacts/`, `outputs/`, `user_files/` | Local run evidence and generated/user data, not public documentation |
+| `tests/`, `scripts/`, `install/` | Regression checks, operational utilities and installation |
+| `docs/`, `image/` | Documentation, evidence, figures and presentation provenance |
+
+## 6. 설명용 문서 폴더
+
+Current owner documentation lives in `runtime/`, `gui/`, `agents/`,
+`device_bridges/`, `hardware/` and `knowledge/`. Start-to-finish procedures
+live in `tutorials/`; research narrative and dated evidence live in `paper/`.
+`standards/` and `templates/` define authoring contracts.
+`maintenance/` records audits; `repository/` and `process/` describe contributor workflows.
+`superpowers/` contains work plans/designs with explicit lifecycle;
+`oldversion/` preserves historical material.
+
+## 7. 이전 개발 자료
+
+Use the [archive index](oldversion/README.md) only for development history.
+Older system prompts, UI packages, solver plans and screenshots are not current
+instructions. Local-only retired evidence is identified as unavailable to public
+readers rather than linked to nonexistent public paths.
+
+## 8. 문서 유지 규칙
+
+- Update the owning reference when its implementation changes, then review
+  dependent tutorials, Wiki explanations and figures.
+- Keep current instructions separate from dated evidence and proposed work.
+- Check file paths, heading anchors, images and external references, not just
+  Markdown syntax. A reachable URL can still be the wrong destination.
+- Preserve original experiment evidence; do not relabel a test or inspection
+  as physical validation.
+- Follow [publication rules](knowledge/publication.md) before adding screenshots
+  or private run material.
+
+## Migration Status
+
+The manifest's governed subset and the repository-wide document inventory have
+different purposes. Files outside the manifest still require review; they must
+not be silently described as unused. The 2026-09-14 relocation is documented in
+[repository cleanup](maintenance/repository_cleanup.md).
+
+## Limitations and Known Gaps
+
+Historical test results remain dated. External sites may require authentication,
+rate-limit automated requests, or retire URLs. Such cases must be distinguished
+from a missing local file and from a verified replacement source.
+Runtime-consumed guidance needs a separate behavior review; ordinary documentation
+cleanup must not silently change experiment decisions.
+
+## Index Verification
+
+The [file-by-file review](maintenance/documentation_review_20260929.md) records
+repository-wide coverage, corrections, link checks and preserved runtime inputs.
+
+The page routes and document ownership above were checked against the
+`dd0d772` source baseline on 2026-09-29. This is documentation/static inspection,
+not a hardware trial. Run the governed-document validator from repository root:
+
+```bash
+.venv/bin/python scripts/validate_documentation.py
+```
+
+## Related Documents
+
+- [Documentation standard](standards/documentation_standard.md)
+- [Paper standard](standards/paper_documentation_standard.md)
+- [Document templates](templates/document_types.md)
+- [Current code snapshot](runtime/current_code_snapshot.md)
+- [Historical governance design](oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md)

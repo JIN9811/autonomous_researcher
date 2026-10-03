@@ -21,17 +21,14 @@ related_docs:
 supersedes: []
 -->
 
-<a id="autonomous-researcher-framework-paper-package"></a>
+# Autonomous Researcher Framework Paper Package
 
-# Research: connecting existing laboratories into a closed loop
-
-<a id="summary"></a>
+## Summary
 
 **Working title:** *Autonomous Researcher Framework: Transforming Existing Laboratories
 with Structured AI Layers and VLA-Enabled Manipulation*
 
-AX4LAB is the implemented platform; this paper uses Autonomous Researcher
-(ATR) Framework for its research framework. ATR adds structured AI layers to existing laboratory equipment. A VLA-enabled
+ATR adds structured AI layers to existing laboratory equipment. A VLA-enabled
 robot arm connects physical stages without making bespoke fixtures or dedicated
 transfer automation the organizing principle. Specialist agents coordinate
 research decisions and execution; the platform supports equipment reuse and
@@ -90,24 +87,17 @@ Excluded until qualifying evidence exists:
 
 ## Reading Path
 
-Read the main argument in this order: [problem and contributions](01_problem_and_contributions.md)
-→ [architecture](02_system_architecture.md) → [one cycle's method](03_closed_loop_method.md)
-→ [recorded setup](05_experimental_setup.md) → [results](06_evaluation_and_results.md).
-The result to look for is fifteen retained observation sets with checked
-artifact linkage, not a measured reduction in cost or unattended-failure rate.
-
-Then choose the question you need to answer:
-
-- To check a result yourself, read [reproducibility](07_reproducibility.md) and
-  the [claim-to-evidence map](09_claim_evidence_traceability.md).
-- To understand unresolved risks and human intervention, read
-  [safety, ethics and limitations](08_safety_ethics_and_limitations.md).
-- To add a capability, read [platform extension boundaries](04_platform_architecture.md),
-  then [concrete interfaces](appendix_a_interfaces.md) and
-  [deployment requirements](appendix_b_hardware_and_deployment.md).
-
-The main chapters explain the scientific argument. The appendices and tables
-below are reference paths, not prerequisites for understanding the results.
+1. [Problem and contributions](01_problem_and_contributions.md)
+2. [System architecture](02_system_architecture.md)
+3. [Closed-loop method](03_closed_loop_method.md)
+4. [Platform architecture](04_platform_architecture.md)
+5. [Experimental setup](05_experimental_setup.md)
+6. [Evaluation and results](06_evaluation_and_results.md)
+7. [Reproducibility](07_reproducibility.md)
+8. [Safety, ethics, and limitations](08_safety_ethics_and_limitations.md)
+9. [Claim-evidence traceability](09_claim_evidence_traceability.md)
+10. [Interface appendix](appendix_a_interfaces.md) and
+    [deployment appendix](appendix_b_hardware_and_deployment.md)
 
 ## Claim Status Legend
 
@@ -160,13 +150,9 @@ paper path. They remain useful but are not automatically paper evidence. The
 paper package now indexes a [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md),
 but not a complete public raw dataset, comparative benchmarks or independent
 per-cycle fabrication certification. An approved author list, venue-formatted
-submission and archival DOI remain separate publication decisions.
-
-### Manuscript maintenance context
-
-RPT has generated PDF/Word drafts in an isolated development worktree; that
-is not a production deployment or evidence of publication readiness. Authoring
-history is available in the [paper documentation design](../oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md).
+submission and archival DOI remain separate publication decisions. RPT has
+generated PDF/Word drafts in an isolated development worktree; that is not a
+production deployment or evidence of publication readiness.
 
 ## Verification
 
@@ -180,9 +166,7 @@ Run from repository root:
 The second command becomes fully green only when the complete public file set
 and artifact manifest are present.
 
-<a id="related-documents"></a>
-
-## Maintainer references
+## Related Documents
 
 - [Paper Documentation Standard](../standards/paper_documentation_standard.md)
 - [Current Code Snapshot](../runtime/current_code_snapshot.md)

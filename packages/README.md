@@ -1,35 +1,7 @@
 # Agent and Experimental Packages
 
-Use an Experimental Package to move a validated experiment draft between
-workspaces without carrying credentials, private connection values or run
-artifacts. Use Agent Package metadata to inspect what is already installed.
-Neither operation installs software or starts an experiment. For the ownership
-boundaries, see the [modularity guide](../docs/modularity.md).
-
-## Exchange an experiment draft
-
-1. In Runtime IDE, inspect the intended graph and module drafts. Open
-   **Infra → Package Manager** to compare installed dependencies with draft
-   membership; these are different states.
-2. Choose **Export Package** to validate and download the graph, Agent Package
-   references and retained module drafts. Include each edited module you need:
-   export does not implicitly read referenced module files.
-3. At the receiving IDE, choose **Import Package**. Review dependency/version
-   errors and confirm replacement of affected dirty drafts only when intended.
-   Successful import is a detached draft, not a saved or active configuration.
-4. Review graph routes, module settings and unresolved bindings. Configure
-   devices, models, storage and services locally through their existing owners;
-   a `requires_local_configuration` binding is not a hardware-health result.
-5. Use the existing graph/module validation and explicit save/application paths
-   for the intended future run. Recheck the active identity and configuration;
-   imported package membership alone cannot activate a graph.
-
-The task is complete when the intended detached graph and module drafts are
-available with their declared dependencies. If you also intend to apply them,
-follow the separate [IDE activation workflow](../docs/runtime/runtime_ide.md#operator-workflow).
-Do not interpret successful exchange as readiness or execution approval.
-
-## Installed package membership
+For the relationship between packages, modules, core owners, bridges, and the
+runtime path, start with the [Modularity Reference](../docs/modularity.md).
 
 Agent Packages are installed metadata, not an installer. Shipped manifests in
 `packages/agents/` are loaded only when their matching code-owned agent module
@@ -48,10 +20,6 @@ Validation can compile structure, but never invokes handlers or starts a graph.
 
 ## HTTP contract
 
-This section is for API clients implementing the same exchange. Validation may
-compile structure but never runs handlers. Treat `ok` and the returned
-`activated`/`persisted` fields as separate from HTTP transport success.
-
 `GET /api/packages` returns `{ok, schema: "ax4lab.package_catalog.v1", errors,
 agent_packages, bridge_modules, external_requirements, limits}`. Agent items
 contain `id`, `version`, `agent_module`, `handler`, `module_reference`,
@@ -60,8 +28,6 @@ Bridge items include code-owned IDs/versions/tools, provider component reference
 UI/storage references, `binding_requirements`, and
 `package_owners: [{id,version}]`. This is installed membership; an IDE marks
 current draft membership separately. Catalog reads no device memory.
-
-### Export a detached package
 
 POST directly to `/api/packages/experimental/export` with:
 
@@ -108,8 +74,6 @@ and credential fields are removed; machine-local paths, connection URLs and code
 or file-inclusion fields fail validation. These guards do not classify arbitrary
 secrets hidden in free text; do not enter credentials in prompts or notes.
 
-### Import and resolve local bindings
-
 POST that `package` object directly to `/api/packages/experimental/import`.
 Import rejects private fields and checks exact installed dependencies, all graph
 handlers and all supplied module configurations with the existing validators.
@@ -125,16 +89,12 @@ required `printer_fleet_connection` device binding. All supplied/required bindin
 return unresolved with `status: "requires_local_configuration"`; this is not an
 assertion about current hardware state.
 
-### Interpret validation failures
-
 Validation failure uses HTTP 200 with `ok:false`, `errors:[message]` and
 `package:null` or `draft:null` (import also returns `unresolved_bindings:[]`).
 Malformed JSON, duplicate JSON keys and nonfinite JSON use HTTP 400; payloads
 over 1,048,576 bytes use HTTP 413. Parsing is streamed and bounded; nesting is
 limited to 40. Messages omit private values. Unknown top-level/schema fields,
 executable fields, connection fields and non-exact versions fail closed.
-
-## Inspect dependencies without executing them
 
 In Runtime IDE, **Device Bridge Plane** (graph or Explorer) and **Infra → Device
 Bridges** open the same contract graph: Agent Package nodes connect to Device

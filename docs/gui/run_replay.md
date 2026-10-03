@@ -1,29 +1,5 @@
 # Read-only run replay
 
-Use Replay to inspect a recorded experiment without contacting its devices.
-This is artifact/event review, not LeRobot trajectory replay; the latter is a
-separate robot operation that can move hardware.
-
-## Open a recorded point
-
-1. On Main GUI, set Run Control to **replay · read-only review**.
-2. Select an **Experiment session**, then **Start**. A separate screen-sized
-   `/replay` window opens; this Start opens a viewer, not a new experiment.
-3. Check the coral **REPLAY** label and selected run. Choose an available
-   cycle/event in **Contract · Replay point**, then select the agent to inspect.
-4. Read the point's timestamp, report and chat together. A capture-time point may
-   still have a pending verdict; choose a later retained point to look for the
-   result. Point changes preserve the selected agent.
-5. Open **Artifacts** for original files and downloads. Check the scope notice:
-   these are session files and can include files created after the selected point.
-
-The expected result is a recorded point with its available evidence, not a
-healthy or successful experiment. **Not recorded** means the viewer lacks that
-evidence. It never repairs gaps using a current frame, another run, or later
-state. Missing cycles are skipped; if the session has no usable point, inspect
-the original [run artifacts](artifact_preservation.md) instead of restarting a
-live experiment to populate Replay.
-
 ![Replay with shared Live layout and point selector](assets/screenshots/2026-09-29/replay.png)
 
 *1920 × 1080 capture, 2026-09-29: coral REPLAY indicator, recorded session and
@@ -31,10 +7,10 @@ Contract point selectors, shared agent report and chat. Only retained points can
 be selected; this image does not imply complete replay coverage of all 15 cycles.
 See [GUI structure](visual_structure.md) for the full page map.*
 
-## Navigate without affecting Live
-
-Opening Replay does **not** call `/api/run/start`, resume an experiment, or replay
-a robot trajectory. Existing LeRobot replay APIs are unchanged.
+Run Control → **replay · read-only review** reveals an **Experiment session**
+dropdown beside Mode. Select a recorded session, then **Start** opens `/replay` in a
+separate window. This action does **not** call `/api/run/start`, resume an
+experiment, or replay a robot trajectory. Existing LeRobot replay APIs are unchanged.
 
 Only the coral **REPLAY** title distinguishes the viewer from LIVE; the template,
 agent panels, tabs, cards and renderers are shared with the original LIVE GUI. Select an archived
@@ -69,9 +45,6 @@ recovery/checkpoint directories. HTML/scripts are served as plain text; file
 responses carry a sandbox CSP and `nosniff`. Write methods remain unavailable.
 
 ## Activation and experimental isolation
-
-The following recorder details are for installation/support work. Opening the
-viewer requires no recorder deployment during an active experiment.
 
 The recorder is installed at the next normal server startup. Do not restart an
 active experiment just to enable this feature. The run ID present when the
@@ -142,9 +115,6 @@ credential fields are excluded. This is still local experiment data, not a publi
 export format: free-form user/model text should be treated as potentially private.
 
 ## Validation
-
-Maintainer test reference; these software checks are not required to view a run
-and are not a new physical or browser validation claim.
 
 ```bash
 .venv/bin/python -m pytest tests/unit/test_run_review.py tests/unit/test_vision_capture_preview.py -q

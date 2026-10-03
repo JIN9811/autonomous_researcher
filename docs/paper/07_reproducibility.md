@@ -35,7 +35,15 @@ supersedes: []
 
 # Reproducibility
 
-<a id="summary"></a>
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Topic | Reproduction tiers from inspection to supervised hardware |
+| Evidence boundary | Each tier requires its own recorded inputs, commands and outcomes |
+| Recorded basis | 2026-08-09 · [Scope and verification](#verification) |
+
+## Summary
 
 The latest [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md)
 provides a bounded read-only reproduction protocol and per-iteration hashes.
@@ -43,16 +51,36 @@ The public summary does not bundle private raw run data. Re-running the
 experiment, re-analyzing retained CSV and checking an archive are different
 reproduction tasks; none is silently performed by opening Replay.
 
-From this public checkout, begin with document integrity and static architecture
-inspection (Tier 0), or the focused documentation tests (selected Tier 1).
-Reanalyzing campaign curves requires the separately retained private raw files;
-a public hash index cannot supply those inputs. Launching hardware would be a
-new authorized experiment, not a prerequisite for reviewing this paper.
-
 Reproduction is progressive. A reviewer can validate the public document and
 architecture contracts without models or devices, then proceed to tests,
 replay, browser workflows, and supervised hardware only when the required
 dependencies and approvals are available.
+
+## Audience and Outcome
+
+This guide is for artifact evaluators, researchers, and developers. Completion
+means reproducing one declared tier and reporting that tier without implying
+completion of a higher one.
+
+## Scope
+
+Tier 0 and focused Tier 1 documentation checks are reproducible from the public
+package. Bounded supervised mixed-mode Tier 4 observations were subsequently
+recorded on September 7; their private raw archives are not bundled. Repeating
+those experiments or claiming another Tier 1–4 result requires its own evidence
+record, environment and authorization.
+
+The [Orchestrator dynamic Setup verification](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+is one such bounded working-tree/Tier 1 record. Its provider cases use guarded
+local handlers and do not elevate the result to Tier 2–4, live hardware, or a
+complete experimental cycle.
+
+## Source of Truth
+
+- Environment and setup requirements: `REQUIREMENTS.md`
+- Document governance: `scripts/validate_documentation.py`
+- Paper package contract: `scripts/validate_paper_publication.py`
+- Machine-readable evidence: `docs/paper/artifact_manifest.yaml`
 
 ## Reproduction Tiers
 
@@ -124,10 +152,6 @@ selection, result count, commit, and environment is non-reproducible.
 
 ## Tier 2 Procedure Contract
 
-This and the following higher-tier sections define requirements for a new,
-separately authorized reproduction. They are not ready-to-run recipes or claims
-that the necessary datasets, servers or equipment are bundled.
-
 A Tier 2 record must name the replay bundle or simulator, scenario IDs, seeds,
 graph and module versions, model configuration, expected gates, expected
 terminal states, and output artifact root. Physical bridges must be disabled or
@@ -161,11 +185,6 @@ A tier is reproduced when:
 
 ## Failure Recovery
 
-Stop at the first unmet prerequisite and report which part could not be
-reproduced. Do not silently substitute another model, device or dataset merely
-to obtain a passing result. Distinguish an unavailable tier from a failed
-execution within an available tier.
-
 - A missing optional dependency means the affected tier is unavailable, not
   failed or passed.
 - A checksum mismatch invalidates the referenced output until explained and
@@ -193,32 +212,6 @@ inspection of retained evidence, not a new Tier 4 execution. Optional external
 services may require agreements or hardware unavailable to reviewers.
 
 ## Verification
-
-<a id="scope"></a>
-
-Tier 0 and focused Tier 1 documentation checks are reproducible from the public
-package. Bounded supervised mixed-mode Tier 4 observations were subsequently
-recorded on September 7; their private raw archives are not bundled. Repeating
-those experiments or claiming another Tier 1–4 result requires its own evidence
-record, environment and authorization.
-
-The [Orchestrator dynamic Setup verification](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
-is one such bounded working-tree/Tier 1 record. Its provider cases use guarded
-local handlers and do not elevate the result to Tier 2–4, live hardware, or a
-complete experimental cycle.
-
-<a id="source-of-truth"></a>
-
-- Environment and setup requirements: `REQUIREMENTS.md`
-- Document governance: `scripts/validate_documentation.py`
-- Paper package contract: `scripts/validate_paper_publication.py`
-- Machine-readable evidence: `docs/paper/artifact_manifest.yaml`
-
-<a id="audience-and-outcome"></a>
-
-This guide is for artifact evaluators, researchers, and developers. Completion
-means reproducing one declared tier and reporting that tier without implying
-completion of a higher one.
 
 Tier definitions and focused commands were reviewed on 2026-08-09. The public
 validator and its unit tests provide the initial machine-checkable reproduction

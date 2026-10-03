@@ -36,22 +36,32 @@ supersedes: []
 
 # Claim-Evidence Traceability
 
-<a id="summary"></a>
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Topic | Claims mapped to evidence and explicit gaps |
+| Evidence boundary | [Artifact manifest](artifact_manifest.yaml); source records retain their original scope |
+| Recorded basis | 2026-09-28; dated earlier records retained · [Scope and verification](#verification) |
+
+## Summary
 
 This chapter is the human-readable view of
-`docs/paper/artifact_manifest.yaml`. Use it to trace a statement in the results chapter to the record that supports
-it, and to see which part remains unverified.
+`docs/paper/artifact_manifest.yaml`. It prevents a reader from having to infer
+which command, environment, or artifact supports a material claim.
 
-## Read a claim back to its evidence
+## Scope
 
-1. Find the claim ID and read the whole proposition, including its scope.
-2. Follow the evidence ID in the [manifest](artifact_manifest.yaml) to its
-   dated report and output hash. A link proves traceability, not adequacy.
-3. Compare environment, specimen/iteration identity and the reported denominator.
-   An archive audit cannot stand in for a new physical run.
-4. Read the exclusions and failed attempts before deciding whether the evidence
-   answers your question. If it does not, retain the gap rather than enlarging
-   the proposition.
+The initial map covers the top-level system, traceability, safety, platform,
+and evaluation-limit claims. Chapter-level explanatory sentences inherit these
+boundaries but do not create new evidence classes.
+
+## Evidence Basis
+
+The mapping was checked against artifact-manifest schema version 1. The
+publication validator rejects duplicate IDs, invalid statuses, missing
+evidence references, unsafe paths, missing outputs, and mismatched SHA-256
+digests.
 
 ## Claim Map
 
@@ -82,9 +92,6 @@ or independent physical certification. Earlier claim IDs keep their original sco
 
 ## Claim Lifecycle
 
-The following is for maintainers updating the paper, after the evidence review
-above—not an additional requirement for reading a result.
-
 1. Create a stable claim ID and bounded proposition.
 2. Assign `not_evaluated` before qualifying evidence exists.
 3. Record evidence with environment, commit, command/protocol, inputs, outputs,
@@ -113,19 +120,6 @@ records, but no replay, simulation, or browser evidence records. It does not rep
 statistical analysis, or domain data repository.
 
 ## Verification
-
-<a id="scope"></a>
-
-The initial map covers the top-level system, traceability, safety, platform,
-and evaluation-limit claims. Chapter-level explanatory sentences inherit these
-boundaries but do not create new evidence classes.
-
-<a id="evidence-basis"></a>
-
-The mapping was checked against artifact-manifest schema version 1. The
-publication validator rejects duplicate IDs, invalid statuses, missing
-evidence references, unsafe paths, missing outputs, and mismatched SHA-256
-digests.
 
 Run from repository root:
 

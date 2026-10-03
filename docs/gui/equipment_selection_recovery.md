@@ -2,22 +2,6 @@
 
 This operator-requested recovery preserves the current run and completed fabrication/robot transfer. It is not an automatic retry policy or a way to repeat device commands.
 
-## Operator: establish that selection failed before execution
-
-Open Live GUI → EQP → Report, then Backend and Timeline for the same run/cycle.
-Look for `EQUIPMENT_WORKFLOW_SELECTION_REJECTED` and the Guardian recovery wait.
-Record the specimen ID and Equipment execution identity. Ask support to check the
-durable record against the eligibility list below; an empty progress card alone
-does not prove that no device command ran.
-
-Leave the run paused while this is checked. Do not repeat fabrication, robot
-transfer, a Windows Skill, or a manual UTM command. After support restores an
-eligible checkpoint, use the normal **Resume** control and watch EQP for a new
-selection and gated execution. This recovery pauses at this cycle's boundary;
-it must not start another fabrication cycle. If the checkpoint is rejected,
-preserve the blocker and investigate the changed evidence rather than deleting
-the record or its exclusive claim.
-
 ## Eligibility
 
 - The run is paused at the Guardian recovery wait for `EQUIPMENT_WORKFLOW_SELECTION_REJECTED`.
@@ -27,9 +11,6 @@ the record or its exclusive claim.
 - No active safety source or stop flag is present; no Analysis/BO execution has started for the cycle.
 
 ## Save, restore and resume
-
-The following is a support runbook, not a routine GUI retry. All eligibility
-checks above must pass before checkpoint creation or a server restart.
 
 1. `python -m app.equipment_selection_checkpoint --run-id RUN_ID` writes `runs/RUN_ID/recovery/equipment_selection.json`, retaining the complete state, planning transcript identity, completed specimen payload and checksums of owner results.
 2. Restart the server only after the checkpoint validates. Existing checkpoints are never overwritten.

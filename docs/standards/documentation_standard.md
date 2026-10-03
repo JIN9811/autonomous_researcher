@@ -214,42 +214,12 @@ A document with `status: superseded` MUST name a valid replacement through
 
 ## Body Structure
 
-Reader-facing indexes and guides SHOULD begin with the reader's task and
-expected outcome, then explain prerequisites, actions, observable results,
-and relevant recovery. They MAY use natural task headings instead of visible
-`Summary`, `Scope`, and `Source of Truth` boilerplate. Required metadata still
-applies. Put implementation provenance and contributor-only detail after the
-procedure, or behind a clearly labeled expandable section.
-
-References and other governed documents SHOULD begin with `Summary`, `Scope`,
-and `Source of Truth` or `Evidence Basis`, and end with limitations,
-verification, and related documents. Type-specific sections follow
-`docs/templates/document_types.md`; omissions MUST NOT hide safety,
-compatibility, or verification information. Exact Agent, Device Bridge, and
-Runtime IDE reference layouts below remain mandatory.
-
-### Reader-first writing
-
-- Give each page one primary job. Explain why a step matters before presenting
-  a long inventory of controls or internal terms.
-- Keep one maintained procedure and link to it. An index routes readers; it
-  SHOULD NOT repeat the procedure, governance history, or implementation log.
-- State physical effects and uncertain-effect recovery at the action that
-  needs them, rather than repeating a generic warning on every page.
-- Write English and Korean as natural prose for their readers. Preserve exact
-  UI labels, identifiers, commands, units, and operational meaning across
-  translations; do not mix explanatory languages within a language-specific
-  page. Link to an English-only technical reference explicitly when needed.
-- Use screenshots where they help locate or interpret a control. Retain their
-  capture date and privacy/validation scope; do not present an old image as a
-  fresh execution result.
-- Keep detailed facts, unique capabilities, scientific limits, and original
-  evidence accessible. Shortening prose MUST NOT silently remove them.
-- Preserve inbound anchors when changing headings. Check local paths, image
-  targets, and fragments after editing both language editions.
-- Review changes to runtime-consumed documents separately from reader prose.
-  A reader-facing rewrite MUST NOT silently alter agent instructions or
-  promote historical evidence to current execution authority.
+Every governed document SHOULD begin its body with `Summary`, `Scope`, and
+`Source of Truth` or `Evidence Basis`. It SHOULD end with `Limitations and Known
+Gaps`, `Verification`, and `Related Documents`. Type-specific middle sections
+MUST follow `docs/templates/document_types.md` unless a concise document does
+not need a section; omitted sections MUST NOT hide safety, compatibility, or
+verification information.
 
 ### Restructured Agent Reference Layout
 

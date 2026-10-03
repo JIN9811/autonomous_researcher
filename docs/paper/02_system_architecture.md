@@ -43,14 +43,39 @@ supersedes: []
 
 # System Architecture
 
-<a id="summary"></a>
+## Status at a Glance
 
-A research objective becomes an experiment only when someone owns each
-decision, action and result. ATR separates those authorities: the operator
-sets intent and approval; orchestration selects work; agents interpret bounded
-context; bridges carry out external actions; the evidence plane records what
-was actually returned. This chapter explains those responsibilities. The
-[next chapter](03_closed_loop_method.md) follows them through one cycle.
+| At a glance | Details |
+|---|---|
+| Topic | Control areas, executable graph and evidence ownership |
+| Evidence boundary | Static code/configuration inspection; not deployment certification |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
+
+## Summary
+
+ATR separates control, agent work, physical integration, evidence, and
+operator interaction into explicit layers. At code baseline `5542ef2`, the
+checked-in graph contained 19 nodes, 74 declared edges, and 12 stage-dispatch
+entries. That reader-facing runtime map displayed 50 connections after internal
+dispatch/step-return edges are filtered. These are architecture observations, not stability or
+performance guarantees. A YAML-only check on 2026-09-29 at `dd0d772` counts
+19 nodes, 73 declared edges and 12 dispatch entries; it does not rerun the
+historical architecture evidence or measure a browser rendering.
+
+## Scope
+
+This chapter covers the primary closed-loop graph, runtime state movement,
+agents and sidecars, Guardian and operator boundaries, and evidence planes. It
+does not certify every optional backend or physical device.
+
+## Source of Truth
+
+- `graphs/configs/atr_closed_loop.yaml` declares nodes, edges, dispatch,
+  transitions, terminal stages, and safety metadata.
+- `orchestrator/langgraph_runtime.py` compiles and executes the declared graph.
+- `orchestrator/supervisor.py` coordinates handoffs and runtime decisions.
+- `app/controller.py` owns run lifecycle and operator-facing orchestration.
+- `policies/guardian_gate.py` implements Guardian policy evaluation.
 
 ## Layered Architecture
 
@@ -100,7 +125,7 @@ Dispatch maps the current stage to one of 12 entries: `idle`, `design`,
 `bo`, `guardian`, `complete`, and `error`.
 
 Declared edges include logical transitions, supervisor overlays, evidence
-flows, and runtime-sidecar relations. The dated 74-edge inventory in [Verification](#verification) describes
+flows, and runtime-sidecar relations. The dated 74-edge count above describes
 that configuration surface, not sequential physical actions. Current inventories
 are maintained in the [code snapshot](../runtime/current_code_snapshot.md).
 
@@ -132,10 +157,6 @@ bypass. Its bounded verification is recorded separately in the
 that note is not a complete physical-campaign result.
 
 ## State, Checkpoints, and Resume
-
-Run state connects these owners over time. An agent may finish its local work
-without completing the experiment, and a saved checkpoint may preserve an
-uncertain external effect rather than a safe point for repetition.
 
 Runtime state carries run/cycle identity, current stage, domain artifacts,
 decisions, error context, and transition information. Checkpointing makes a
@@ -187,32 +208,6 @@ backend. Counts can change as routes and overlays evolve. Evaluation must use
 behavioral evidence rather than treating diagram completeness as correctness.
 
 ## Verification
-
-### Dated architecture inventories
-
-ATR separates control, agent work, physical integration, evidence, and
-operator interaction into explicit layers. At code baseline `5542ef2`, the
-checked-in graph contained 19 nodes, 74 declared edges, and 12 stage-dispatch
-entries. That reader-facing runtime map displayed 50 connections after internal
-dispatch/step-return edges are filtered. These are architecture observations, not stability or
-performance guarantees. A YAML-only check on 2026-09-29 at `dd0d772` counts
-19 nodes, 73 declared edges and 12 dispatch entries; it does not rerun the
-historical architecture evidence or measure a browser rendering.
-
-<a id="scope"></a>
-
-This chapter covers the primary closed-loop graph, runtime state movement,
-agents and sidecars, Guardian and operator boundaries, and evidence planes. It
-does not certify every optional backend or physical device.
-
-<a id="source-of-truth"></a>
-
-- `graphs/configs/atr_closed_loop.yaml` declares nodes, edges, dispatch,
-  transitions, terminal stages, and safety metadata.
-- `orchestrator/langgraph_runtime.py` compiles and executes the declared graph.
-- `orchestrator/supervisor.py` coordinates handoffs and runtime decisions.
-- `app/controller.py` owns run lifecycle and operator-facing orchestration.
-- `policies/guardian_gate.py` implements Guardian policy evaluation.
 
 Current graph counts and Knowledge ownership were checked by static inspection
 on 2026-09-12 against `5542ef2`. No hardware or model was invoked for this refresh.

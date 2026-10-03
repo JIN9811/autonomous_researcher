@@ -34,45 +34,25 @@ related_docs:
 supersedes: []
 ---
 
-<a id="loop-artifact-archiving"></a>
-
-# Find and interpret saved experiment artifacts
+# Loop Artifact Archiving
 
 ## Summary
 
-Use the artifact archive to recover the files behind a result: the candidate
-geometry, images, measurement CSV, analysis plots, and agent decisions. Files
-are grouped by run, loop, agent, and invocation so that a later cycle or retry
-does not overwrite the earlier invocation's saved inputs, results, or copied
-file bytes.
+The [2026-09-28 retained-campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+checks fifteen completed observation sets and all 485 invocation statuses.
+This is later artifact-retention evidence, separate from the original no-device
+implementation tests. It does not certify every physical action or erase failed attempts.
 
-## Open the files you need
+ATR stores execution evidence beneath the existing run directory, partitioned
+by loop, agent, and invocation. A later loop or retry does not overwrite the
+earlier invocation's input, result, or copied file bytes. This is an observation
+layer around existing agent and tool calls, not a replacement execution graph,
+device driver, retry policy, or success gate.
 
-1. In Live GUI, select the agent and open **Artifacts**. Its indexed files
-   include earlier loops by default; use the loop filter to narrow the view.
-2. For a finished cycle, use that cycle's **Loop Artifacts** button. Refresh
-   the list if a long-running worker has only just returned its files.
-3. Select a file to preview a supported image, text, JSON, or CSV. Use the
-   original-file or download link for a large or unsupported file.
-4. If an expected file is absent, inspect the invocation's archive status
-   before concluding that the experiment produced no data. **All files** also
-   includes legacy files whose agent or loop ownership is unknown.
-
-Runtime IDE provides the same evidence through **Artifact Lineage**, grouped by
-loop, agent, and attempt. Opening saved artifacts does not reconnect a robot or
-repeat a device command. For the broader saved-session view, see
-[read-only Replay](../gui/run_replay.md).
-
-## Separate experiment outcome from storage status
-
-A failed invocation may have a complete archive: its failure and evidence were
-saved successfully. Conversely, a successful agent may have an incomplete
-archive because a referenced file could not be copied. Check both states; do
-not interpret “archive complete” as physical experiment success.
-
-Archiving observes the existing calls. It does not replace execution, retries,
-device drivers, or success gates. The detailed status fields below help diagnose
-missing files without rerunning the physical operation.
+한국어 요약: 기존 `runs/` 안에서 실행 → 루프 → 에이전트 → 호출 차수별로
+보관합니다. 성공뿐 아니라 실패·취소 결과와 취소 후 도착한 tool 결과도 같은
+호출에 연결합니다. Live GUI의 완료 루프와 Runtime IDE에서 저장된 파일을
+조회할 수 있으며, 아카이브 완료와 물리 실험 성공은 별개의 상태입니다.
 
 ## Scope
 
@@ -297,15 +277,10 @@ ownership is labelled `legacy` with empty identity fields.
 
 ## Verification
 
-The original implementation checks were recorded against the working tree on
-2026-09-06. That historical report is not a statement that the current checkout
-is uncommitted or needs a restart. The later
-[2026-09-28 campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
-checked 15 completed observation sets and all 485 invocation statuses. Neither
-record certifies every physical action or erases unsuccessful attempts.
-
-The commands below reproduce the original non-actuating check families; the
-prose revision did not rerun devices or model inference.
+This Reference intentionally covers the uncommitted **working-tree** on
+2026-09-06, not the older committed baseline. Implementation was followed by
+offline tests; the running application was not restarted as part of this work.
+A later normal application restart loads the changes.
 
 ```bash
 .venv/bin/pytest tests/unit/test_agent_artifact_archive.py tests/integration/test_all_agent_loop_archives.py tests/integration/test_loop_artifact_api.py -q

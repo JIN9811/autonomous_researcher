@@ -1,71 +1,5 @@
 # UTM ROS Vision Runtime Bridge
 
-Use this bridge to obtain camera, marker and ROS graph evidence for Vision and
-Equipment. It observes the UTM; Windows/PyAutoGUI remains the UTM control path.
-A loaded ROS process or a visible expected graph is not proof of a fresh frame,
-correct placement, or completed compression.
-
-## Prepare the camera and inspect a fresh observation
-
-This procedure assumes the UTM workspace has already been cloned to the chosen
-host and built with ROS 2 Jazzy, together with the YOLO workspace/model. The
-[installation section](#installation) records the workstation recipe; its
-UTM build commands start inside an existing clone, not an empty directory.
-Resolve every `/home/<user>/` placeholder to the bridge account's absolute path.
-
-1. From Main GUI, open **Vision / UTM Camera Bridge** at
-   `/device-bridge/vision-utm`. Select an OS-discovered **Camera** candidate and
-   save it. An empty device path means no camera has been selected; do not assume
-   `/dev/video0` is your intended camera merely because it appears in an example.
-2. Inspect the saved profile before loading. The supported local BRIO baseline
-   in this guide is `640x480 @ 60fps`, `pixel_format=mjpeg2rgb`, `io_method=mmap`,
-   `brightness=128`, `gain=-1`. These are workstation settings, not guarantees
-   that every camera can deliver 60 fps through the complete pipeline.
-3. On the Main **UTM ROS System** card, use **Loading** to start the camera/ROS
-   process group. This starts observation processes; it is not a UTM compression
-   command. Inspect `startup_camera_controls` for the attempted
-   `exposure_dynamic_framerate=0` control. Unsupported controls produce a warning,
-   not an invented successful setting.
-4. Use **Probe** and inspect both the actual nodes/topics and the frame result.
-   The expected `usb_cam -> rectify_node -> green_dot_monitor -> yolov8` diagram
-   comes from launch files; only actual ROS graph evidence establishes which
-   nodes/topics are present. A successful frame reports `frame_available=true`,
-   its actual topic, dimensions/encoding and `frame_age_ms`.
-5. During a run, read Live VIS for the run/specimen-scoped image and verdict and
-   the compact **UTM ROS Runtime · usb->rect->green->yolo** status. Do not replace
-   the agent's required fresh observation with a workspace preview. Return-state
-   verification still requires `NOT_WORKING` marker geometry; upward movement
-   alone does not permit robot entry.
-
-For a walkthrough of the camera controls, see the
-[Vision workspace guide](../tutorials/device_workspace_vision_camera_bridge_usage.en.md).
-Calibration is separate maintenance, not a repair to attempt during an owned run.
-Use **Unloading** only when the observation runtime can be stopped at an approved
-boundary; it stops the ROS group, not the physical UTM or robot.
-
-## When the expected evidence is missing
-
-| Symptom | Inspect | Bounded next action |
-| --- | --- | --- |
-| Camera list/path is empty | OS-discovered candidates and saved camera identity | Select the intended discovered camera; do not substitute a different sensor to force a pass |
-| Graph shows expected nodes but no actual image | Actual nodes/topics and frame `attempts[]` | Retain topic, return code and `ROS_IMAGE_FRAME_UNAVAILABLE`/timeout evidence for support |
-| FPS is low or falls over time | `/camera/image_raw`, camera publisher, profile and transport settings below | Investigate the observation pipeline; do not start competing camera readers during a run |
-| Physical UTM summary is stale/missing | `/compression_tester/summary`, last fresh sample and run identity | Leave the physical stage at operator attention; virtual evidence cannot clear it |
-| D455F has publishers but no frames | Separate tracker/USB ownership path below | Recover the device only at a safe boundary; a publisher is not camera acquisition proof |
-
-The motion window is **10 seconds**, but freshness is still **five seconds from
-the last fresh sample**. Keep both distinctions when reading old observations.
-The exact ±0.25 px/eight-sample motion rules are retained under
-[quasi-static motion evidence](#quasi-static-motion-evidence-2026-09-18).
-TEST is not necessarily virtual: a real observer is used when available, and an
-effective-live path must not be relabeled as virtual after a failure.
-
-## Technical setup and evidence reference
-
-The remaining sections retain configuration, transport, API and dated validation
-detail. The June `yuyv2rgb` entry is historical and is superseded by the September
-profile/transport record; it is not an alternative current setup recommendation.
-
 ## Purpose
 
 Paths containing `/home/<user>/` are documentation placeholders. Replace `<user>`
@@ -144,7 +78,7 @@ The backend builds publisher/subscriber edges from `ros2 node info`. The expecte
 
 ## Installed Local Runtime Baseline
 
-Retained workstation baseline (not a new check of your installation):
+Validated on this workstation:
 
 ```text
 Ubuntu 24.04.4 LTS noble, aarch64
@@ -163,7 +97,7 @@ source /home/<user>/external_repos/yolo_ros/install/setup.bash
 ros2 pkg list | rg '^(compression_tester_monitor|roi_image_cropper|yolo_bringup|yolo_ros|yolo_msgs)$'
 ```
 
-Recorded local preflight result:
+Current local preflight result:
 
 ```text
 compression_tester_monitor: found

@@ -1,26 +1,32 @@
-<a id="logging"></a>
+# Logging
 
-# Logs and run identities
+The runtime writes:
+- `structured.jsonl`: machine-readable events
+- `summary.log`: human-readable run summary
 
-When investigating a run, keep its exact run ID and the event time. A GUI status
-message, an agent result, and an archive-completeness flag describe different
-things; use the recorded evidence for the question you are investigating.
+Each event includes `run_id`, `experiment_id`, `layer`, `event_type`, and payload.
 
-## Choose the evidence source
+## Local model request budgets
 
-| Question | Start with |
-|---|---|
-| What happened, and in what order? | `structured.jsonl`, the machine-readable event stream |
-| What is the readable run summary? | `summary.log` |
-| Why did Guardian raise an incident or request approval? | `runs/<run_id>/guardian_events.jsonl` |
-| Which file or result belongs to this cycle and attempt? | [Loop artifacts](loop_artifact_archiving.md) |
-| Why did a model request consume so much context? | Server-side model usage diagnostics described below |
+The vLLM backend logs the model-reported `prompt_tokens`, `completion_tokens`,
+and `total_tokens` with the task type and model name after successful requests.
+These usage lines contain neither prompt text nor API credentials. They are
+server diagnostics, not experimental measurements or agent success evidence.
 
-Structured events carry `run_id`, `experiment_id`, `layer`, `event_type`,
-and a payload. Start with the relevant identity rather than combining messages
-from different runs. The [recovery guides](../README.md#when-a-run-needs-attention)
-explain what to do with the evidence; a log entry by itself is not permission
-to repeat an operation.
+Manipulation and Equipment use prompt-only evidence projections to avoid
+recursively including earlier model requests, raw driver logs, and duplicate
+reports. Full decision evidence remains in the existing agent artifacts. Shared
+values and signal tables preserve identities, missing values, and conflicting
+facts; they do not modify the frozen execution payload, tool arguments, safety
+gates, or completion criteria. BO additionally uses compact JSON serialization
+without dropping or rounding its observations.
+
+Input budgeting must include the system prompt, the runtime reference pack,
+images for multimodal reviews, and the reserved output tokens. A short initial
+request is not sufficient validation: inspect later tool rounds and terminal
+reviews too. Token counts depend on the selected model and the current evidence;
+verify them with that model's tokenizer. Output reservations are configured in
+`backends/vllm_client.py`; they do not silently truncate input evidence.
 
 ## Readable Run and Session Names
 
@@ -63,16 +69,6 @@ IDs; neither format changes path-containment checks.
 Sources: `utils/ids.py`, `app/controller.py`, `app/main.py`.
 Focused nonactuating checks: `tests/unit/test_readable_ids.py`.
 
-
-## Recognize progress, alerts, and gates
-
-Progress events explain what the UI is showing. Completion still belongs to
-the owning stage result. These details are useful when a visible status and a
-saved result appear to disagree.
-
-<details>
-<summary>Event fields and the Guardian incident record</summary>
-
 Live GUI planning/tool events:
 - Planning chat messages are also emitted as structured events by `MainController`.
 - `printer.prepare` can emit supplemental per-step tool events while Specimen Making Agent is running.
@@ -97,37 +93,6 @@ Guardian graph-wide gates:
 - Tool shield approval interrupts are persisted in `run_metadata.guardian_approval_queue` and `run_metadata.runtime_approvals`.
 - Live GUI refreshes on `guardian` and `incident` event types and surfaces warning/error gates in Operator Attention.
 - `/api/guardian/status` and `/api/state.guardian_status` expose the same Guardian blackbox state as a report payload for risk heatmap, approval queue, incident ledger, and handoff review panels.
-
-</details>
-
-## Diagnose model requests
-
-These diagnostics describe inference cost and capacity, not scientific
-measurements or task success. Keep them separate from experiment metrics.
-
-### Local model request budgets
-
-The vLLM backend logs the model-reported `prompt_tokens`, `completion_tokens`,
-and `total_tokens` with the task type and model name after successful requests.
-These usage lines contain neither prompt text nor API credentials. They are
-server diagnostics, not experimental measurements or agent success evidence.
-
-Manipulation and Equipment use prompt-only evidence projections to avoid
-recursively including earlier model requests, raw driver logs, and duplicate
-reports. Full decision evidence remains in the existing agent artifacts. Shared
-values and signal tables preserve identities, missing values, and conflicting
-facts; they do not modify the frozen execution payload, tool arguments, safety
-gates, or completion criteria. BO additionally uses compact JSON serialization
-without dropping or rounding its observations.
-
-Input budgeting must include the system prompt, the runtime reference pack,
-images for multimodal reviews, and the reserved output tokens. A short initial
-request is not sufficient validation: inspect later tool rounds and terminal
-reviews too. Token counts depend on the selected model and the current evidence;
-verify them with that model's tokenizer. Output reservations are configured in
-`backends/vllm_client.py`; they do not silently truncate input evidence.
-
-
 ### Local decision context capacity
 
 Gemma 31B serving uses a 32,768-token context with the existing 0.55 GPU-memory
@@ -137,8 +102,3 @@ requests can still require over 13,000 text tokens after removing recursive
 prior prompts, so 8,192 tokens is insufficient. Include image tokens and the
 requested output allowance when checking capacity. Offline character-size
 tests detect recursive serialization regressions; they do not certify token fit.
-
-
-For credentials and route selection, see [model and API-key setup](api_keys.md).
-Review raw logs and copied files for private information before sharing them;
-structured redaction does not guarantee that every free-form message is safe.

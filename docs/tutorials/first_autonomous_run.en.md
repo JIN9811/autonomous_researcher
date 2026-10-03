@@ -26,41 +26,34 @@ supersedes: []
 
 ## Goal and prerequisites
 
-By the end of this walkthrough, you will have requested one **virtual** experiment,
-followed its candidate through the agents, and opened the saved evidence. The
-exercise teaches the operating sequence without requiring a printer or robot.
-Its synthetic results must remain labeled virtual, not physical measurements.
+Complete one **virtual** experiment through the existing Live conversation, then
+find its design, analysis and optimization evidence. This walkthrough does not
+require a printer or robot. A virtual result is not a physical experiment result.
 
 You need a configured AX4LAB installation, a reachable LLM backend and a browser.
-If installation is incomplete, follow [Install](../../install/README.md) first.
+If installation is incomplete, follow [Requirements](../../REQUIREMENTS.md) first.
 Use a desktop viewport of 1920 × 1080 to match the figures. Screenshot numbers and
 saved settings belong to the captured installation; do not copy them blindly.
 
 ## Step 1 — Open the application
 
-Start the installed application from a Linux/WSL terminal:
+From a terminal on the installed workstation:
 
 ```bash
 atr up
 ```
-
-On native Windows, activate the checkout's `.venv` and use `python -m app.serve`
-instead, as shown in the installation guide.
 
 Open `http://localhost:7860`. If the server is already running, use that instance;
 do not restart an active experiment to follow this guide.
 
 ![Main dashboard: models above Run Control](../gui/assets/screenshots/2026-09-29/main-dashboard.png)
 
-Locate **Run Control** beneath the model/backend controls in the figure. You
-should see the same control groups in your browser. A loaded model means it is
-available; it does not mean an experiment is running. If Main is unreachable,
-read the launcher output and check the local server before doing any device work.
+**Expected:** the Main dashboard shows model/backend controls and **Run Control**.
+A loaded model indicates availability, not an active experiment.
+If the page is unreachable, check the launcher output and local server before
+trying any device action.
 
 ## Step 2 — Choose the virtual execution profile
-
-The first decision is what the experiment may do, not which Start button to press.
-Save the virtual boundary before opening the conversation:
 
 1. In **Run Control**, click **Test Mode Settings**.
 2. Select **Virtual Bridge**.
@@ -72,9 +65,8 @@ Save the virtual boundary before opening the conversation:
 
 ![Test Mode Settings: virtual profile and device boundaries](../gui/assets/screenshots/2026-09-29/test-mode-settings.png)
 
-After **Reload**, the saved revision, **Virtual Bridge** and `1` cycle should still
-be visible. Inspect the per-agent values as well as the profile name. The figure's
-cycle count is a captured installation value, not this exercise's required value.
+**Expected:** a saved revision and the intended virtual boundaries.
+The screenshot's cycle count is illustrative, not the value required by this exercise.
 
 Do not choose another profile just because it contains the word “test”:
 
@@ -95,10 +87,9 @@ The saved per-agent overrides also matter. See [Test Mode](../runtime/test_mode.
 
 ![Live GUI: agent list, report and conversation](../gui/assets/screenshots/2026-09-29/live-overview.png)
 
-The separate Live window should initialize a conversation. Use its agent list to
-navigate reports and its chat area to review the plan. Main's **test → Start**
-uses a direct run-start route instead; do not switch to that sequence partway
-through this chat-driven exercise.
+**Expected:** Live GUI opens separately and initializes its conversation.
+This is the chat-driven entry used in this tutorial. Main's **test → Start** instead
+calls the direct run-start route; it is not the same button sequence.
 
 The figure contains historical data. Opening Live is not evidence that a new run
 has been admitted.
@@ -111,10 +102,9 @@ In Live chat, enter this supported example:
 테스트 모드, 가상 브릿지
 ```
 
-This means “test mode, virtual bridge.” It selects a prepared scenario whose
-planning replies still pass through the Orchestrator conversation. Wait for the
-**Experiment Contract** and **Experimental Setup**, then read them before treating
-the plan as ready to execute.
+This means “test mode, virtual bridge.” The scenario-input driver asks/answers
+planning questions through the normal Orchestrator conversation. Read the resulting
+**Experiment Contract** and **Experimental Setup**, not only the greeting.
 
 Check the objective and units, specimen dimensions/material, design-variable names
 and bounds, execution profile, and number of cycles. For the gyroid workflow,
@@ -123,20 +113,15 @@ search space. State corrections in chat if the proposed plan differs from your i
 
 ![Orchestrator: experiment contract and decisions](../gui/assets/screenshots/2026-09-29/live-orchestrator.png)
 
-Look for the reviewed plan in the Orchestrator report and new run/cycle evidence
-in the reports or **Timeline** as work begins. A greeting, a historical contract
-or an opened window is not proof that this request started a new run. Record the
-new run ID when it is available so that later artifacts can be matched to it.
-
-Agreeing to a plan and agreeing to execute it are separate decisions. The scenario
-can provide normal review replies, but it cannot supply missing connection facts
-or witness a physical action. If this virtual exercise asks for physical confirmation,
-stop at that request and recheck the saved profile; do not invent a confirmation.
+**Expected:** a reviewed contract and a run-specific admission/handoff.
+Planning consent is distinct from execution consent; the test scenario can supply
+the normal review replies, but missing connection facts and physical confirmations
+remain operator-owned. Do not answer a physical confirmation with fictional evidence.
+If it is requested in this virtual exercise, check the selected profile.
 
 ## Step 5 — Check design and specimen preparation
 
-Select **DSN → Report** to see what will be made. The figure locates the candidate
-views; your own run may contain fewer candidates or different values.
+Click **DSN** on the left, then **Report**.
 
 ![Design report: generated specimens, design space and comparison](../gui/assets/screenshots/2026-09-29/live-design.png)
 
@@ -146,25 +131,19 @@ views; your own run may contain fewer candidates or different values.
 3. Open a generated STL from **Artifacts** and check that it belongs to this candidate.
 4. Select **SPC** to inspect slicing/preparation evidence.
 
-You should be able to connect one candidate ID to its constraint result and STL.
-A thumbnail alone does not establish that constraints passed. Mass and print time
-may remain unknown until slicing; do not read an empty field as zero or replace it
-with a value from the screenshot. Use the recorded slicer/analysis source when it
-becomes available.
+**Expected:** an identifiable candidate, current constraint evidence and the
+corresponding artifact. A thumbnail alone is not a pass verdict. Missing mass/time
+before slicing is not a measurement; use the actual recorded slicer/analysis source
+when it becomes available.
 
 ## Step 6 — Follow the agents without taking over their devices
 
 ![SPC report: preparation and printer evidence](../gui/assets/screenshots/2026-09-29/live-specimen.png)
 
-Follow **SPC** (specimen preparation), **VIS** (vision), **MAN** (manipulation) and
-**EQP** (equipment) in the left agent list. Read each stage's report as it progresses.
-In this exercise, virtual results and preflight checks—checks before device use—
-are expected, not evidence of a real print, robot motion or compression test.
-
-The SPC figure helps locate preparation evidence. If a card is pending, inspect
-its **Timeline** and **Artifacts** for the current run. Do not launch a separate
-print or robot rollout from a workspace to make the card turn green: a run owns
-its device sequence.
+Use the left agent list to inspect VIS, MAN and EQP reports as the workflow
+progresses. Their virtual/preflight outcomes must remain distinguishable from
+physical completion. Do not open a workspace and manually run a second print or
+rollout to make a pending card turn green.
 
 **Expected:** stage-specific evidence for the current run, then a handoff to ANL.
 If a stage stops, open its **Timeline** and **Artifacts** before retrying.
@@ -172,28 +151,18 @@ Use the checklist in Step 9.
 
 ## Step 7 — Read analysis and BO
 
-Select **ANL → Report** and match the selected specimen to the candidate you saved.
-Read the force–displacement (**FD**) and stress–strain (**SS**) curves, including
-their axes and units. Check the source data, mass source and resulting metric.
-Then open **BO → Report**, where Bayesian optimization uses accepted observations
-to propose later candidates.
+Select **ANL → Report**. Inspect the SS/FD views and their units, selected specimen,
+mass source and metric result. Then select **BO → Report**.
 
 ![Analysis report and measured-response evidence](../gui/assets/screenshots/2026-09-29/live-analysis.png)
 
 ![BO report with posterior and candidate evidence](../gui/assets/screenshots/2026-09-29/live-bo.png)
 
-The basic success check is that the analysis belongs to this candidate and retains
-its virtual source. A one-cycle exercise need not produce a new BO recommendation.
-Specific energy absorption (**SEA**) derived from virtual data is not measured SEA.
-
-If you want to inspect optimization more deeply, first check the observation count.
-The Gaussian-process (**GP**) model needs sufficient observations; an initial
-Latin-hypercube sampling (**LHS**) view without a posterior is not necessarily a
-plotting failure. When available, compare mean, uncertainty and acquisition views
-in 2D/3D with the candidate's cell-size and wall-thickness coordinates. An old 1D
-display does not represent the full two-variable space. See
-[analysis interpretation](../agents/analysis_agent.md) and
-[BO evidence](../agents/bo_agent.md).
+**Expected:** analysis tied to the current candidate. A GP posterior is meaningful
+only when sufficient observations exist; an initial LHS-only state is not a plotting
+failure. In a one-cycle exercise a new BO recommendation is not guaranteed.
+When available, inspect the 2D/3D mean, uncertainty and acquisition views and the
+candidate coordinates. Never treat the synthetic/virtual result as measured SEA.
 
 These figures show a historical multi-cycle run, not the result you must reproduce
 after a single cycle.
@@ -215,19 +184,14 @@ one run folder. For read-only history, return to Main, select **replay**, choose
 
 ![Main: Replay mode and experiment-session selector](assets/screenshots/2026-09-29/main-replay.png)
 
-The new window should show **REPLAY** and saved points, with no device execution.
-This is artifact/session review, not robot motion replay. Only recorded points are
-available; older sessions may not cover every cycle. See [Replay](../gui/run_replay.md)
-for point navigation and [artifact preservation](../gui/artifact_preservation.md)
-for retaining the referenced files.
+**Expected:** a separate Replay window with recorded points, not device controls.
+Only saved points can be selected; legacy sessions may not cover every cycle.
+See [Replay](../gui/run_replay.md).
 
 ## Step 9 — Finish, or diagnose the first failure
 
-Before calling the exercise complete, check the final run state and open at least
-the design and analysis files produced by the stages that ran. Match their run,
-cycle and candidate identities. A clean-looking screen without a terminal result
-does not establish completion. If the run is blocked, keep the partial artifacts
-and exact reason; they are the starting point for recovery, not failed files to delete.
+A successful exercise has a terminal run result and inspectable artifacts for the
+stages it actually executed. “No error on screen” alone is not completion.
 
 | Symptom | First check | Do not do this |
 |---|---|---|
@@ -239,9 +203,7 @@ and exact reason; they are the starting point for recovery, not failed files to 
 | Recovery requests physical action | Operator supervision and actual device state | Assume virtual testing authorizes hardware |
 
 For an idle system you intend to shut down, run `atr down`.
-For native Windows, stop the server in its terminal with `Ctrl+C` after work has
-finished. Do not use `atr restart` as a substitute for
-[resuming the existing run](../gui/run_resume.md).
+Do not use `atr restart` as a substitute for run recovery.
 
 ## Next exercise
 

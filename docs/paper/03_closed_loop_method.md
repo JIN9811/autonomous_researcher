@@ -45,7 +45,15 @@ supersedes: []
 
 # Closed-Loop Method
 
-<a id="summary"></a>
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Topic | Orchestration handoffs, verification and feedback |
+| Evidence boundary | [Fifteen-observation archive audit](evidence/2026-09-28-campaign-archive-audit.md), plus [earlier one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md) with distinct mixed-mode limits |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
+
+## Summary
 
 One ATR cycle converts a research objective and prior evidence into a governed
 candidate, performs or requests bounded actions, captures observations,
@@ -53,13 +61,20 @@ derives analysis, updates durable knowledge, and selects the next candidate.
 Each transition carries state and evidence rather than relying on an agent's
 conversation history as the run record.
 
-## Cycle Semantics
+## Scope
 
-Follow the specimen and its evidence together. A design artifact identifies what
-is requested; placement evidence establishes readiness for measurement; the
-measurement and any required clearance determine when Analysis may proceed.
-The next candidate belongs to a later iteration, not retroactively to the
-specimen whose data produced it.
+This chapter describes the implemented method at the control-flow level. It
+does not prescribe a domain-specific scientific protocol and does not claim
+that every stage must invoke physical equipment in every mode.
+
+## Evidence Basis
+
+The method is reconstructed from the graph configuration, runtime/controller,
+Guardian policy, Knowledge and Bayesian-optimization agents at baseline
+`5542ef2`. Behavioral claims remain bounded by the evidence manifest; updating
+this description does not extend the scope of retained demonstrations.
+
+## Cycle Semantics
 
 The nominal path is:
 
@@ -180,12 +195,6 @@ physical actions.
 
 ## Cycle Completion
 
-To interpret a saved cycle, read its state and linked artifacts in sequence:
-Design/Specimen identity, placement and equipment proof, required clearance,
-Analysis output, then Knowledge/BO handoff. Keep failed and retried attempts
-alongside the completed result. This is an evidence-reading procedure, not an
-instruction to repeat the physical stages.
-
 A cycle is not complete merely because every function returned. Completion
 requires an explicit terminal or continuation state plus the artifacts and
 evidence needed to explain that state. A run may end successfully, stop by
@@ -207,19 +216,6 @@ physical action. It does not quantify recovery effectiveness, operator burden,
 hazard coverage or causal scientific improvement from the feedback loop.
 
 ## Verification
-
-<a id="scope"></a>
-
-This chapter describes the implemented method at the control-flow level. It
-does not prescribe a domain-specific scientific protocol and does not claim
-that every stage must invoke physical equipment in every mode.
-
-<a id="evidence-basis"></a>
-
-The method is reconstructed from the graph configuration, runtime/controller,
-Guardian policy, Knowledge and Bayesian-optimization agents at baseline
-`5542ef2`. Behavioral claims remain bounded by the evidence manifest; updating
-this description does not extend the scope of retained demonstrations.
 
 Route, Knowledge and BO descriptions were checked through static repository
 inspection on 2026-09-12 against `5542ef2`. The original 2026-08-09 inspection

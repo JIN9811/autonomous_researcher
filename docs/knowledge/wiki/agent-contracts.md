@@ -1,5 +1,5 @@
 ---
-{"topic_id":"agent-contracts","owner":"agent-architecture","source_refs":["docs/agents/agent_api_connection_matrix.md","docs/runtime/three_level_control_model.md","docs/modularity.md"],"source_revision":{"docs/agents/agent_api_connection_matrix.md":"a5d1cfca58b130b986cf65aa80d65e332533555ea51325bcaf2a3b7b87737c08","docs/runtime/three_level_control_model.md":"e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4","docs/modularity.md":"bffc918f5ef651b143bf7a9b1778d524b9367cd93f4a87f1a4c86166bba3b2fb"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: agent-contracts","status":"reviewed"}
+{"topic_id":"agent-contracts","owner":"agent-architecture","source_refs":["docs/agents/agent_api_connection_matrix.md","docs/runtime/three_level_control_model.md","docs/modularity.md"],"source_revision":{"docs/agents/agent_api_connection_matrix.md":"a5d1cfca58b130b986cf65aa80d65e332533555ea51325bcaf2a3b7b87737c08","docs/runtime/three_level_control_model.md":"e825ed068815e8d849568da873b65b10ef9203c9e7b0f576758efb7a6c955ce4","docs/modularity.md":"f73b0dc4867aed165801d21a319d63daf5f0ab1e1e9909046d4ab13dca2926a2"},"verified_at":"2026-09-29T00:00:00+09:00","applicability":"Public AX4LAB reference: agent-contracts","status":"reviewed"}
 ---
 
 # Agent Contracts — Roles and Handoffs

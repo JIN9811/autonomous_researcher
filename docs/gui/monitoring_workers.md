@@ -1,30 +1,5 @@
 # Isolated Live GUI monitoring
 
-Use this guide when printer video or robot telemetry looks stale while the
-experiment is still running. These displays observe the controller; closing a
-window, losing video, or stopping a display worker does not stop the experiment.
-
-## Decide whether the problem is presentation or execution
-
-1. Check Live GUI's run/session identity, sync status and the owner's Report and
-   Timeline. Compare the displayed observation time with the current task.
-2. If robot display reports `publisher_stale` or `stale`, treat the visible pose
-   and plot as retained history. A five-second context-publication delay can
-   leave the worker following its known session; that is not fresh home evidence.
-3. After an approved frontend deployment, reload the page to obtain the current
-   monitoring bundle. If the same symptom remains, retain the run/session ID,
-   timestamps and blocker for support. Do not start a second camera reader or
-   robot session just to compare the pictures.
-4. If device execution itself failed, use the owner's recovery path, not a
-   monitoring restart. Emergency/stop controls and their confirmation remain
-   separate from closing the GUI.
-
-A later fresh update can restore the display. It does not retrospectively prove
-that an old image or pose met a physical gate. Replay is intentionally isolated
-from these live transports and will not become live after a refresh.
-
-## Maintainer architecture
-
 The experiment controller remains a **single process**. Do not increase Uvicorn
 application workers: that would duplicate in-memory run state and device owners.
 
